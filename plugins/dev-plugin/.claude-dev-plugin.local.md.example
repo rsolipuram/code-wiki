@@ -1,0 +1,115 @@
+---
+enabled: true
+typescript:
+  command: npx tsc --noEmit
+python:
+  mypy_command: mypy .
+  ruff_command: ruff check .
+go:
+  command: go build ./...
+rust:
+  command: cargo check
+---
+
+# Development Plugin Settings
+
+This file configures the intelligent code quality checking hook.
+
+## Configuration Options
+
+### enabled
+- **Type**: boolean
+- **Default**: `true`
+- **Description**: Enable or disable all quality checking
+
+### typescript
+- **command**: TypeScript checking command (default: `npx tsc --noEmit`)
+
+### python
+- **mypy_command**: MyPy type checking command (default: `mypy .`)
+- **ruff_command**: Ruff linting command (default: `ruff check .`)
+
+### go
+- **command**: Go build command (default: `go build ./...`)
+
+### rust
+- **command**: Rust cargo command (default: `cargo check`)
+
+## Usage
+
+Copy this file to your project's `.claude/` directory:
+
+```bash
+cp .claude-dev-plugin.local.md.example .claude/dev-plugin.local.md
+```
+
+Then edit the settings as needed.
+
+## Examples
+
+### Disable All Checks
+
+```yaml
+---
+enabled: false
+---
+```
+
+### TypeScript with Strict Mode
+
+```yaml
+---
+typescript:
+  command: npx tsc --noEmit --strict
+---
+```
+
+### Python with Custom Config
+
+```yaml
+---
+python:
+  mypy_command: mypy --config-file mypy.ini src/
+  ruff_command: ruff check --select E,F src/
+---
+```
+
+### Go with Specific Packages
+
+```yaml
+---
+go:
+  command: go build ./cmd/... ./pkg/...
+---
+```
+
+### Multi-Language Project
+
+```yaml
+---
+enabled: true
+typescript:
+  command: npx tsc --noEmit
+python:
+  mypy_command: mypy backend/
+  ruff_command: ruff check backend/
+---
+```
+
+## Automatic Detection
+
+The plugin automatically detects project types by looking for:
+
+- **TypeScript**: `tsconfig.json`
+- **Python**: `pyproject.toml`, `setup.py`, `requirements.txt`, `Pipfile`, `poetry.lock`
+- **Go**: `go.mod`
+- **Rust**: `Cargo.toml`
+
+Only detected project types will be checked.
+
+## Notes
+
+- Changes to settings require restarting Claude Code
+- The plugin runs all applicable checks based on detected project types
+- Errors from any language will block session end
+- Tools must be installed and available in PATH
