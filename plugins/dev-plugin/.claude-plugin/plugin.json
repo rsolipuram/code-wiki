@@ -1,10 +1,27 @@
 {
   "name": "dev-plugin",
-  "version": "0.2.0",
-  "description": "Intelligent development plugin that automatically runs type checking and linting on Stop, with support for TypeScript, Python, Go, and more",
+  "version": "0.4.0",
+  "description": "Intelligent development automation: code quality, auto-formatting, git checkpointing, safety validations, notifications, and session observability with Langfuse integration",
   "author": {
     "name": "Developer"
   },
   "license": "MIT",
-  "keywords": ["development", "quality", "type-checking", "linting", "typescript", "python", "automation"]
+  "keywords": [
+    "development",
+    "quality",
+    "type-checking",
+    "linting",
+    "formatting",
+    "git",
+    "automation",
+    "notifications",
+    "safety",
+    "observability",
+    "langfuse",
+    "analytics",
+    "tracking",
+    "typescript",
+    "python",
+    "prettier"
+  ]
 }

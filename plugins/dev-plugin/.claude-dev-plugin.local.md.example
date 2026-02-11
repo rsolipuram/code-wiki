@@ -1,5 +1,8 @@
 ---
+# Master control
 enabled: true
+
+# Code quality checks
 typescript:
   command: npx tsc --noEmit
 python:
@@ -9,31 +12,131 @@ go:
   command: go build ./...
 rust:
   command: cargo check
+
+# Auto-formatting (NEW)
+autoformat:
+  enabled: true
+
+# Git checkpointing (NEW)
+git_checkpoint:
+  enabled: true
+
+# Completion notifications (NEW)
+notifications:
+  enabled: true
+  mac_notification: true
+  tts: true
+
+# Observability tracking (NEW)
+observability:
+  enabled: false  # Set to true to enable session tracking
+  langfuse:
+    enabled: false  # Set to true to send data to Langfuse
+    host: http://localhost:3000
+    public_key: ""  # Your Langfuse public key
+    secret_key: ""  # Your Langfuse secret key
 ---
 
 # Development Plugin Settings
 
-This file configures the intelligent code quality checking hook.
+This file configures all intelligent development automation features:
+- **Code Quality Checks**: Type checking and linting on session end
+- **Auto-Formatting**: Automatic code formatting after edits
+- **Git Checkpointing**: Automatic commits with detailed messages
+- **Safety Validations**: Blocks dangerous bash commands
+- **Completion Notifications**: Mac notifications and TTS on completion
 
 ## Configuration Options
 
 ### enabled
 - **Type**: boolean
 - **Default**: `true`
-- **Description**: Enable or disable all quality checking
+- **Description**: Master switch to enable or disable the entire plugin
 
-### typescript
+### Code Quality Checks
+
+#### typescript
 - **command**: TypeScript checking command (default: `npx tsc --noEmit`)
 
-### python
+#### python
 - **mypy_command**: MyPy type checking command (default: `mypy .`)
 - **ruff_command**: Ruff linting command (default: `ruff check .`)
 
-### go
+#### go
 - **command**: Go build command (default: `go build ./...`)
 
-### rust
+#### rust
 - **command**: Rust cargo command (default: `cargo check`)
+
+### Auto-Formatting (NEW)
+
+#### autoformat.enabled
+- **Type**: boolean
+- **Default**: `true`
+- **Description**: Enable/disable automatic code formatting after edits
+- **Currently Supports**: TypeScript/JavaScript with prettier
+- **Behavior**: Non-blocking (warns on failure, doesn't stop workflow)
+
+### Git Checkpointing (NEW)
+
+#### git_checkpoint.enabled
+- **Type**: boolean
+- **Default**: `true`
+- **Description**: Enable/disable automatic git commits at session end
+- **Features**:
+  - Auto-stages modified files
+  - Generates detailed commit messages with diff summary
+  - Skips silently if not a git repository
+  - Blocks if merge conflicts detected
+
+### Completion Notifications (NEW)
+
+#### notifications.enabled
+- **Type**: boolean
+- **Default**: `true`
+- **Description**: Master switch for all completion notifications
+
+#### notifications.mac_notification
+- **Type**: boolean
+- **Default**: `true`
+- **Description**: Send Mac notification center alerts on completion
+
+#### notifications.tts
+- **Type**: boolean
+- **Default**: `true`
+- **Description**: Text-to-speech announcements on completion
+- **Voice**: Uses default macOS voice (Samantha)
+
+### Observability Tracking (NEW)
+
+#### observability.enabled
+- **Type**: boolean
+- **Default**: `false`
+- **Description**: Enable session tracking and observability
+- **Features**:
+  - Tracks all tool usage and file operations
+  - Records session duration and metrics
+  - Saves sessions locally to `.claude/observability/sessions/`
+  - Optional Langfuse integration for visualization
+
+#### observability.langfuse.enabled
+- **Type**: boolean
+- **Default**: `false`
+- **Description**: Send observability data to Langfuse
+- **Requires**: Langfuse SDK (`pip install langfuse`)
+
+#### observability.langfuse.host
+- **Type**: string
+- **Default**: `http://localhost:3000`
+- **Description**: Langfuse instance URL (local or remote)
+
+#### observability.langfuse.public_key
+- **Type**: string
+- **Description**: Langfuse public API key
+
+#### observability.langfuse.secret_key
+- **Type**: string
+- **Description**: Langfuse secret API key
 
 ## Usage
 
@@ -93,6 +196,116 @@ typescript:
 python:
   mypy_command: mypy backend/
   ruff_command: ruff check backend/
+---
+```
+
+### Disable Auto-Formatting Only
+
+```yaml
+---
+autoformat:
+  enabled: false
+---
+```
+
+### Disable Git Checkpointing Only
+
+```yaml
+---
+git_checkpoint:
+  enabled: false
+---
+```
+
+### Disable Notifications Only
+
+```yaml
+---
+notifications:
+  enabled: false
+---
+```
+
+### Mac Notification Only (No TTS)
+
+```yaml
+---
+notifications:
+  enabled: true
+  mac_notification: true
+  tts: false
+---
+```
+
+### Local-Only Observability (No Langfuse)
+
+```yaml
+---
+observability:
+  enabled: true  # Track sessions locally
+  langfuse:
+    enabled: false  # Don't send to Langfuse
+---
+```
+
+### Observability with Local Langfuse
+
+```yaml
+---
+observability:
+  enabled: true
+  langfuse:
+    enabled: true
+    host: http://localhost:3000
+    public_key: pk-lf-local
+    secret_key: sk-lf-local
+---
+```
+
+### Observability with Remote Langfuse
+
+```yaml
+---
+observability:
+  enabled: true
+  langfuse:
+    enabled: true
+    host: https://cloud.langfuse.com
+    public_key: pk-lf-xxxxxxxx
+    secret_key: sk-lf-xxxxxxxx
+---
+```
+
+### Complete Feature Control
+
+```yaml
+---
+# Quality checks
+typescript:
+  command: npx tsc --noEmit --strict
+
+# Auto-formatting
+autoformat:
+  enabled: true
+
+# Git checkpointing
+git_checkpoint:
+  enabled: true
+
+# Notifications with TTS disabled
+notifications:
+  enabled: true
+  mac_notification: true
+  tts: false
+
+# Observability tracking
+observability:
+  enabled: true
+  langfuse:
+    enabled: true
+    host: http://localhost:3000
+    public_key: pk-lf-local
+    secret_key: sk-lf-local
 ---
 ```
 
