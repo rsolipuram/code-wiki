@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Wiki - Analyzing Repository</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #8B5CF6;
+            --primary-light: #A78BFA;
+            --secondary: #06B6D4;
+            --accent: #EC4899;
+            --bg-dark: #0A0A0F;
+            --bg-darker: #050508;
+            --glass-bg: rgba(15, 15, 25, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #F9FAFB;
+            --text-secondary: #D1D5DB;
+            --text-tertiary: #9CA3AF;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-darker);
+            color: var(--text-primary);
+            line-height: 1.7;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+
+        /* Animated Gradient Background */
+        .gradient-bg {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background: var(--bg-dark);
+            overflow: hidden;
+        }
+
+        .gradient-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.4;
+            animation: float 20s ease-in-out infinite;
+        }
+
+        .orb-1 {
+            width: 600px;
+            height: 600px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            top: -200px;
+            left: -200px;
+            animation-delay: 0s;
+        }
+
+        .orb-2 {
+            width: 500px;
+            height: 500px;
+            background: linear-gradient(135deg, var(--accent), var(--primary));
+            bottom: -150px;
+            right: -150px;
+            animation-delay: -10s;
+        }
+
+        .orb-3 {
+            width: 400px;
+            height: 400px;
+            background: linear-gradient(135deg, var(--secondary), var(--primary-light));
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation-delay: -5s;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(50px, -50px) scale(1.1); }
+            66% { transform: translate(-30px, 30px) scale(0.9); }
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.5); }
+            50%       { box-shadow: 0 0 0 8px rgba(6, 182, 212, 0); }
+        }
+
+        @keyframes progressFill {
+            from { width: 0%; }
+            to   { width: var(--target-width, 40%); }
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Confetti burst for completion */
+        @keyframes confettiBurst {
+            0%   { transform: scale(0.8); opacity: 0; }
+            60%  { transform: scale(1.06); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        @keyframes gradientShift {
+            0%   { background-position: 0% 50%; }
+            50%  { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        @keyframes sparkle {
+            0%   { transform: translateY(0) scale(1); opacity: 1; }
+            100% { transform: translateY(-80px) scale(0); opacity: 0; }
+        }
+
+        @keyframes stepComplete {
+            from { transform: scale(0.7); opacity: 0; }
+            to   { transform: scale(1); opacity: 1; }
+        }
+
+        /* Glass Card */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        /* ===== LAYOUT ===== */
+        .page-wrap {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 24px 80px;
+        }
+
+        /* Back / logo row */
+        .topbar {
+            width: 100%;
+            max-width: 700px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 40px;
+            opacity: 0;
+            animation: fadeInUp 0.5s ease forwards;
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text-tertiary);
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: color 0.2s;
+            min-height: 44px;
+        }
+
+        .back-link:hover {
+            color: var(--text-secondary);
+        }
+
+        .logo-link {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 14px;
+            color: white;
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+        }
+
+        .logo-text {
+            font-size: 17px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* ===== MAIN CARD ===== */
+        .main-card {
+            width: 100%;
+            max-width: 700px;
+            padding: 48px 44px;
+            opacity: 0;
+            animation: fadeInUp 0.6s 0.15s ease forwards;
+        }
+
+        /* Heading */
+        .page-heading {
+            font-family: 'Fira Code', monospace;
+            font-size: 30px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            letter-spacing: -0.02em;
+        }
+
+        .repo-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 14px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            font-family: 'Fira Code', monospace;
+            font-size: 13px;
+            color: var(--text-tertiary);
+            margin-bottom: 40px;
+        }
+
+        .repo-pill-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--secondary);
+            flex-shrink: 0;
+        }
+
+        /* ===== STEPPER ===== */
+        .stepper {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        .stepper-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            padding-bottom: 28px;
+            position: relative;
+        }
+
+        .stepper-item:last-child {
+            padding-bottom: 0;
+        }
+
+        /* Vertical connector line */
+        .stepper-item:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            left: 14px;
+            top: 30px;
+            bottom: 0;
+            width: 2px;
+            background: var(--glass-border);
+        }
+
+        .stepper-item.s-complete:not(:last-child)::after {
+            background: rgba(34, 197, 94, 0.4);
+        }
+
+        .stepper-item.s-active:not(:last-child)::after {
+            background: rgba(6, 182, 212, 0.3);
+        }
+
+        /* Step node */
+        .step-node {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 13px;
+            font-weight: 700;
+            position: relative;
+            z-index: 1;
+            transition: all 0.4s;
+        }
+
+        .s-complete .step-node {
+            background: #22c55e;
+            color: white;
+            box-shadow: 0 0 16px rgba(34, 197, 94, 0.5);
+            animation: stepComplete 0.4s ease;
+        }
+
+        .s-active .step-node {
+            background: var(--secondary);
+            color: white;
+            animation: pulseGlow 2s infinite;
+        }
+
+        .s-pending .step-node {
+            background: rgba(255,255,255,0.05);
+            border: 2px solid var(--glass-border);
+            color: var(--text-tertiary);
+        }
+
+        /* Step content */
+        .step-body {
+            padding-top: 4px;
+            flex: 1;
+        }
+
+        .step-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 3px;
+        }
+
+        .s-complete .step-title { color: #4ade80; }
+        .s-active  .step-title { color: var(--secondary); }
+        .s-pending .step-title { color: var(--text-tertiary); }
+
+        .step-desc {
+            font-size: 13px;
+            color: var(--text-tertiary);
+        }
+
+        .s-active .step-desc {
+            color: var(--text-secondary);
+        }
+
+        /* Active step spinner within title row */
+        .step-spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(6, 182, 212, 0.3);
+            border-top-color: var(--secondary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+
+        /* ===== PROGRESS BAR ===== */
+        .progress-section {
+            margin-bottom: 28px;
+        }
+
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .progress-pct {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--secondary);
+        }
+
+        .progress-eta {
+            font-size: 13px;
+            color: var(--text-tertiary);
+        }
+
+        .progress-track {
+            height: 10px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid var(--glass-border);
+            border-radius: 100px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 100px;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 0 12px rgba(6, 182, 212, 0.5);
+        }
+
+        /* Stats row */
+        .stats-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            padding: 16px 0;
+            border-top: 1px solid var(--glass-border);
+            border-bottom: 1px solid var(--glass-border);
+            margin-bottom: 28px;
+            font-size: 13px;
+        }
+
+        .live-stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text-tertiary);
+        }
+
+        .live-stat-val {
+            color: var(--primary-light);
+            font-weight: 700;
+        }
+
+        /* ===== EXPANDABLE "WHAT WE FOUND" PANEL ===== */
+        .accordion {
+            border-radius: 14px;
+            overflow: hidden;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--glass-border);
+            margin-bottom: 32px;
+        }
+
+        .accordion-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            user-select: none;
+            transition: background 0.2s;
+            min-height: 50px;
+        }
+
+        .accordion-header:hover {
+            background: rgba(255,255,255,0.04);
+        }
+
+        .accordion-arrow {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            transition: transform 0.25s;
+        }
+
+        .accordion-arrow.open {
+            transform: rotate(180deg);
+        }
+
+        .accordion-body {
+            display: none;
+            padding: 0 20px 16px;
+        }
+
+        .accordion-body.open {
+            display: block;
+        }
+
+        .module-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .module-list-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            border: 1px solid var(--glass-border);
+            animation: fadeInUp 0.3s ease;
+        }
+
+        .module-list-item .mod-icon {
+            font-size: 15px;
+        }
+
+        .module-list-item .mod-name {
+            font-family: 'Fira Code', monospace;
+            color: var(--primary-light);
+            font-weight: 500;
+        }
+
+        .module-list-item .mod-count {
+            margin-left: auto;
+            font-size: 12px;
+            color: var(--text-tertiary);
+        }
+
+        /* Cancel link */
+        .cancel-link {
+            display: block;
+            text-align: center;
+            color: var(--text-tertiary);
+            font-size: 14px;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .cancel-link:hover {
+            color: var(--accent);
+        }
+
+        /* ===== COMPLETION STATE ===== */
+        .completion-state {
+            display: none;
+            text-align: center;
+            padding: 48px 44px;
+        }
+
+        .completion-state.visible {
+            display: block;
+        }
+
+        .completion-burst {
+            width: 100px;
+            height: 100px;
+            margin: 0 auto 24px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--secondary), var(--accent));
+            background-size: 200% 200%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 44px;
+            animation: confettiBurst 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards,
+                       gradientShift 3s ease infinite;
+            box-shadow: 0 0 60px rgba(139, 92, 246, 0.6);
+        }
+
+        .completion-heading {
+            font-size: 32px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            background-size: 200% 200%;
+            animation: gradientShift 3s ease infinite;
+            margin-bottom: 12px;
+        }
+
+        .completion-sub {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 36px;
+        }
+
+        .view-wiki-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 16px 36px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            border-radius: 16px;
+            color: white;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 17px;
+            text-decoration: none;
+            cursor: pointer;
+            box-shadow: 0 4px 24px rgba(139, 92, 246, 0.5);
+            transition: all 0.3s;
+        }
+
+        .view-wiki-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 36px rgba(139, 92, 246, 0.7);
+        }
+
+        /* Sparkles container */
+        .sparkles {
+            position: relative;
+            height: 0;
+            overflow: visible;
+        }
+
+        .sparkle {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: sparkle 1.2s ease forwards;
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 600px) {
+            .main-card,
+            .completion-state {
+                padding: 28px 20px;
+            }
+
+            .page-heading {
+                font-size: 22px;
+            }
+
+            .stats-row {
+                gap: 12px;
+            }
+
+            .step-title {
+                font-size: 14px;
+            }
+
+            .topbar {
+                margin-bottom: 24px;
+            }
+        }
+
+        @media (max-width: 400px) {
+            .page-heading {
+                font-size: 18px;
+            }
+
+            .live-stat {
+                font-size: 12px;
+            }
+        }
+    /* content-link-style */
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo) {
+            color: #06B6D4;
+            text-decoration: underline;
+            text-decoration-color: rgba(6, 182, 212, 0.4);
+            text-underline-offset: 3px;
+            transition: color 0.2s, text-decoration-color 0.2s;
+        }
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo):hover {
+            color: #A78BFA;
+            text-decoration-color: rgba(167, 139, 250, 0.6);
+        }
+</style>
+</head>
+<body>
+    <div class="gradient-bg">
+        <div class="gradient-orb orb-1"></div>
+        <div class="gradient-orb orb-2"></div>
+        <div class="gradient-orb orb-3"></div>
+    </div>
+
+    <div class="page-wrap">
+
+        <!-- Top bar -->
+        <div class="topbar">
+            <a href="submit.html" class="back-link">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+            </a>
+            <a href="dashboard.html" class="logo-link">
+                <div class="logo-icon">CW</div>
+                <span class="logo-text">Code Wiki</span>
+            </a>
+        </div>
+
+        <!-- ===== IN-PROGRESS CARD ===== -->
+        <div class="glass-card main-card" id="progressCard">
+
+            <h1 class="page-heading">Analyzing myapp</h1>
+            <div class="repo-pill">
+                <span class="repo-pill-dot"></span>
+                github.com/ranjit/myapp
+            </div>
+
+            <!-- Vertical stepper -->
+            <div class="stepper" id="stepper">
+
+                <div class="stepper-item s-complete" id="step-0">
+                    <div class="step-node">&#10003;</div>
+                    <div class="step-body">
+                        <div class="step-title">Cloning repository</div>
+                        <div class="step-desc">0.3s &mdash; done</div>
+                    </div>
+                </div>
+
+                <div class="stepper-item s-complete" id="step-1">
+                    <div class="step-node">&#10003;</div>
+                    <div class="step-body">
+                        <div class="step-title">Parsing source files</div>
+                        <div class="step-desc">312 files analyzed</div>
+                    </div>
+                </div>
+
+                <div class="stepper-item s-active" id="step-2">
+                    <div class="step-node">3</div>
+                    <div class="step-body">
+                        <div class="step-title">Detecting modules <span class="step-spinner"></span></div>
+                        <div class="step-desc" id="step2Desc">8 modules found so far&hellip;</div>
+                    </div>
+                </div>
+
+                <div class="stepper-item s-pending" id="step-3">
+                    <div class="step-node">4</div>
+                    <div class="step-body">
+                        <div class="step-title">Building knowledge graph</div>
+                        <div class="step-desc">Pending</div>
+                    </div>
+                </div>
+
+                <div class="stepper-item s-pending" id="step-4">
+                    <div class="step-node">5</div>
+                    <div class="step-body">
+                        <div class="step-title">Generating wiki pages</div>
+                        <div class="step-desc">Pending</div>
+                    </div>
+                </div>
+
+                <div class="stepper-item s-pending" id="step-5">
+                    <div class="step-node">6</div>
+                    <div class="step-body">
+                        <div class="step-title">Creating visual diagrams</div>
+                        <div class="step-desc">Pending</div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Progress bar -->
+            <div class="progress-section">
+                <div class="progress-label">
+                    <span class="progress-pct" id="progressPct">40%</span>
+                    <span class="progress-eta" id="progressEta">Estimated time remaining: ~6 minutes</span>
+                </div>
+                <div class="progress-track">
+                    <div class="progress-fill" id="progressFill" style="width: 40%;"></div>
+                </div>
+            </div>
+
+            <!-- Live stats -->
+            <div class="stats-row">
+                <div class="live-stat">
+                    <span class="live-stat-val" id="statFiles">312</span> files
+                </div>
+                <div class="live-stat">
+                    <span class="live-stat-val" id="statModules">8</span> modules detected
+                </div>
+                <div class="live-stat">
+                    <span class="live-stat-val" id="statFunctions">142</span> functions indexed
+                </div>
+            </div>
+
+            <!-- Accordion: what we found so far -->
+            <div class="accordion" id="accordion">
+                <div class="accordion-header" id="accordionHeader" role="button" tabindex="0" aria-expanded="false">
+                    <span>What we found so far</span>
+                    <span class="accordion-arrow" id="accordionArrow">&#9660;</span>
+                </div>
+                <div class="accordion-body" id="accordionBody">
+                    <ul class="module-list" id="moduleList">
+                        <li class="module-list-item"><span class="mod-icon">&#128274;</span><span class="mod-name">auth</span><span class="mod-count">18 fns</span></li>
+                        <li class="module-list-item"><span class="mod-icon">&#128202;</span><span class="mod-name">analysis</span><span class="mod-count">24 fns</span></li>
+                        <li class="module-list-item"><span class="mod-icon">&#128172;</span><span class="mod-name">chat</span><span class="mod-count">16 fns</span></li>
+                        <li class="module-list-item"><span class="mod-icon">&#128196;</span><span class="mod-name">wiki</span><span class="mod-count">20 fns</span></li>
+                        <li class="module-list-item"><span class="mod-icon">&#128269;</span><span class="mod-name">search</span><span class="mod-count">14 fns</span></li>
+                        <li class="module-list-item"><span class="mod-icon">&#128200;</span><span class="mod-name">diagrams</span><span class="mod-count">12 fns</span></li>
+                        <li class="module-list-item"><span class="mod-icon">&#128257;</span><span class="mod-name">sync</span><span class="mod-count">10 fns</span></li>
+                        <li class="module-list-item"><span class="mod-icon">&#128451;</span><span class="mod-name">database</span><span class="mod-count">28 fns</span></li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Cancel -->
+            <a href="dashboard.html" class="cancel-link">Cancel analysis</a>
+
+        </div>
+
+        <!-- ===== COMPLETION CARD ===== -->
+        <div class="glass-card completion-state" id="completionCard">
+            <div class="sparkles" id="sparklesContainer"></div>
+            <div class="completion-burst">&#10024;</div>
+            <h2 class="completion-heading">Wiki Ready!</h2>
+            <p class="completion-sub">myapp has been fully analyzed. Your documentation is ready to explore.</p>
+            <a href="home.html" class="view-wiki-btn">
+                View your documentation &rarr;
+            </a>
+        </div>
+
+    </div>
+
+    <script>
+        // ===== Accordion =====
+        var accordionHeader = document.getElementById('accordionHeader');
+        var accordionBody   = document.getElementById('accordionBody');
+        var accordionArrow  = document.getElementById('accordionArrow');
+
+        function toggleAccordion() {
+            var isOpen = accordionBody.classList.toggle('open');
+            accordionArrow.classList.toggle('open', isOpen);
+            accordionHeader.setAttribute('aria-expanded', String(isOpen));
+        }
+
+        accordionHeader.addEventListener('click', toggleAccordion);
+        accordionHeader.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') toggleAccordion();
+        });
+
+        // ===== Step simulation data =====
+        var STEPS = [
+            { title: 'Cloning repository',    desc: '0.3s \u2014 done' },
+            { title: 'Parsing source files',  desc: '312 files analyzed' },
+            { title: 'Detecting modules',     desc: '8 modules found so far\u2026' },
+            { title: 'Building knowledge graph', desc: 'Linking 142 functions across modules\u2026' },
+            { title: 'Generating wiki pages', desc: 'Creating 23 documentation pages\u2026' },
+            { title: 'Creating visual diagrams', desc: 'Generating architecture diagrams\u2026' }
+        ];
+
+        // State: step-0 and step-1 start as complete, step-2 is active (index 2)
+        var activeStep = 2;
+        var progressValues = [40, 57, 72, 84, 94, 100];
+        var etaLabels = [
+            '~6 minutes',
+            '~5 minutes',
+            '~4 minutes',
+            '~2 minutes',
+            '~1 minute',
+            'Complete!'
+        ];
+
+        var extraModules = [
+            { icon: '&#128736;', name: 'utils', count: '9 fns' },
+            { icon: '&#128293;', name: 'api-router', count: '11 fns' }
+        ];
+        var extraModulesAdded = 0;
+
+        function updateStepUI(index, status) {
+            var el = document.getElementById('step-' + index);
+            if (!el) return;
+            el.className = 'stepper-item ' + status;
+
+            var nodeEl  = el.querySelector('.step-node');
+            var titleEl = el.querySelector('.step-title');
+            var descEl  = el.querySelector('.step-desc');
+
+            if (status === 's-complete') {
+                nodeEl.textContent = '\u2713';
+                // Remove any spinner from title
+                var spinner = titleEl.querySelector('.step-spinner');
+                if (spinner) titleEl.removeChild(spinner);
+                titleEl.textContent = STEPS[index].title;
+                descEl.textContent  = STEPS[index].desc;
+            } else if (status === 's-active') {
+                nodeEl.textContent = String(index + 1);
+                titleEl.textContent = STEPS[index].title;
+                var sp = document.createElement('span');
+                sp.className = 'step-spinner';
+                titleEl.appendChild(sp);
+                descEl.textContent = STEPS[index].desc;
+            } else {
+                nodeEl.textContent = String(index + 1);
+                // Remove any spinner from title
+                var spinner2 = titleEl.querySelector('.step-spinner');
+                if (spinner2) titleEl.removeChild(spinner2);
+                titleEl.textContent = STEPS[index].title;
+                descEl.textContent = 'Pending';
+            }
+        }
+
+        function updateProgress(idx) {
+            var pct = progressValues[idx];
+            document.getElementById('progressFill').style.width = pct + '%';
+            document.getElementById('progressPct').textContent  = pct + '%';
+            document.getElementById('progressEta').textContent  = 'Estimated time remaining: ' + etaLabels[idx];
+        }
+
+        function addModuleToList() {
+            if (extraModulesAdded >= extraModules.length) return;
+            var m    = extraModules[extraModulesAdded];
+            var list = document.getElementById('moduleList');
+            var li   = document.createElement('li');
+            li.className = 'module-list-item';
+
+            var iconSpan = document.createElement('span');
+            iconSpan.className = 'mod-icon';
+            // Use textContent-safe approach for icon display
+            iconSpan.setAttribute('aria-hidden', 'true');
+            iconSpan.textContent = extraModulesAdded === 0 ? '\u2699\ufe0f' : '\uD83D\uDD25';
+
+            var nameSpan = document.createElement('span');
+            nameSpan.className = 'mod-name';
+            nameSpan.textContent = m.name;
+
+            var countSpan = document.createElement('span');
+            countSpan.className = 'mod-count';
+            countSpan.textContent = m.count;
+
+            li.appendChild(iconSpan);
+            li.appendChild(nameSpan);
+            li.appendChild(countSpan);
+            list.appendChild(li);
+
+            extraModulesAdded++;
+        }
+
+        function updateLiveStats(idx) {
+            var modCounts   = [8, 9, 10, 10, 10, 10];
+            var fnCounts    = [142, 152, 164, 164, 164, 164];
+            document.getElementById('statModules').textContent   = String(modCounts[idx]);
+            document.getElementById('statFunctions').textContent = String(fnCounts[idx]);
+        }
+
+        // ===== Completion =====
+        function showCompletion() {
+            document.getElementById('progressCard').style.display  = 'none';
+            var comp = document.getElementById('completionCard');
+            comp.classList.add('visible');
+
+            // Spawn sparkle dots
+            var colors = ['#8B5CF6','#06B6D4','#EC4899','#A78BFA','#34d399'];
+            var container = document.getElementById('sparklesContainer');
+            for (var i = 0; i < 16; i++) {
+                (function(i) {
+                    var dot = document.createElement('div');
+                    dot.className = 'sparkle';
+                    dot.style.left   = (Math.random() * 640 - 80) + 'px';
+                    dot.style.top    = '0px';
+                    dot.style.background = colors[i % colors.length];
+                    dot.style.animationDelay = (Math.random() * 0.5) + 's';
+                    dot.style.width  = (6 + Math.random() * 8) + 'px';
+                    dot.style.height = dot.style.width;
+                    container.appendChild(dot);
+                })(i);
+            }
+        }
+
+        // ===== Main simulation loop =====
+        function advance() {
+            activeStep++;
+
+            if (activeStep > 5) {
+                showCompletion();
+                return;
+            }
+
+            // Mark previous step complete
+            updateStepUI(activeStep - 1, 's-complete');
+            // Mark current step active
+            updateStepUI(activeStep, 's-active');
+            // Update progress
+            updateProgress(activeStep);
+            // Update live stats
+            updateLiveStats(activeStep);
+            // Occasionally add a module to the list
+            if (activeStep === 3) addModuleToList();
+            if (activeStep === 4) addModuleToList();
+        }
+
+        // Start the simulation: every 3 seconds advance one step
+        var simInterval = setInterval(function() {
+            if (activeStep >= 5) {
+                clearInterval(simInterval);
+                advance(); // final step -> completion
+            } else {
+                advance();
+            }
+        }, 3000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat Assistant - Code Wiki</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #8B5CF6;
+            --primary-light: #A78BFA;
+            --secondary: #06B6D4;
+            --accent: #EC4899;
+            --bg-dark: #0A0A0F;
+            --bg-darker: #050508;
+            --glass-bg: rgba(15, 15, 25, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #F9FAFB;
+            --text-secondary: #D1D5DB;
+            --text-tertiary: #9CA3AF;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-darker);
+            color: var(--text-primary);
+            line-height: 1.7;
+            overflow-x: hidden;
+            position: relative;
+            height: 100vh;
+        }
+
+        /* Animated Gradient Background */
+        .gradient-bg {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background: var(--bg-dark);
+            overflow: hidden;
+        }
+
+        .gradient-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.4;
+            animation: float 20s ease-in-out infinite;
+        }
+
+        .orb-1 {
+            width: 600px;
+            height: 600px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            top: -200px;
+            left: -200px;
+            animation-delay: 0s;
+        }
+
+        .orb-2 {
+            width: 500px;
+            height: 500px;
+            background: linear-gradient(135deg, var(--accent), var(--primary));
+            bottom: -150px;
+            right: -150px;
+            animation-delay: -10s;
+        }
+
+        .orb-3 {
+            width: 400px;
+            height: 400px;
+            background: linear-gradient(135deg, var(--secondary), var(--primary-light));
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation-delay: -5s;
+        }
+
+        @keyframes float {
+            0%, 100% {
+                transform: translate(0, 0) scale(1);
+            }
+            33% {
+                transform: translate(50px, -50px) scale(1.1);
+            }
+            66% {
+                transform: translate(-30px, 30px) scale(0.9);
+            }
+        }
+
+        /* Layout */
+        .chat-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 24px;
+            gap: 24px;
+        }
+
+        /* Glass Card Base */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        /* Header */
+        .chat-header {
+            padding: 24px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+            opacity: 0;
+            animation: fadeInUp 0.6s ease forwards;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 18px;
+            box-shadow: 0 0 30px rgba(139, 92, 246, 0.5);
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .chat-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .header-btn {
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .header-btn:hover {
+            background: rgba(139, 92, 246, 0.2);
+            border-color: rgba(139, 92, 246, 0.5);
+        }
+
+        .new-chat-btn {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            box-shadow: 0 4px 20px rgba(139, 92, 246, 0.3);
+        }
+
+        .new-chat-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(139, 92, 246, 0.5);
+        }
+
+        /* Chat Messages */
+        .chat-messages {
+            flex: 1;
+            padding: 32px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            opacity: 0;
+            animation: fadeInUp 0.8s 0.2s ease forwards;
+        }
+
+        .chat-messages::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: var(--primary);
+            border-radius: 4px;
+        }
+
+        .message {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            animation: messageSlideIn 0.4s ease;
+        }
+
+        @keyframes messageSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .user-avatar {
+            background: linear-gradient(135deg, var(--accent), var(--primary));
+            box-shadow: 0 0 20px rgba(236, 72, 153, 0.4);
+        }
+
+        .ai-avatar {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+        }
+
+        .message-content {
+            flex: 1;
+            max-width: 800px;
+        }
+
+        .message-bubble {
+            padding: 20px 24px;
+            border-radius: 16px;
+            font-size: 15px;
+            line-height: 1.7;
+        }
+
+        .user-message .message-bubble {
+            background: linear-gradient(135deg, rgba(236, 72, 153, 0.15), rgba(139, 92, 246, 0.15));
+            border: 1px solid rgba(236, 72, 153, 0.3);
+        }
+
+        .ai-message .message-bubble {
+            background: rgba(15, 15, 25, 0.5);
+            border: 1px solid var(--glass-border);
+        }
+
+        .message-time {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-top: 8px;
+        }
+
+        .code-block {
+            margin: 16px 0;
+            background: rgba(5, 5, 8, 0.8);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--glass-border);
+            overflow-x: auto;
+        }
+
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .code-language {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .copy-btn {
+            padding: 6px 12px;
+            background: rgba(139, 92, 246, 0.2);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 6px;
+            color: var(--primary-light);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .copy-btn:hover {
+            background: rgba(139, 92, 246, 0.3);
+        }
+
+        .code-block code {
+            font-family: 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #E5E7EB;
+        }
+
+        .link-card {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            margin: 8px 8px 8px 0;
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 10px;
+            text-decoration: none;
+            color: var(--primary-light);
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .link-card:hover {
+            background: rgba(139, 92, 246, 0.25);
+            transform: translateX(4px);
+        }
+
+        .link-card-icon {
+            font-size: 16px;
+        }
+
+        /* Suggested Questions */
+        .suggested-questions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .suggested-question {
+            padding: 8px 16px;
+            background: rgba(6, 182, 212, 0.1);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 20px;
+            color: var(--secondary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .suggested-question:hover {
+            background: rgba(6, 182, 212, 0.2);
+            transform: translateY(-2px);
+        }
+
+        /* Input Area */
+        .chat-input-container {
+            padding: 24px 32px;
+            opacity: 0;
+            animation: fadeInUp 0.8s 0.4s ease forwards;
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+        }
+
+        .chat-input {
+            flex: 1;
+            min-height: 56px;
+            max-height: 200px;
+            padding: 16px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid var(--glass-border);
+            border-radius: 16px;
+            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            font-size: 15px;
+            line-height: 1.5;
+            resize: none;
+            transition: all 0.3s;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 30px rgba(139, 92, 246, 0.3);
+        }
+
+        .chat-input::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        .send-btn {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            border-radius: 14px;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
+            flex-shrink: 0;
+        }
+
+        .send-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(139, 92, 246, 0.6);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Empty State */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        .empty-icon {
+            font-size: 80px;
+            margin-bottom: 24px;
+            opacity: 0;
+            animation: fadeInUp 0.8s 0.3s ease forwards;
+        }
+
+        .empty-title {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            opacity: 0;
+            animation: fadeInUp 0.8s 0.4s ease forwards;
+        }
+
+        .empty-description {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+            text-align: center;
+            max-width: 500px;
+            opacity: 0;
+            animation: fadeInUp 0.8s 0.5s ease forwards;
+        }
+
+        .example-questions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+            width: 100%;
+            max-width: 800px;
+            opacity: 0;
+            animation: fadeInUp 0.8s 0.6s ease forwards;
+        }
+
+        .example-question {
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .example-question:hover {
+            background: rgba(139, 92, 246, 0.15);
+            border-color: rgba(139, 92, 246, 0.5);
+            transform: translateY(-4px);
+        }
+
+        .example-question-icon {
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+
+        .example-question-text {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Repo context bar */
+        .repo-context-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--glass-border);
+            flex-wrap: wrap;
+        }
+
+        .repo-context-label {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .repo-context-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: rgba(139, 92, 246, 0.12);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+            color: var(--text-primary);
+            font-weight: 500;
+            position: relative;
+        }
+
+        .repo-context-pill:hover {
+            background: rgba(139, 92, 246, 0.2);
+            border-color: rgba(139, 92, 246, 0.5);
+            box-shadow: 0 0 16px rgba(139, 92, 246, 0.2);
+        }
+
+        .repo-context-pill .repo-icon {
+            font-size: 15px;
+        }
+
+        .repo-context-pill .repo-name {
+            font-family: 'Fira Code', monospace;
+            font-size: 13px;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .repo-context-pill .dropdown-arrow {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            -webkit-text-fill-color: var(--text-tertiary);
+            background: none;
+            margin-left: 2px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .chat-container {
+                padding: 16px;
+            }
+
+            .chat-header {
+                padding: 16px 20px;
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .header-left {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .header-actions {
+                width: 100%;
+            }
+
+            .header-btn {
+                flex: 1;
+            }
+
+            .chat-messages {
+                padding: 20px;
+            }
+
+            .message-content {
+                max-width: 100%;
+            }
+
+            .message-bubble {
+                padding: 16px;
+                font-size: 14px;
+            }
+
+            .chat-input-container {
+                padding: 16px;
+            }
+
+            .empty-icon {
+                font-size: 60px;
+            }
+
+            .empty-title {
+                font-size: 24px;
+            }
+
+            .example-questions {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .chat-input {
+                font-size: 14px;
+            }
+
+            .send-btn {
+                width: 48px;
+                height: 48px;
+                font-size: 18px;
+            }
+
+            .message-avatar {
+                width: 32px;
+                height: 32px;
+                font-size: 16px;
+            }
+        }
+    /* content-link-style */
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo) {
+            color: #06B6D4;
+            text-decoration: underline;
+            text-decoration-color: rgba(6, 182, 212, 0.4);
+            text-underline-offset: 3px;
+            transition: color 0.2s, text-decoration-color 0.2s;
+        }
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo):hover {
+            color: #A78BFA;
+            text-decoration-color: rgba(167, 139, 250, 0.6);
+        }
+</style>
+</head>
+<body>
+    <div class="gradient-bg">
+        <div class="gradient-orb orb-1"></div>
+        <div class="gradient-orb orb-2"></div>
+        <div class="gradient-orb orb-3"></div>
+    </div>
+
+    <div class="chat-container">
+        <nav style="padding:12px 24px 0;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-tertiary);">
+            <a href="dashboard.html" style="color:var(--text-tertiary);text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='var(--primary-light)'" onmouseout="this.style.color='var(--text-tertiary)'">&#8592; dashboard</a>
+            <span>/</span>
+            <a href="home.html" style="color:var(--text-tertiary);text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='var(--primary-light)'" onmouseout="this.style.color='var(--text-tertiary)'">myapp wiki</a>
+        </nav>
+        <header class="chat-header glass-card">
+            <div class="header-left">
+                <a href="home.html" class="logo">
+                    <div class="logo-icon">CW</div>
+                    <div class="logo-text">Code Wiki</div>
+                </a>
+                <div>
+                    <h1 class="chat-title">AI Chat Assistant</h1>
+                    <div class="repo-context-bar">
+                        <span class="repo-context-label">Context:</span>
+                        <div class="repo-context-pill" title="Click to change repository context">
+                            <span class="repo-icon">📦</span>
+                            <span class="repo-name">myapp / main</span>
+                            <span class="dropdown-arrow">▼</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="header-btn" onclick="window.location.href='home.html'">← Back to Docs</button>
+                <button class="header-btn new-chat-btn" onclick="clearChat()">+ New Chat</button>
+            </div>
+        </header>
+
+        <div class="chat-messages glass-card" id="chatMessages">
+            <!-- Empty State -->
+            <div class="empty-state" id="emptyState">
+                <div class="empty-icon">💬</div>
+                <h2 class="empty-title">How can I help you?</h2>
+                <p class="empty-description">
+                    Ask me anything about the code-wiki codebase. I can explain how modules work, find functions, show relationships, and help you understand the architecture.
+                </p>
+                <div class="example-questions">
+                    <div class="example-question" onclick="askQuestion('How does the authentication system work?')">
+                        <div class="example-question-icon">🔐</div>
+                        <div class="example-question-text">How does the authentication system work?</div>
+                    </div>
+                    <div class="example-question" onclick="askQuestion('What functions call authenticateUser?')">
+                        <div class="example-question-icon">🔗</div>
+                        <div class="example-question-text">What functions call authenticateUser?</div>
+                    </div>
+                    <div class="example-question" onclick="askQuestion('Explain the repository analysis module')">
+                        <div class="example-question-icon">📊</div>
+                        <div class="example-question-text">Explain the repository analysis module</div>
+                    </div>
+                    <div class="example-question" onclick="askQuestion('Show me how to set up the project')">
+                        <div class="example-question-icon">🚀</div>
+                        <div class="example-question-text">Show me how to set up the project</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sample Conversation (will be hidden initially) -->
+            <div id="conversationHistory" style="display: none; width: 100%; flex-direction: column; gap: 24px;">
+                <div class="message user-message">
+                    <div class="message-avatar user-avatar">👤</div>
+                    <div class="message-content">
+                        <div class="message-bubble">
+                            How does the authentication system work?
+                        </div>
+                        <div class="message-time">2 minutes ago</div>
+                    </div>
+                </div>
+
+                <div class="message ai-message">
+                    <div class="message-avatar ai-avatar">🤖</div>
+                    <div class="message-content">
+                        <div class="message-bubble">
+                            <p>The authentication system in code-wiki provides secure user authentication with JWT tokens and OAuth support. Here's how it works:</p>
+
+                            <p><strong>Core Components:</strong></p>
+                            <ul style="margin-left: 20px; margin-top: 8px;">
+                                <li><strong>authenticateUser()</strong> - Main authentication function</li>
+                                <li><strong>validateCredentials()</strong> - Password verification</li>
+                                <li><strong>generateToken()</strong> - JWT token creation</li>
+                                <li><strong>AuthenticationService</strong> - Core service class</li>
+                            </ul>
+
+                            <p style="margin-top: 16px;"><strong>Authentication Flow:</strong></p>
+
+                            <div class="code-block">
+                                <div class="code-header">
+                                    <span class="code-language">TypeScript</span>
+                                    <button class="copy-btn">Copy</button>
+                                </div>
+                                <code>// 1. User submits credentials
+const result = await authenticateUser(username, password);
+
+// 2. System validates against database
+const user = await findUserByUsername(username);
+const isValid = await validateCredentials(user, password);
+
+// 3. Generate JWT token on success
+const token = await generateToken(user, options);
+
+// 4. Return token to client
+return { success: true, token, user };</code>
+                            </div>
+
+                            <p style="margin-top: 16px;"><strong>Related Documentation:</strong></p>
+                            <div>
+                                <a href="function.html" class="link-card">
+                                    <span class="link-card-icon">📄</span>
+                                    <span>authenticateUser() Function</span>
+                                </a>
+                                <a href="module.html" class="link-card">
+                                    <span class="link-card-icon">📦</span>
+                                    <span>Authentication Module</span>
+                                </a>
+                            </div>
+
+                            <p style="margin-top: 16px;">The system also supports OAuth providers (Google, GitHub) and includes features like session management, password reset, and multi-factor authentication.</p>
+
+                            <div class="suggested-questions">
+                                <div class="suggested-question" onclick="askQuestion('How do I implement OAuth?')">How do I implement OAuth?</div>
+                                <div class="suggested-question" onclick="askQuestion('What about password security?')">What about password security?</div>
+                                <div class="suggested-question" onclick="askQuestion('Show session management code')">Show session management code</div>
+                            </div>
+                        </div>
+                        <div class="message-time">Just now</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-input-container glass-card">
+            <div class="input-wrapper">
+                <textarea
+                    id="chatInput"
+                    class="chat-input"
+                    placeholder="Ask about functions, modules, architecture..."
+                    rows="1"
+                    onkeydown="handleKeyPress(event)"
+                ></textarea>
+                <button class="send-btn" onclick="sendMessage()">
+                    ✈️
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const chatMessages = document.getElementById('chatMessages');
+        const chatInput = document.getElementById('chatInput');
+        const emptyState = document.getElementById('emptyState');
+        const conversationHistory = document.getElementById('conversationHistory');
+
+        // Auto-resize textarea
+        chatInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+        });
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function sendMessage() {
+            const message = chatInput.value.trim();
+            if (!message) return;
+
+            // Hide empty state and show conversation
+            emptyState.style.display = 'none';
+            conversationHistory.style.display = 'flex';
+
+            // Add user message using safe DOM methods
+            addUserMessage(message);
+
+            // Clear input
+            chatInput.value = '';
+            chatInput.style.height = 'auto';
+
+            // Simulate AI response
+            setTimeout(() => {
+                addAIResponse();
+            }, 1000);
+        }
+
+        function addUserMessage(text) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message user-message';
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar user-avatar';
+            avatar.textContent = '👤';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.textContent = text;
+
+            const time = document.createElement('div');
+            time.className = 'message-time';
+            time.textContent = 'Just now';
+
+            contentDiv.appendChild(bubble);
+            contentDiv.appendChild(time);
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+            conversationHistory.appendChild(messageDiv);
+
+            scrollToBottom();
+        }
+
+        function addAIResponse() {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message ai-message';
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar ai-avatar';
+            avatar.textContent = '🤖';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+
+            const p = document.createElement('p');
+            p.textContent = 'I can help you understand that! Let me search through the codebase...';
+            bubble.appendChild(p);
+
+            const time = document.createElement('div');
+            time.className = 'message-time';
+            time.textContent = 'Just now';
+
+            contentDiv.appendChild(bubble);
+            contentDiv.appendChild(time);
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+            conversationHistory.appendChild(messageDiv);
+
+            scrollToBottom();
+        }
+
+        function askQuestion(question) {
+            chatInput.value = question;
+            sendMessage();
+        }
+
+        function clearChat() {
+            conversationHistory.style.display = 'none';
+            emptyState.style.display = 'flex';
+            while (conversationHistory.children.length > 2) {
+                conversationHistory.removeChild(conversationHistory.lastChild);
+            }
+        }
+
+        function scrollToBottom() {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Copy code button functionality
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('copy-btn')) {
+                const codeBlock = e.target.closest('.code-block');
+                const code = codeBlock.querySelector('code').textContent;
+                navigator.clipboard.writeText(code).then(() => {
+                    e.target.textContent = 'Copied!';
+                    setTimeout(() => {
+                        e.target.textContent = 'Copy';
+                    }, 2000);
+                });
+            }
+        });
+
+        // Auto-focus input on load
+        window.addEventListener('load', () => {
+            chatInput.focus();
+        });
+    </script>
+</body>
+</html>

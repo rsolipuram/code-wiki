@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Wiki - Repositories</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #8B5CF6;
+            --primary-light: #A78BFA;
+            --secondary: #06B6D4;
+            --accent: #EC4899;
+            --bg-dark: #0A0A0F;
+            --bg-darker: #050508;
+            --glass-bg: rgba(15, 15, 25, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #F9FAFB;
+            --text-secondary: #D1D5DB;
+            --text-tertiary: #9CA3AF;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-darker);
+            color: var(--text-primary);
+            line-height: 1.7;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+
+        /* Animated Gradient Background */
+        .gradient-bg {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background: var(--bg-dark);
+            overflow: hidden;
+        }
+
+        .gradient-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.4;
+            animation: float 20s ease-in-out infinite;
+        }
+
+        .orb-1 {
+            width: 600px;
+            height: 600px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            top: -200px;
+            left: -200px;
+            animation-delay: 0s;
+        }
+
+        .orb-2 {
+            width: 500px;
+            height: 500px;
+            background: linear-gradient(135deg, var(--accent), var(--primary));
+            bottom: -150px;
+            right: -150px;
+            animation-delay: -10s;
+        }
+
+        .orb-3 {
+            width: 400px;
+            height: 400px;
+            background: linear-gradient(135deg, var(--secondary), var(--primary-light));
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation-delay: -5s;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(50px, -50px) scale(1.1); }
+            66% { transform: translate(-30px, 30px) scale(0.9); }
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* Glass Card */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        /* ===== TOP NAV ===== */
+        .topnav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            padding: 0 32px;
+        }
+
+        .topnav-inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 72px;
+            gap: 24px;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            flex-shrink: 0;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 16px;
+            box-shadow: 0 0 24px rgba(139, 92, 246, 0.5);
+            color: white;
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex: 1;
+            justify-content: center;
+        }
+
+        .nav-link {
+            padding: 8px 18px;
+            border-radius: 10px;
+            color: var(--text-secondary);
+            font-size: 15px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+        }
+
+        .nav-link:hover {
+            background: rgba(255,255,255,0.06);
+            color: var(--text-primary);
+        }
+
+        .nav-link.active {
+            background: rgba(139, 92, 246, 0.15);
+            color: var(--primary-light);
+            border: 1px solid rgba(139, 92, 246, 0.25);
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--glass-border);
+            cursor: pointer;
+            transition: all 0.2s;
+            min-height: 44px;
+        }
+
+        .user-menu:hover {
+            background: rgba(255,255,255,0.09);
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 12px;
+            color: white;
+            flex-shrink: 0;
+        }
+
+        .user-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .dropdown-arrow {
+            color: var(--text-tertiary);
+            font-size: 10px;
+        }
+
+        /* Mobile hamburger */
+        .hamburger {
+            display: none;
+            background: none;
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            color: var(--text-primary);
+            padding: 10px 12px;
+            cursor: pointer;
+            font-size: 18px;
+            min-height: 44px;
+            min-width: 44px;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mobile-nav-menu {
+            display: none;
+            flex-direction: column;
+            padding: 12px 20px 20px;
+            gap: 4px;
+        }
+
+        .mobile-nav-menu.open {
+            display: flex;
+        }
+
+        /* ===== PAGE CONTENT ===== */
+        .page-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 32px 80px;
+        }
+
+        /* Hero */
+        .hero {
+            margin-bottom: 40px;
+            opacity: 0;
+            animation: fadeInUp 0.6s ease forwards;
+        }
+
+        .hero-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 24px;
+            flex-wrap: wrap;
+            margin-bottom: 28px;
+        }
+
+        .hero-title {
+            font-size: 42px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.02em;
+            line-height: 1.1;
+        }
+
+        .add-repo-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 28px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            border-radius: 14px;
+            color: white;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 15px;
+            text-decoration: none;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
+            transition: all 0.3s;
+            min-height: 50px;
+            white-space: nowrap;
+        }
+
+        .add-repo-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(139, 92, 246, 0.6);
+        }
+
+        /* Stats row */
+        .stats-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .stat-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .stat-pill-num {
+            font-size: 20px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* ===== REPO GRID ===== */
+        .repo-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            opacity: 0;
+            animation: fadeInUp 0.6s 0.2s ease forwards;
+        }
+
+        .repo-card {
+            padding: 28px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px 0 rgba(0,0,0,0.37);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .repo-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(139, 92, 246, 0.4);
+            box-shadow: 0 12px 40px rgba(139, 92, 246, 0.2);
+        }
+
+        /* Repo header row */
+        .repo-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .repo-name {
+            font-family: 'Fira Code', monospace;
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .visibility-badge {
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            flex-shrink: 0;
+        }
+
+        .badge-public {
+            background: rgba(34, 197, 94, 0.15);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #4ade80;
+        }
+
+        .badge-private {
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            color: var(--primary-light);
+        }
+
+        .repo-description {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            line-height: 1.5;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Language badges */
+        .lang-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .lang-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid var(--glass-border);
+            color: var(--text-secondary);
+        }
+
+        .lang-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .dot-ts  { background: #3178C6; }
+        .dot-py  { background: #3572A5; }
+        .dot-go  { background: #00ADD8; }
+        .dot-js  { background: #F1E05A; }
+        .dot-java{ background: #B07219; }
+
+        /* Repo stats row */
+        .repo-stats {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            padding: 14px 0;
+            border-top: 1px solid var(--glass-border);
+            border-bottom: 1px solid var(--glass-border);
+            margin-bottom: 14px;
+            font-size: 13px;
+            color: var(--text-tertiary);
+        }
+
+        .repo-stats span {
+            color: var(--primary-light);
+            font-weight: 600;
+        }
+
+        /* Sync status */
+        .sync-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            margin-bottom: 18px;
+            padding: 10px 14px;
+            border-radius: 10px;
+        }
+
+        .sync-synced {
+            background: rgba(34, 197, 94, 0.08);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+        }
+
+        .sync-syncing {
+            background: rgba(234, 179, 8, 0.08);
+            border: 1px solid rgba(234, 179, 8, 0.2);
+            color: #facc15;
+        }
+
+        .sync-failed {
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: #f87171;
+        }
+
+        .sync-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .dot-green  { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+        .dot-yellow { background: #eab308; box-shadow: 0 0 6px #eab308; animation: pulse-dot 1.5s infinite; }
+        .dot-red    { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+
+        .sync-spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(234, 179, 8, 0.3);
+            border-top-color: #facc15;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+
+        .sync-status-text {
+            flex: 1;
+        }
+
+        .retry-btn {
+            background: none;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            border-radius: 6px;
+            color: #f87171;
+            font-family: 'Outfit', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-height: 28px;
+        }
+
+        .retry-btn:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        /* Action links */
+        .repo-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .action-link {
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: none;
+            color: var(--primary-light);
+            transition: color 0.2s;
+            min-height: 44px;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .action-link:hover {
+            color: var(--secondary);
+        }
+
+        .action-link-settings {
+            color: var(--text-tertiary);
+        }
+
+        .action-link-settings:hover {
+            color: var(--text-secondary);
+        }
+
+        /* ===== EMPTY STATE ===== */
+        .empty-state {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 80px 40px;
+            text-align: center;
+        }
+
+        .empty-state.visible {
+            display: flex;
+            opacity: 0;
+            animation: fadeInUp 0.6s 0.2s ease forwards;
+        }
+
+        .empty-art {
+            font-size: 80px;
+            margin-bottom: 24px;
+            filter: grayscale(0.4);
+        }
+
+        .empty-heading {
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+        }
+
+        .empty-sub {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+            max-width: 360px;
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 900px) {
+            .repo-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .topnav {
+                padding: 0 16px;
+            }
+
+            .nav-links {
+                display: none;
+            }
+
+            .hamburger {
+                display: inline-flex;
+            }
+
+            .mobile-nav-menu .nav-link {
+                font-size: 15px;
+                padding: 12px 16px;
+            }
+
+            .page-content {
+                padding: 24px 16px 80px;
+            }
+
+            .hero-title {
+                font-size: 30px;
+            }
+
+            .hero-top {
+                flex-direction: column;
+                gap: 16px;
+            }
+
+            .add-repo-btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .hero-title {
+                font-size: 26px;
+            }
+
+            .repo-name {
+                font-size: 16px;
+            }
+
+            .stats-row {
+                gap: 10px;
+            }
+
+            .stat-pill {
+                font-size: 12px;
+                padding: 8px 14px;
+            }
+        }
+    /* content-link-style */
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo) {
+            color: #06B6D4;
+            text-decoration: underline;
+            text-decoration-color: rgba(6, 182, 212, 0.4);
+            text-underline-offset: 3px;
+            transition: color 0.2s, text-decoration-color 0.2s;
+        }
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo):hover {
+            color: #A78BFA;
+            text-decoration-color: rgba(167, 139, 250, 0.6);
+        }
+</style>
+</head>
+<body>
+    <div class="gradient-bg">
+        <div class="gradient-orb orb-1"></div>
+        <div class="gradient-orb orb-2"></div>
+        <div class="gradient-orb orb-3"></div>
+    </div>
+
+    <!-- ===== TOP NAV ===== -->
+    <nav class="glass-card topnav">
+        <div class="topnav-inner">
+            <a href="dashboard.html" class="nav-logo">
+                <div class="logo-icon">CW</div>
+                <span class="logo-text">Code Wiki</span>
+            </a>
+
+            <div class="nav-links">
+                <a href="dashboard.html" class="nav-link active">Repositories</a>
+                <a href="#" class="nav-link">Settings</a>
+                <a href="getting-started.html" class="nav-link">Docs</a>
+            </div>
+
+            <div class="nav-right">
+                <div class="user-menu">
+                    <div class="user-avatar">RJ</div>
+                    <span class="user-name">ranjit</span>
+                    <span class="dropdown-arrow">▾</span>
+                </div>
+                <button class="hamburger" id="hamburgerBtn" aria-label="Open navigation menu">☰</button>
+            </div>
+        </div>
+
+        <!-- Mobile nav -->
+        <div class="mobile-nav-menu" id="mobileMenu">
+            <a href="dashboard.html" class="nav-link active">Repositories</a>
+            <a href="#" class="nav-link">Settings</a>
+            <a href="getting-started.html" class="nav-link">Docs</a>
+        </div>
+    </nav>
+
+    <!-- ===== PAGE CONTENT ===== -->
+    <main class="page-content">
+
+        <!-- ===== POPULATED STATE ===== -->
+        <div id="populatedState">
+            <div class="hero">
+                <div class="hero-top">
+                    <h1 class="hero-title">Your Repositories</h1>
+                    <a href="submit.html" class="add-repo-btn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Add Repository
+                    </a>
+                </div>
+                <div class="stats-row">
+                    <div class="stat-pill">
+                        <span class="stat-pill-num">3</span> repos
+                    </div>
+                    <div class="stat-pill">
+                        <span class="stat-pill-num">2</span> synced
+                    </div>
+                    <div class="stat-pill">
+                        <span class="stat-pill-num">1</span> pending
+                    </div>
+                </div>
+            </div>
+
+            <div class="repo-grid">
+
+                <!-- Repo 1: myapp — Synced -->
+                <div class="repo-card">
+                    <div class="repo-header">
+                        <span class="repo-name">myapp</span>
+                        <span class="visibility-badge badge-public">Public</span>
+                    </div>
+                    <p class="repo-description">Full-stack web application with authentication, REST API, and data visualization dashboard.</p>
+                    <div class="lang-badges">
+                        <span class="lang-badge"><span class="lang-dot dot-ts"></span>TypeScript</span>
+                        <span class="lang-badge"><span class="lang-dot dot-py"></span>Python</span>
+                    </div>
+                    <div class="repo-stats">
+                        <div><span>8</span> modules</div>
+                        <div><span>142</span> functions</div>
+                        <div><span>23</span> pages</div>
+                    </div>
+                    <div class="sync-status sync-synced">
+                        <span class="sync-dot dot-green"></span>
+                        <span class="sync-status-text">Synced &mdash; Last analyzed 2h ago &middot; Commit abc1234</span>
+                    </div>
+                    <div class="repo-actions">
+                        <a href="home.html" class="action-link">View Wiki &rarr;</a>
+                        <a href="#" class="action-link action-link-settings">Settings</a>
+                    </div>
+                </div>
+
+                <!-- Repo 2: backend-api — Syncing -->
+                <div class="repo-card">
+                    <div class="repo-header">
+                        <span class="repo-name">backend-api</span>
+                        <span class="visibility-badge badge-private">Private</span>
+                    </div>
+                    <p class="repo-description">High-performance REST API backend service with gRPC endpoints and Redis caching.</p>
+                    <div class="lang-badges">
+                        <span class="lang-badge"><span class="lang-dot dot-go"></span>Go</span>
+                    </div>
+                    <div class="repo-stats">
+                        <div><span>12</span> modules</div>
+                        <div><span>89</span> functions</div>
+                        <div><span>18</span> pages</div>
+                    </div>
+                    <div class="sync-status sync-syncing">
+                        <span class="sync-spinner"></span>
+                        <span class="sync-status-text">Syncing &mdash; Triggered by push to main</span>
+                    </div>
+                    <div class="repo-actions">
+                        <a href="home.html" class="action-link">View Wiki &rarr;</a>
+                        <a href="#" class="action-link action-link-settings">Settings</a>
+                    </div>
+                </div>
+
+                <!-- Repo 3: data-pipeline — Failed -->
+                <div class="repo-card">
+                    <div class="repo-header">
+                        <span class="repo-name">data-pipeline</span>
+                        <span class="visibility-badge badge-private">Private</span>
+                    </div>
+                    <p class="repo-description">ETL pipeline for ingesting and transforming large-scale datasets with Apache Airflow.</p>
+                    <div class="lang-badges">
+                        <span class="lang-badge"><span class="lang-dot dot-py"></span>Python</span>
+                    </div>
+                    <div class="repo-stats">
+                        <div><span>5</span> modules</div>
+                        <div><span>47</span> functions</div>
+                        <div><span>9</span> pages</div>
+                    </div>
+                    <div class="sync-status sync-failed" id="pipelineStatus">
+                        <span class="sync-dot dot-red"></span>
+                        <span class="sync-status-text">Analysis failed</span>
+                        <button class="retry-btn" id="retryBtn">Retry</button>
+                    </div>
+                    <div class="repo-actions">
+                        <a href="home.html" class="action-link">View Wiki &rarr;</a>
+                        <a href="#" class="action-link action-link-settings">Settings</a>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ===== EMPTY STATE ===== -->
+        <!--
+             This section is visible when there are 0 repos.
+             Toggle by double-clicking anywhere on the page (demo mode).
+        -->
+        <div id="emptyState" class="glass-card empty-state">
+            <div class="empty-art">&#128194;</div>
+            <h2 class="empty-heading">No repositories yet</h2>
+            <p class="empty-sub">Add your first repository to start auto-generating beautiful documentation.</p>
+            <a href="submit.html" class="add-repo-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Add your first repository
+            </a>
+        </div>
+
+    </main>
+
+    <script>
+        // Hamburger toggle
+        document.getElementById('hamburgerBtn').addEventListener('click', function() {
+            document.getElementById('mobileMenu').classList.toggle('open');
+        });
+
+        // Retry button: show syncing state using DOM methods (no innerHTML)
+        document.getElementById('retryBtn').addEventListener('click', function() {
+            var statusEl = document.getElementById('pipelineStatus');
+
+            // Remove current children
+            while (statusEl.firstChild) {
+                statusEl.removeChild(statusEl.firstChild);
+            }
+
+            // Switch class to syncing
+            statusEl.className = 'sync-status sync-syncing';
+
+            // Build spinner element
+            var spinner = document.createElement('span');
+            spinner.className = 'sync-spinner';
+
+            // Build text element
+            var textEl = document.createElement('span');
+            textEl.className = 'sync-status-text';
+            textEl.textContent = 'Syncing \u2014 Retry triggered\u2026';
+
+            statusEl.appendChild(spinner);
+            statusEl.appendChild(textEl);
+        });
+
+        // Demo: double-click anywhere to toggle empty state
+        var showEmpty = false;
+        document.addEventListener('dblclick', function() {
+            showEmpty = !showEmpty;
+            document.getElementById('populatedState').style.display = showEmpty ? 'none' : 'block';
+            var emptyEl = document.getElementById('emptyState');
+            if (showEmpty) {
+                emptyEl.classList.add('visible');
+            } else {
+                emptyEl.classList.remove('visible');
+            }
+        });
+    </script>
+</body>
+</html>

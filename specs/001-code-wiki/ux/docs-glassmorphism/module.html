@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Module - Code Wiki</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #8B5CF6;
+            --primary-light: #A78BFA;
+            --secondary: #06B6D4;
+            --accent: #EC4899;
+            --bg-dark: #0A0A0F;
+            --bg-darker: #050508;
+            --glass-bg: rgba(15, 15, 25, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #F9FAFB;
+            --text-secondary: #D1D5DB;
+            --text-tertiary: #9CA3AF;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-darker);
+            color: var(--text-primary);
+            line-height: 1.7;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Animated Gradient Background */
+        .gradient-bg {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background: var(--bg-dark);
+            overflow: hidden;
+        }
+
+        .gradient-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.4;
+            animation: float 20s ease-in-out infinite;
+        }
+
+        .orb-1 {
+            width: 600px;
+            height: 600px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            top: -200px;
+            left: -200px;
+            animation-delay: 0s;
+        }
+
+        .orb-2 {
+            width: 500px;
+            height: 500px;
+            background: linear-gradient(135deg, var(--accent), var(--primary));
+            bottom: -150px;
+            right: -150px;
+            animation-delay: -10s;
+        }
+
+        .orb-3 {
+            width: 400px;
+            height: 400px;
+            background: linear-gradient(135deg, var(--secondary), var(--primary-light));
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation-delay: -5s;
+        }
+
+        @keyframes float {
+            0%, 100% {
+                transform: translate(0, 0) scale(1);
+            }
+            33% {
+                transform: translate(50px, -50px) scale(1.1);
+            }
+            66% {
+                transform: translate(-30px, 30px) scale(0.9);
+            }
+        }
+
+        /* Layout */
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 300px 1fr 280px;
+            max-width: 1800px;
+            margin: 0 auto;
+            min-height: 100vh;
+            gap: 24px;
+            padding: 24px;
+        }
+
+        /* Glass Card Base */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        /* Left Sidebar */
+        .sidebar-left {
+            position: sticky;
+            top: 24px;
+            height: calc(100vh - 48px);
+            overflow-y: auto;
+            padding: 32px;
+        }
+
+        .sidebar-left::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .sidebar-left::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+        }
+
+        .sidebar-left::-webkit-scrollbar-thumb {
+            background: var(--primary);
+            border-radius: 3px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 40px;
+            opacity: 0;
+            animation: fadeInUp 0.6s ease forwards;
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 18px;
+            box-shadow: 0 0 30px rgba(139, 92, 246, 0.5);
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .nav-section {
+            margin-bottom: 32px;
+            opacity: 0;
+            animation: fadeInUp 0.6s ease forwards;
+        }
+
+        .nav-section:nth-child(2) { animation-delay: 0.1s; }
+        .nav-section:nth-child(3) { animation-delay: 0.2s; }
+        .nav-section:nth-child(4) { animation-delay: 0.3s; }
+        .nav-section:nth-child(5) { animation-delay: 0.4s; }
+
+        .nav-section-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-tertiary);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.3s;
+        }
+
+        .nav-section-title:hover {
+            color: var(--primary-light);
+        }
+
+        .nav-items {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 15px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .nav-item::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .nav-item span {
+            position: relative;
+            z-index: 1;
+        }
+
+        .nav-item:hover {
+            color: var(--text-primary);
+            transform: translateX(4px);
+        }
+
+        .nav-item:hover::before {
+            opacity: 0.1;
+        }
+
+        .nav-item.active {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(6, 182, 212, 0.2));
+            color: var(--text-primary);
+            font-weight: 600;
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+        }
+
+        .nav-item.active::before {
+            opacity: 0.15;
+        }
+
+        /* Main Content */
+        .main-content {
+            padding: 48px 64px;
+            max-width: 900px;
+            opacity: 0;
+            animation: fadeInUp 0.8s 0.2s ease forwards;
+        }
+
+        .breadcrumbs {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            margin-bottom: 32px;
+            color: var(--text-tertiary);
+        }
+
+        .breadcrumb-link {
+            color: var(--text-tertiary);
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+
+        .breadcrumb-link:hover {
+            color: var(--primary-light);
+        }
+
+        .page-title {
+            font-size: 64px;
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 24px;
+            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.02em;
+        }
+
+        /* Sync metadata row */
+        .sync-meta-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px 20px;
+            margin-bottom: 48px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            font-size: 14px;
+            color: var(--text-tertiary);
+            flex-wrap: wrap;
+        }
+
+        .sync-dot {
+            width: 8px;
+            height: 8px;
+            background: #22c55e;
+            border-radius: 50%;
+            box-shadow: 0 0 6px #22c55e;
+            flex-shrink: 0;
+        }
+
+        .sync-meta-row .sync-label {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .sync-meta-row .sync-commit {
+            font-family: 'Fira Code', monospace;
+            font-size: 13px;
+            background: rgba(139, 92, 246, 0.2);
+            padding: 3px 8px;
+            border-radius: 6px;
+            color: var(--primary-light);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        h2 {
+            font-size: 36px;
+            font-weight: 700;
+            margin: 64px 0 24px;
+            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            scroll-margin-top: 32px;
+        }
+
+        h3 {
+            font-size: 28px;
+            font-weight: 600;
+            margin: 48px 0 20px;
+            color: var(--text-primary);
+            scroll-margin-top: 32px;
+        }
+
+        h4 {
+            font-size: 20px;
+            font-weight: 600;
+            margin: 32px 0 16px;
+            color: var(--text-secondary);
+            scroll-margin-top: 32px;
+        }
+
+        p {
+            margin-bottom: 24px;
+            color: var(--text-secondary);
+            font-size: 16px;
+        }
+
+        code {
+            font-family: 'Fira Code', monospace;
+            font-size: 14px;
+            background: rgba(139, 92, 246, 0.2);
+            padding: 4px 8px;
+            border-radius: 6px;
+            color: var(--primary-light);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        pre {
+            background: rgba(5, 5, 8, 0.8);
+            padding: 28px;
+            border-radius: 16px;
+            overflow-x: auto;
+            margin: 32px 0;
+            font-family: 'Fira Code', monospace;
+            font-size: 14px;
+            line-height: 1.8;
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        pre code {
+            background: none;
+            border: none;
+            padding: 0;
+            color: #E5E7EB;
+        }
+
+        ul, ol {
+            margin-bottom: 24px;
+            padding-left: 28px;
+        }
+
+        li {
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* Content Links */
+        .main-content a:not(.breadcrumb-link) {
+            color: var(--secondary);
+            text-decoration: none;
+            position: relative;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 500;
+        }
+
+        .main-content a:not(.breadcrumb-link)::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            bottom: -2px;
+            width: 100%;
+            height: 1px;
+            background: linear-gradient(90deg, var(--primary-light), var(--secondary));
+            transform: scaleX(0);
+            transform-origin: right;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .main-content a:not(.breadcrumb-link):hover::after {
+            transform: scaleX(1);
+            transform-origin: left;
+        }
+
+        .main-content a:not(.breadcrumb-link):hover {
+            filter: brightness(1.2);
+        }
+
+        .info-box {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(6, 182, 212, 0.15));
+            border-left: 4px solid var(--primary);
+            padding: 24px;
+            border-radius: 12px;
+            margin: 32px 0;
+            backdrop-filter: blur(10px);
+        }
+
+        .info-box p {
+            margin: 0;
+            color: var(--text-primary);
+        }
+
+        /* File Location card */
+        .file-tree-card {
+            background: rgba(5, 5, 8, 0.8);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 28px;
+            margin: 24px 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .file-tree-card pre {
+            margin: 0;
+            padding: 0;
+            background: none;
+            border: none;
+            box-shadow: none;
+        }
+
+        /* Key Components grid */
+        .components-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin: 24px 0;
+        }
+
+        .component-card {
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            transition: all 0.3s;
+        }
+
+        .component-card:hover {
+            background: rgba(139, 92, 246, 0.1);
+            border-color: rgba(139, 92, 246, 0.5);
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(139, 92, 246, 0.2);
+        }
+
+        .component-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        .badge-class {
+            background: rgba(139, 92, 246, 0.25);
+            border: 1px solid rgba(139, 92, 246, 0.4);
+            color: var(--primary-light);
+        }
+
+        .badge-function {
+            background: rgba(6, 182, 212, 0.2);
+            border: 1px solid rgba(6, 182, 212, 0.35);
+            color: var(--secondary);
+        }
+
+        .component-name {
+            font-family: 'Fira Code', monospace;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .component-description {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* Dependencies table */
+        .deps-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 24px 0;
+            font-size: 14px;
+        }
+
+        .deps-table th {
+            text-align: left;
+            padding: 12px 16px;
+            background: rgba(139, 92, 246, 0.15);
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        .deps-table th:first-child { border-radius: 10px 0 0 0; }
+        .deps-table th:last-child  { border-radius: 0 10px 0 0; }
+
+        .deps-table td {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--glass-border);
+            color: var(--text-secondary);
+            vertical-align: middle;
+        }
+
+        .deps-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .deps-table tr:hover td {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .deps-table-wrap {
+            background: rgba(5, 5, 8, 0.6);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            overflow: hidden;
+            margin: 24px 0;
+        }
+
+        .badge-internal {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            background: rgba(6, 182, 212, 0.15);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            color: var(--secondary);
+        }
+
+        .badge-external {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            color: #fbbf24;
+        }
+
+        /* Right Sidebar - TOC */
+        .sidebar-right {
+            position: sticky;
+            top: 24px;
+            height: calc(100vh - 48px);
+            overflow-y: auto;
+            padding: 32px;
+            opacity: 0;
+            animation: fadeInUp 0.8s 0.4s ease forwards;
+        }
+
+        .sidebar-right::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .sidebar-right::-webkit-scrollbar-thumb {
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        .toc-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-tertiary);
+            margin-bottom: 24px;
+        }
+
+        .toc-items {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toc-item {
+            padding: 8px 0 8px 16px;
+            font-size: 14px;
+            color: var(--text-tertiary);
+            text-decoration: none;
+            transition: all 0.3s;
+            border-left: 2px solid transparent;
+            position: relative;
+        }
+
+        .toc-item::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 2px;
+            height: 0;
+            background: linear-gradient(180deg, var(--primary), var(--secondary));
+            transition: height 0.3s;
+        }
+
+        .toc-item:hover {
+            color: var(--text-primary);
+            padding-left: 20px;
+        }
+
+        .toc-item.active {
+            color: var(--primary-light);
+            font-weight: 600;
+        }
+
+        .toc-item.active::before {
+            height: 100%;
+        }
+
+        .toc-item.level-3 {
+            padding-left: 28px;
+            font-size: 13px;
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 1400px) {
+            .docs-layout {
+                grid-template-columns: 280px 1fr;
+            }
+            .sidebar-right {
+                display: none;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .docs-layout {
+                grid-template-columns: 1fr;
+                padding: 16px;
+            }
+            .sidebar-left {
+                display: none;
+            }
+            .main-content {
+                padding: 32px 24px;
+            }
+            .page-title {
+                font-size: 42px;
+            }
+            .components-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ─── Mobile Nav Overlay ─────────────────────────────── */
+        .nav-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 99;
+        }
+        .nav-overlay.open { display: block; }
+
+        /* Mobile top bar */
+        .mobile-topbar {
+            display: none;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(10, 10, 15, 0.9);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 14px 20px;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .mobile-topbar .mobile-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            text-decoration: none;
+        }
+        .mobile-topbar .mobile-logo-icon {
+            width: 30px;
+            height: 30px;
+            background: linear-gradient(135deg, #8B5CF6, #06B6D4);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 800;
+            color: #fff;
+        }
+        .hamburger-btn {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 8px;
+            padding: 8px 10px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: center;
+            justify-content: center;
+        }
+        .hamburger-btn span {
+            display: block;
+            width: 20px;
+            height: 2px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            transition: all 0.3s;
+        }
+        .hamburger-btn.open span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+        .hamburger-btn.open span:nth-child(2) { opacity: 0; }
+        .hamburger-btn.open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+        /* Sidebar close button (inside sidebar, mobile only) */
+        .sidebar-close-btn {
+            display: none;
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 8px;
+            width: 32px;
+            height: 32px;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: #9CA3AF;
+            font-size: 18px;
+            line-height: 1;
+            transition: all 0.2s;
+        }
+        .sidebar-close-btn:hover { color: #fff; background: rgba(255,255,255,0.15); }
+
+        @media (max-width: 900px) {
+            /* Show mobile topbar */
+            .mobile-topbar { display: flex; }
+
+            /* Show close button inside sidebar */
+            .sidebar-close-btn { display: flex; }
+
+            /* Hide sidebar by default — slide in from left */
+            .sidebar-left {
+                position: fixed !important;
+                top: 0 !important;
+                left: -320px !important;
+                height: 100vh !important;
+                width: 300px !important;
+                z-index: 200 !important;
+                transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+                border-radius: 0 20px 20px 0 !important;
+                overflow-y: auto !important;
+                padding-top: 20px !important;
+            }
+            .sidebar-left.open {
+                left: 0 !important;
+            }
+
+            /* Also hide right TOC sidebar on mobile if present */
+            .sidebar-right {
+                display: none !important;
+            }
+
+            /* Main content takes full width */
+            .docs-layout, .layout, .page-layout, .main-layout {
+                grid-template-columns: 1fr !important;
+                display: block !important;
+            }
+            .main-content, .content-area, .content, main {
+                padding: 20px 16px !important;
+                max-width: 100% !important;
+            }
+        }
+    /* content-link-style */
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo) {
+            color: #06B6D4;
+            text-decoration: underline;
+            text-decoration-color: rgba(6, 182, 212, 0.4);
+            text-underline-offset: 3px;
+            transition: color 0.2s, text-decoration-color 0.2s;
+        }
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo):hover {
+            color: #A78BFA;
+            text-decoration-color: rgba(167, 139, 250, 0.6);
+        }
+</style>
+</head>
+<body>
+    <div class="mobile-topbar">
+        <a href="home.html" class="mobile-logo">
+            <div class="mobile-logo-icon">CW</div>
+            Code Wiki
+        </a>
+        <button class="hamburger-btn" id="hamburgerBtn" aria-label="Open navigation menu" onclick="toggleNav()">
+            <span></span><span></span><span></span>
+        </button>
+    </div>
+    <div class="nav-overlay" id="navOverlay" onclick="closeNav()"></div>
+
+    <div class="gradient-bg">
+        <div class="gradient-orb orb-1"></div>
+        <div class="gradient-orb orb-2"></div>
+        <div class="gradient-orb orb-3"></div>
+    </div>
+
+    <div class="docs-layout">
+        <nav class="sidebar-left glass-card">
+            <button class="sidebar-close-btn" onclick="closeNav()" aria-label="Close navigation">&#x2715;</button>
+            <a href="home.html" class="logo">
+                <div class="logo-icon">CW</div>
+                <div class="logo-text">Code Wiki</div>
+            </a>
+
+            <div class="nav-section">
+                <div class="nav-section-title">Getting Started</div>
+                <div class="nav-items">
+                    <a href="getting-started.html" class="nav-item"><span>Overview</span></a>
+                    <a href="getting-started.html" class="nav-item"><span>Quick Start</span></a>
+                    <a href="getting-started.html" class="nav-item"><span>Installation</span></a>
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section-title">Core Concepts</div>
+                <div class="nav-items">
+                    <a href="module.html" class="nav-item active"><span>Repository Analysis</span></a>
+                    <a href="module.html" class="nav-item"><span>Module Detection</span></a>
+                    <a href="module.html" class="nav-item"><span>Code Parsing</span></a>
+                    <a href="module.html" class="nav-item"><span>Relationship Mapping</span></a>
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section-title">Features</div>
+                <div class="nav-items">
+                    <a href="chat.html" class="nav-item"><span>AI Chat Assistant</span></a>
+                    <a href="diagrams.html" class="nav-item"><span>Visual Diagrams</span></a>
+                    <a href="search.html" class="nav-item"><span>Search</span></a>
+                    <a href="module.html" class="nav-item"><span>Auto-Updates</span></a>
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section-title">API Reference</div>
+                <div class="nav-items">
+                    <a href="api-reference.html" class="nav-item"><span>Function Index</span></a>
+                    <a href="api-reference.html" class="nav-item"><span>REST API</span></a>
+                    <a href="glossary.html" class="nav-item"><span>Glossary</span></a>
+                </div>
+            </div>
+        </nav>
+
+        <main class="main-content glass-card">
+            <nav class="breadcrumbs" style="margin-bottom:12px;">
+                <a href="dashboard.html" class="breadcrumb-link">&#8592; dashboard</a>
+                <span>/</span>
+                <a href="home.html" class="breadcrumb-link">myapp wiki</a>
+            </nav>
+
+            <nav class="breadcrumbs">
+                <a href="home.html" class="breadcrumb-link">myapp-wiki</a>
+                <span>/</span>
+                <a href="home.html" class="breadcrumb-link">Modules</a>
+                <span>/</span>
+                <span>Authentication</span>
+            </nav>
+
+            <h1 class="page-title">Authentication Module</h1>
+
+            <!-- Sync metadata row replacing the author Follow button -->
+            <div class="sync-meta-row">
+                <span class="sync-dot"></span>
+                <span class="sync-label">Last synced:</span>
+                <span class="sync-commit">f6c11de</span>
+                <span>&middot; 2 hours ago</span>
+                <span style="color:var(--text-tertiary);">&middot; Auto-generated from source</span>
+            </div>
+
+            <p>The Authentication module handles all aspects of user identity and access within myapp. It provides JWT-based session management, password hashing, token lifecycle, and HTTP middleware for protecting routes. The module is designed for high security and low-latency credential verification.</p>
+
+            <div class="info-box">
+                <p><strong>Auto-generated:</strong> This page is generated directly from source code in <code>src/auth/</code>. All function signatures, file sizes, and dependency data are extracted at analysis time and stay in sync with every commit.</p>
+            </div>
+
+            <!-- ── FILE LOCATION ─────────────────────────────── -->
+            <h2 id="file-location">File Location</h2>
+            <div class="file-tree-card">
+                <pre><code>src/auth/
+  ├── login.py         (245 lines)
+  ├── session.py       (189 lines)
+  ├── tokens.py        (312 lines)
+  └── middleware.py    (201 lines)</code></pre>
+            </div>
+
+            <!-- ── KEY COMPONENTS ────────────────────────────── -->
+            <h2 id="key-components">Key Components</h2>
+            <p>Six public symbols are exported from this module. Click any name to view its full documentation.</p>
+
+            <div class="components-grid">
+                <div class="component-card">
+                    <span class="component-badge badge-class">CLASS</span>
+                    <a href="function.html" class="component-name">AuthenticationMiddleware</a>
+                    <p class="component-description">Express-compatible middleware that validates incoming JWT tokens and attaches the decoded user context to the request object.</p>
+                </div>
+
+                <div class="component-card">
+                    <span class="component-badge badge-function">FUNCTION</span>
+                    <a href="function.html" class="component-name">authenticate_user()</a>
+                    <p class="component-description">Primary entry point — validates credentials against the database and returns a signed JWT on success.</p>
+                </div>
+
+                <div class="component-card">
+                    <span class="component-badge badge-function">FUNCTION</span>
+                    <a href="function.html" class="component-name">create_session()</a>
+                    <p class="component-description">Creates a new server-side session record in Redis and returns the session identifier to the caller.</p>
+                </div>
+
+                <div class="component-card">
+                    <span class="component-badge badge-function">FUNCTION</span>
+                    <a href="function.html" class="component-name">verify_token()</a>
+                    <p class="component-description">Cryptographically verifies a JWT signature and expiry, returning the decoded payload or raising an error.</p>
+                </div>
+
+                <div class="component-card">
+                    <span class="component-badge badge-function">FUNCTION</span>
+                    <a href="function.html" class="component-name">refresh_token()</a>
+                    <p class="component-description">Issues a new access token from a valid refresh token without requiring the user to re-authenticate.</p>
+                </div>
+
+                <div class="component-card">
+                    <span class="component-badge badge-function">FUNCTION</span>
+                    <a href="function.html" class="component-name">logout()</a>
+                    <p class="component-description">Invalidates the current session in Redis and marks the JWT as revoked in the token blocklist.</p>
+                </div>
+            </div>
+
+            <!-- ── DEPENDENCIES ──────────────────────────────── -->
+            <h2 id="dependencies">Dependencies</h2>
+            <p>This module relies on two internal project modules and two external libraries. External dependencies are highlighted — they represent third-party code outside the repository (FR-013).</p>
+
+            <div class="deps-table-wrap">
+                <table class="deps-table">
+                    <thead>
+                        <tr>
+                            <th>Module</th>
+                            <th>Type</th>
+                            <th>Usage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="font-weight:600;color:var(--text-primary);">Database Layer</td>
+                            <td><span class="badge-internal">Internal</span></td>
+                            <td>User credential lookup</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight:600;color:var(--text-primary);">bcrypt <span style="font-size:12px;color:var(--text-tertiary);">v4.0.1</span></td>
+                            <td><span class="badge-external">External</span></td>
+                            <td>Password hashing</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight:600;color:var(--text-primary);">PyJWT <span style="font-size:12px;color:var(--text-tertiary);">v2.8.0</span></td>
+                            <td><span class="badge-external">External</span></td>
+                            <td>Token generation</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight:600;color:var(--text-primary);">Redis Cache</td>
+                            <td><span class="badge-internal">Internal</span></td>
+                            <td>Session storage</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- ── HOW IT WORKS ──────────────────────────────── -->
+            <h2 id="how-it-works">How It Works</h2>
+            <p>The authentication flow is split into three coordinated phases: credential verification, session creation, and token issuance. Each phase is isolated in its own file to keep responsibilities clear and unit-testable.</p>
+
+            <h3 id="login-flow">Login Flow</h3>
+            <p><code>authenticate_user()</code> in <code>login.py</code> receives a username and plaintext password. It fetches the stored bcrypt hash from the Database Layer, calls <code>bcrypt.checkpw()</code> to verify the password, then calls <code>create_session()</code> and <code>tokens.py</code> to produce a signed JWT and a server-side session record.</p>
+
+            <pre><code># Simplified login flow (login.py)
+def authenticate_user(username: str, password: str) -> AuthResult:
+    user = db.find_user(username)
+    if not bcrypt.checkpw(password.encode(), user.password_hash):
+        raise InvalidCredentialsError()
+    session_id = create_session(user.id)
+    token = generate_token(user, session_id)
+    return AuthResult(token=token, session_id=session_id)</code></pre>
+
+            <h3 id="middleware-flow">Middleware Flow</h3>
+            <p><code>AuthenticationMiddleware</code> in <code>middleware.py</code> intercepts every protected HTTP request. It extracts the Bearer token from the Authorization header, calls <code>verify_token()</code> to validate the signature and expiry, then checks the Redis session store to confirm the session is still active before forwarding the request.</p>
+
+            <!-- ── CONFIGURATION ──────────────────────────────── -->
+            <h2 id="configuration">Configuration</h2>
+            <p>The authentication module reads the following environment variables. These should be set in your deployment environment or <code>.env</code> file:</p>
+
+            <pre><code># JWT settings
+JWT_SECRET=your-256-bit-secret-here
+JWT_ACCESS_EXPIRY=900         # 15 minutes in seconds
+JWT_REFRESH_EXPIRY=604800     # 7 days in seconds
+
+# Bcrypt cost factor (12–14 recommended for production)
+BCRYPT_ROUNDS=12
+
+# Redis session store
+REDIS_URL=redis://localhost:6379
+SESSION_PREFIX=auth:session:</code></pre>
+
+            <!-- ── NEXT STEPS ──────────────────────────────────── -->
+            <h2 id="next-steps">Next Steps</h2>
+            <p>Explore related areas of the codebase:</p>
+            <ul>
+                <li><a href="function.html">authenticate_user()</a> &mdash; Full function documentation with parameter types</li>
+                <li><a href="function.html">AuthenticationMiddleware</a> &mdash; Middleware class API reference</li>
+                <li><a href="module.html">Database Layer</a> &mdash; How user records are stored and queried</li>
+                <li><a href="chat.html">Ask the AI assistant</a> &mdash; "How does token refresh work in myapp?"</li>
+            </ul>
+        </main>
+
+        <aside class="sidebar-right glass-card">
+            <div class="toc-title">On this page</div>
+            <nav class="toc-items">
+                <a href="#overview" class="toc-item active">Overview</a>
+                <a href="#file-location" class="toc-item">File Location</a>
+                <a href="#key-components" class="toc-item">Key Components</a>
+                <a href="#dependencies" class="toc-item">Dependencies</a>
+                <a href="#how-it-works" class="toc-item">How It Works</a>
+                <a href="#login-flow" class="toc-item level-3">Login Flow</a>
+                <a href="#middleware-flow" class="toc-item level-3">Middleware Flow</a>
+                <a href="#configuration" class="toc-item">Configuration</a>
+                <a href="#next-steps" class="toc-item">Next Steps</a>
+            </nav>
+        </aside>
+    </div>
+
+    <script>
+        // Scroll Spy
+        const observerOptions = {
+            rootMargin: '-100px 0px -66% 0px',
+            threshold: 0
+        };
+
+        const headings = document.querySelectorAll('h2[id], h3[id], h4[id]');
+        const tocItems = document.querySelectorAll('.toc-item');
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const id = entry.target.getAttribute('id');
+                    tocItems.forEach(item => {
+                        item.classList.remove('active');
+                        if (item.getAttribute('href') === `#${id}`) {
+                            item.classList.add('active');
+                        }
+                    });
+                }
+            });
+        }, observerOptions);
+
+        headings.forEach(heading => observer.observe(heading));
+
+        // Smooth Scrolling
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+    </script>
+    <script>
+        function toggleNav() {
+            const sidebar = document.querySelector('.sidebar-left');
+            const overlay = document.getElementById('navOverlay');
+            const btn = document.getElementById('hamburgerBtn');
+            const isOpen = sidebar.classList.contains('open');
+            if (isOpen) {
+                closeNav();
+            } else {
+                sidebar.classList.add('open');
+                overlay.classList.add('open');
+                btn.classList.add('open');
+                document.body.style.overflow = 'hidden';
+            }
+        }
+        function closeNav() {
+            const sidebar = document.querySelector('.sidebar-left');
+            const overlay = document.getElementById('navOverlay');
+            const btn = document.getElementById('hamburgerBtn');
+            sidebar.classList.remove('open');
+            overlay.classList.remove('open');
+            if (btn) btn.classList.remove('open');
+            document.body.style.overflow = '';
+        }
+        // Close on nav link click (mobile UX)
+        document.querySelectorAll('.sidebar-left a').forEach(link => {
+            link.addEventListener('click', () => {
+                if (window.innerWidth <= 900) closeNav();
+            });
+        });
+    </script>
+</body>
+</html>

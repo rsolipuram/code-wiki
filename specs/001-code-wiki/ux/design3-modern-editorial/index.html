@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>myapp — Code Publication</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;700;900&family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* Editorial Color System */
+            --black: #0A0A0A;
+            --white: #FFFFFF;
+            --gray-100: #F5F5F5;
+            --gray-200: #E5E5E5;
+            --gray-800: #2A2A2A;
+            --accent: #FF4D00; /* Bold orange */
+            --accent-dark: #CC3D00;
+
+            /* Typography */
+            --font-display: 'Fraunces', serif;
+            --font-body: 'Manrope', sans-serif;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--white);
+            color: var(--black);
+            line-height: 1.6;
+        }
+
+        /* Asymmetric Header */
+        .header {
+            padding: 4rem 2rem 2rem;
+            border-bottom: 4px solid var(--black);
+            position: relative;
+        }
+
+        .header-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 4rem;
+            align-items: end;
+        }
+
+        .site-title {
+            font-family: var(--font-body);
+            font-size: 14px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            margin-bottom: 2rem;
+            color: var(--accent);
+        }
+
+        h1 {
+            font-family: var(--font-display);
+            font-size: clamp(48px, 8vw, 120px);
+            font-weight: 900;
+            line-height: 0.9;
+            margin-bottom: 1.5rem;
+            letter-spacing: -0.02em;
+        }
+
+        .header-description {
+            font-size: 24px;
+            line-height: 1.4;
+            color: var(--gray-800);
+            max-width: 600px;
+        }
+
+        .header-meta {
+            border-left: 4px solid var(--accent);
+            padding-left: 1.5rem;
+        }
+
+        .meta-item {
+            margin-bottom: 1rem;
+        }
+
+        .meta-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 800;
+            color: var(--gray-800);
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .meta-value {
+            font-size: 32px;
+            font-weight: 800;
+            color: var(--accent);
+        }
+
+        /* Feature Grid - Asymmetric */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 4rem 2rem;
+        }
+
+        .section-label {
+            font-family: var(--font-display);
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 3rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .section-label::before {
+            content: '';
+            width: 40px;
+            height: 4px;
+            background: var(--accent);
+        }
+
+        /* Asymmetric Feature Grid */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 2rem;
+            margin-bottom: 4rem;
+        }
+
+        .feature-card {
+            background: var(--gray-100);
+            padding: 3rem;
+            text-decoration: none;
+            color: var(--black);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 0;
+            background: var(--accent);
+            transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .feature-card:hover::before {
+            height: 8px;
+        }
+
+        .feature-card:hover {
+            background: var(--black);
+            color: var(--white);
+            transform: translateY(-8px);
+        }
+
+        .feature-card:hover .feature-number {
+            color: var(--accent);
+        }
+
+        .feature-large {
+            grid-column: span 8;
+        }
+
+        .feature-small {
+            grid-column: span 4;
+        }
+
+        .feature-number {
+            font-family: var(--font-display);
+            font-size: 72px;
+            font-weight: 900;
+            line-height: 1;
+            color: var(--gray-200);
+            margin-bottom: 2rem;
+            transition: color 0.4s ease;
+        }
+
+        .feature-title {
+            font-family: var(--font-display);
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            line-height: 1.2;
+        }
+
+        .feature-description {
+            font-size: 16px;
+            line-height: 1.6;
+            opacity: 0.8;
+        }
+
+        /* Module Cards - Magazine Layout */
+        .module-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2rem;
+        }
+
+        .module-card {
+            background: white;
+            border: 2px solid var(--gray-200);
+            padding: 0;
+            text-decoration: none;
+            color: var(--black);
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+
+        .module-card:hover {
+            border-color: var(--accent);
+            transform: scale(1.02);
+        }
+
+        .module-header {
+            background: var(--gray-100);
+            padding: 2rem;
+            border-bottom: 2px solid var(--gray-200);
+        }
+
+        .module-number {
+            font-family: var(--font-body);
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.15em;
+            color: var(--accent);
+            margin-bottom: 1rem;
+        }
+
+        .module-title {
+            font-family: var(--font-display);
+            font-size: 28px;
+            font-weight: 700;
+            line-height: 1.2;
+            margin-bottom: 1rem;
+        }
+
+        .module-body {
+            padding: 2rem;
+        }
+
+        .module-description {
+            font-size: 15px;
+            line-height: 1.6;
+            color: var(--gray-800);
+            margin-bottom: 1.5rem;
+        }
+
+        .module-stats {
+            display: flex;
+            gap: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--gray-200);
+        }
+
+        .stat-item {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-value {
+            color: var(--accent);
+        }
+
+        /* Pull Quote Style */
+        .repository-highlight {
+            background: var(--black);
+            color: var(--white);
+            padding: 4rem;
+            margin: 4rem 0;
+            position: relative;
+        }
+
+        .highlight-quote {
+            font-family: var(--font-display);
+            font-size: 42px;
+            font-weight: 700;
+            line-height: 1.3;
+            max-width: 900px;
+        }
+
+        .highlight-quote::before {
+            content: '"';
+            font-size: 120px;
+            color: var(--accent);
+            position: absolute;
+            left: 2rem;
+            top: 2rem;
+            line-height: 1;
+        }
+
+        /* Footer */
+        .footer {
+            border-top: 4px solid var(--black);
+            padding: 3rem 2rem;
+            text-align: center;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 600;
+        }
+
+        /* Animations */
+        .feature-card,
+        .module-card {
+            animation: fadeInUp 0.6s ease forwards;
+            opacity: 0;
+        }
+
+        .feature-card:nth-child(1) { animation-delay: 0.1s; }
+        .feature-card:nth-child(2) { animation-delay: 0.2s; }
+        .feature-card:nth-child(3) { animation-delay: 0.3s; }
+
+        .module-card:nth-child(1) { animation-delay: 0.4s; }
+        .module-card:nth-child(2) { animation-delay: 0.5s; }
+        .module-card:nth-child(3) { animation-delay: 0.6s; }
+        .module-card:nth-child(4) { animation-delay: 0.7s; }
+        .module-card:nth-child(5) { animation-delay: 0.8s; }
+        .module-card:nth-child(6) { animation-delay: 0.9s; }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(40px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 1024px) {
+            .header-container {
+                grid-template-columns: 1fr;
+                gap: 2rem;
+            }
+
+            .header-meta {
+                border-left: none;
+                border-top: 4px solid var(--accent);
+                padding-left: 0;
+                padding-top: 1.5rem;
+            }
+
+            .feature-large,
+            .feature-small {
+                grid-column: span 12;
+            }
+
+            .module-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-container">
+            <div>
+                <div class="site-title">Code Publication</div>
+                <h1>myapp</h1>
+                <p class="header-description">
+                    A modern web application providing comprehensive user management,
+                    real-time notifications, and secure payment processing.
+                </p>
+            </div>
+            <div class="header-meta">
+                <div class="meta-item">
+                    <span class="meta-label">Files</span>
+                    <div class="meta-value">147</div>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Lines</span>
+                    <div class="meta-value">32K</div>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Modules</span>
+                    <div class="meta-value">6</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Feature Section -->
+        <div class="section-label">Essential Reading</div>
+
+        <div class="feature-grid">
+            <a href="#" class="feature-card feature-large">
+                <div class="feature-number">01</div>
+                <h2 class="feature-title">Getting Started</h2>
+                <p class="feature-description">
+                    Complete setup guide and quickstart tutorial to get you running in under 10 minutes.
+                    Covers installation, configuration, and your first deployment.
+                </p>
+            </a>
+
+            <a href="#" class="feature-card feature-small">
+                <div class="feature-number">02</div>
+                <h2 class="feature-title">API Reference</h2>
+                <p class="feature-description">
+                    Full API documentation with examples and use cases.
+                </p>
+            </a>
+
+            <a href="#" class="feature-card feature-small">
+                <div class="feature-number">03</div>
+                <h2 class="feature-title">Function Index</h2>
+                <p class="feature-description">
+                    Browse all functions and classes alphabetically.
+                </p>
+            </a>
+
+            <a href="#" class="feature-card feature-large">
+                <div class="feature-number">04</div>
+                <h2 class="feature-title">Architecture Overview</h2>
+                <p class="feature-description">
+                    Understand the system design, key components, and how they work together.
+                </p>
+            </a>
+        </div>
+
+        <!-- Modules Section -->
+        <div class="section-label">Module Collection</div>
+
+        <div class="module-grid">
+            <a href="#" class="module-card">
+                <div class="module-header">
+                    <div class="module-number">AUTH.001</div>
+                    <h3 class="module-title">Authentication System</h3>
+                </div>
+                <div class="module-body">
+                    <p class="module-description">
+                        User credential validation, session management, and JWT token generation
+                        for secure application access.
+                    </p>
+                    <div class="module-stats">
+                        <div class="stat-item">
+                            <span class="stat-value">3</span> files
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">847</span> lines
+                        </div>
+                    </div>
+                </div>
+            </a>
+
+            <a href="#" class="module-card">
+                <div class="module-header">
+                    <div class="module-number">DATA.002</div>
+                    <h3 class="module-title">Database Layer</h3>
+                </div>
+                <div class="module-body">
+                    <p class="module-description">
+                        ORM models, migrations, and database connection management with
+                        PostgreSQL and Redis caching.
+                    </p>
+                    <div class="module-stats">
+                        <div class="stat-item">
+                            <span class="stat-value">8</span> files
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">1,523</span> lines
+                        </div>
+                    </div>
+                </div>
+            </a>
+
+            <a href="#" class="module-card">
+                <div class="module-header">
+                    <div class="module-number">API.003</div>
+                    <h3 class="module-title">API Routes</h3>
+                </div>
+                <div class="module-body">
+                    <p class="module-description">
+                        RESTful API endpoints for user operations, authentication, payments,
+                        and resource management.
+                    </p>
+                    <div class="module-stats">
+                        <div class="stat-item">
+                            <span class="stat-value">12</span> files
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">2,145</span> lines
+                        </div>
+                    </div>
+                </div>
+            </a>
+
+            <a href="#" class="module-card">
+                <div class="module-header">
+                    <div class="module-number">USER.004</div>
+                    <h3 class="module-title">User Management</h3>
+                </div>
+                <div class="module-body">
+                    <p class="module-description">
+                        User profile handling, preferences, roles, and permissions with
+                        RBAC implementation.
+                    </p>
+                    <div class="module-stats">
+                        <div class="stat-item">
+                            <span class="stat-value">5</span> files
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">1,089</span> lines
+                        </div>
+                    </div>
+                </div>
+            </a>
+
+            <a href="#" class="module-card">
+                <div class="module-header">
+                    <div class="module-number">PAY.005</div>
+                    <h3 class="module-title">Payment Processing</h3>
+                </div>
+                <div class="module-body">
+                    <p class="module-description">
+                        Stripe integration, transaction handling, invoice generation,
+                        and payment webhook processing.
+                    </p>
+                    <div class="module-stats">
+                        <div class="stat-item">
+                            <span class="stat-value">6</span> files
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">1,234</span> lines
+                        </div>
+                    </div>
+                </div>
+            </a>
+
+            <a href="#" class="module-card">
+                <div class="module-header">
+                    <div class="module-number">NOTIF.006</div>
+                    <h3 class="module-title">Notification Service</h3>
+                </div>
+                <div class="module-body">
+                    <p class="module-description">
+                        Email, SMS, and push notification delivery with template management
+                        and queuing system.
+                    </p>
+                    <div class="module-stats">
+                        <div class="stat-item">
+                            <span class="stat-value">7</span> files
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">956</span> lines
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+    </div>
+
+    <!-- Repository Highlight -->
+    <div class="repository-highlight">
+        <p class="highlight-quote">
+            Automatically generated documentation that stays in sync with your code,
+            eliminating manual work and documentation drift.
+        </p>
+    </div>
+
+    <footer class="footer">
+        Published by Code Wiki Platform · Updated 2 hours ago
+    </footer>
+</body>
+</html>

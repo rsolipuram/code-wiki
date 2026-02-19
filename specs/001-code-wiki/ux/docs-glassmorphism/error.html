@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error States - Code Wiki</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --primary: #8B5CF6;
+            --primary-light: #A78BFA;
+            --secondary: #06B6D4;
+            --accent: #EC4899;
+            --bg-dark: #0A0A0F;
+            --bg-darker: #050508;
+            --glass-bg: rgba(15, 15, 25, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #F9FAFB;
+            --text-secondary: #D1D5DB;
+            --text-tertiary: #9CA3AF;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-darker);
+            color: var(--text-primary);
+            line-height: 1.7;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+
+        /* Animated Gradient Background */
+        .gradient-bg { position: fixed; inset: 0; z-index: -1; background: var(--bg-dark); overflow: hidden; }
+        .gradient-orb { position: absolute; border-radius: 50%; filter: blur(120px); opacity: 0.4; animation: float 20s ease-in-out infinite; }
+        .orb-1 { width: 600px; height: 600px; background: linear-gradient(135deg, var(--primary), var(--secondary)); top: -200px; left: -200px; animation-delay: 0s; }
+        .orb-2 { width: 500px; height: 500px; background: linear-gradient(135deg, var(--accent), var(--primary)); bottom: -150px; right: -150px; animation-delay: -10s; }
+        .orb-3 { width: 400px; height: 400px; background: linear-gradient(135deg, var(--secondary), var(--primary-light)); top: 50%; left: 50%; transform: translate(-50%,-50%); animation-delay: -5s; }
+
+        @keyframes float {
+            0%,100% { transform: translate(0,0) scale(1); }
+            33%  { transform: translate(50px,-50px) scale(1.1); }
+            66%  { transform: translate(-30px,30px) scale(0.9); }
+        }
+
+        /* Top Nav */
+        .top-nav {
+            max-width: 900px; margin: 0 auto;
+            padding: 28px 24px 0;
+            display: flex; align-items: center; justify-content: space-between;
+            opacity: 0; animation: fadeInUp 0.5s ease forwards;
+        }
+
+        .back-link {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 14px; font-weight: 600;
+            color: var(--text-tertiary); text-decoration: none;
+            transition: all 0.2s; padding: 8px 16px;
+            background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border);
+            border-radius: 10px; backdrop-filter: blur(8px);
+        }
+
+        .back-link:hover { color: var(--primary-light); border-color: rgba(139,92,246,0.4); background: rgba(139,92,246,0.1); }
+
+        .nav-logo {
+            display: flex; align-items: center; gap: 10px;
+            text-decoration: none;
+        }
+
+        .nav-logo-icon {
+            width: 36px; height: 36px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 10px; display: flex; align-items: center;
+            justify-content: center; font-weight: 800; font-size: 15px;
+            box-shadow: 0 0 20px rgba(139,92,246,0.45);
+        }
+
+        .nav-logo-text {
+            font-size: 18px; font-weight: 700;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Page Layout */
+        .page-content {
+            max-width: 780px; margin: 0 auto;
+            padding: 40px 24px 80px;
+            display: flex; flex-direction: column; gap: 40px;
+        }
+
+        /* Glass Card */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.37);
+        }
+
+        /* Error Card Base */
+        .error-card {
+            padding: 56px 48px;
+            text-align: center;
+            opacity: 0; animation: fadeInUp 0.7s ease forwards;
+            position: relative; overflow: hidden;
+        }
+
+        .error-card:nth-child(1) { animation-delay: 0.1s; }
+        .error-card:nth-child(2) { animation-delay: 0.25s; }
+        .error-card:nth-child(3) { animation-delay: 0.4s; }
+
+        /* State 1 — 404 */
+        .error-card.s-404 { border-color: rgba(139,92,246,0.25); }
+        .error-card.s-404::before {
+            content: '';
+            position: absolute; top: 0; left: 0; right: 0; height: 3px;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+        }
+
+        .big-code {
+            font-family: 'Fira Code', monospace;
+            font-size: 96px; font-weight: 800; line-height: 1;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -4px;
+        }
+
+        .error-title {
+            font-size: 32px; font-weight: 700; margin-bottom: 16px;
+            color: var(--text-primary);
+        }
+
+        .error-body {
+            font-size: 16px; color: var(--text-secondary);
+            margin-bottom: 36px; max-width: 520px; margin-left: auto; margin-right: auto;
+            line-height: 1.7;
+        }
+
+        .error-body code {
+            font-family: 'Fira Code', monospace; font-size: 14px;
+            background: rgba(139,92,246,0.15); padding: 2px 8px; border-radius: 5px;
+            color: var(--primary-light); border: 1px solid rgba(139,92,246,0.25);
+        }
+
+        .error-actions {
+            display: flex; align-items: center; justify-content: center;
+            gap: 12px; flex-wrap: wrap;
+        }
+
+        .btn-primary {
+            padding: 13px 28px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none; border-radius: 12px; color: white;
+            font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 600;
+            cursor: pointer; text-decoration: none;
+            box-shadow: 0 4px 20px rgba(139,92,246,0.35);
+            transition: all 0.3s; display: inline-flex; align-items: center; gap: 8px;
+        }
+
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(139,92,246,0.5); }
+
+        .btn-secondary {
+            padding: 13px 28px;
+            background: transparent; border: 1px solid var(--glass-border);
+            border-radius: 12px; color: var(--text-secondary);
+            font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 600;
+            cursor: pointer; text-decoration: none;
+            transition: all 0.3s; display: inline-flex; align-items: center; gap: 8px;
+            backdrop-filter: blur(8px);
+        }
+
+        .btn-secondary:hover { border-color: var(--primary); color: var(--primary-light); background: rgba(139,92,246,0.1); transform: translateY(-2px); }
+
+        /* State 2 — Analysis Failed */
+        .error-card.s-failed { border-color: rgba(245,158,11,0.25); }
+        .error-card.s-failed::before {
+            content: '';
+            position: absolute; top: 0; left: 0; right: 0; height: 3px;
+            background: linear-gradient(90deg, #f59e0b, #ef4444);
+        }
+
+        .warning-icon {
+            width: 72px; height: 72px;
+            background: linear-gradient(135deg, rgba(245,158,11,0.25), rgba(245,158,11,0.1));
+            border: 2px solid rgba(245,158,11,0.45);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 32px; margin: 0 auto 24px;
+            box-shadow: 0 0 30px rgba(245,158,11,0.2);
+        }
+
+        /* Accordion */
+        .accordion {
+            margin: 0 auto 32px; max-width: 520px; text-align: left;
+        }
+
+        .accordion-trigger {
+            width: 100%; padding: 14px 20px;
+            background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border);
+            border-radius: 12px; color: var(--text-secondary);
+            font-family: 'Outfit', sans-serif; font-size: 14px; font-weight: 600;
+            cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+            transition: all 0.3s;
+        }
+
+        .accordion-trigger:hover { border-color: rgba(245,158,11,0.4); color: #fbbf24; background: rgba(245,158,11,0.08); }
+
+        .accordion-trigger.open { border-color: rgba(245,158,11,0.4); color: #fbbf24; background: rgba(245,158,11,0.08); border-radius: 12px 12px 0 0; }
+
+        .accordion-arrow { transition: transform 0.3s; font-size: 10px; }
+        .accordion-trigger.open .accordion-arrow { transform: rotate(180deg); }
+
+        .accordion-body {
+            display: none; padding: 20px;
+            background: rgba(5,5,8,0.7); border: 1px solid rgba(245,158,11,0.3);
+            border-top: none; border-radius: 0 0 12px 12px;
+        }
+
+        .accordion-body.open { display: block; }
+
+        .stack-trace {
+            font-family: 'Fira Code', monospace; font-size: 12px; line-height: 1.8;
+            color: #9CA3AF; white-space: pre-wrap; word-break: break-all;
+        }
+
+        .stack-trace .err-line { color: #f87171; }
+        .stack-trace .warn-line { color: #fbbf24; }
+        .stack-trace .info-line { color: var(--primary-light); }
+
+        /* State 3 — Private Repo */
+        .error-card.s-private { border-color: rgba(6,182,212,0.25); }
+        .error-card.s-private::before {
+            content: '';
+            position: absolute; top: 0; left: 0; right: 0; height: 3px;
+            background: linear-gradient(90deg, var(--secondary), var(--primary));
+        }
+
+        .lock-icon {
+            width: 72px; height: 72px;
+            background: linear-gradient(135deg, rgba(6,182,212,0.25), rgba(6,182,212,0.1));
+            border: 2px solid rgba(6,182,212,0.45);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 32px; margin: 0 auto 24px;
+            box-shadow: 0 0 30px rgba(6,182,212,0.2);
+        }
+
+        /* GitHub OAuth Button */
+        .btn-github {
+            padding: 14px 32px;
+            background: linear-gradient(135deg, #1f2937, #374151);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 12px; color: white;
+            font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 600;
+            cursor: pointer; text-decoration: none;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            transition: all 0.3s; display: inline-flex; align-items: center; gap: 10px;
+        }
+
+        .btn-github:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.5); border-color: rgba(255,255,255,0.25); background: linear-gradient(135deg, #374151, #4b5563); }
+
+        .github-logo { width: 20px; height: 20px; fill: white; flex-shrink: 0; }
+
+        /* Token Accordion */
+        .token-accordion { margin: 24px auto 0; max-width: 480px; text-align: left; }
+
+        .token-trigger {
+            width: 100%; padding: 12px 18px;
+            background: transparent; border: 1px solid var(--glass-border);
+            border-radius: 10px; color: var(--text-tertiary);
+            font-family: 'Outfit', sans-serif; font-size: 14px;
+            cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+            transition: all 0.3s;
+        }
+
+        .token-trigger:hover { border-color: rgba(6,182,212,0.4); color: var(--secondary); }
+        .token-trigger.open { border-color: rgba(6,182,212,0.4); color: var(--secondary); border-radius: 10px 10px 0 0; }
+        .token-trigger .accordion-arrow { font-size: 10px; transition: transform 0.3s; }
+        .token-trigger.open .accordion-arrow { transform: rotate(180deg); }
+
+        .token-body {
+            display: none; padding: 20px;
+            background: rgba(5,5,8,0.6); border: 1px solid rgba(6,182,212,0.3);
+            border-top: none; border-radius: 0 0 10px 10px;
+        }
+
+        .token-body.open { display: block; }
+
+        .token-input-label { font-size: 13px; color: var(--text-tertiary); margin-bottom: 8px; display: block; }
+
+        .token-input-row { display: flex; gap: 8px; }
+
+        .token-input {
+            flex: 1; padding: 11px 14px;
+            background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
+            border-radius: 10px; color: var(--text-primary);
+            font-family: 'Fira Code', monospace; font-size: 13px;
+            transition: all 0.3s;
+        }
+
+        .token-input::placeholder { color: var(--text-tertiary); }
+        .token-input:focus { outline: none; border-color: var(--secondary); background: rgba(6,182,212,0.08); box-shadow: 0 0 16px rgba(6,182,212,0.2); }
+
+        .btn-connect-token {
+            padding: 11px 20px;
+            background: linear-gradient(135deg, var(--secondary), var(--primary));
+            border: none; border-radius: 10px; color: white;
+            font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 600;
+            cursor: pointer; white-space: nowrap; transition: all 0.3s;
+        }
+
+        .btn-connect-token:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(6,182,212,0.35); }
+
+        .token-hint { font-size: 12px; color: var(--text-tertiary); margin-top: 10px; }
+        .token-hint a { color: var(--secondary); text-decoration: none; }
+        .token-hint a:hover { text-decoration: underline; }
+
+        /* Section label above each card */
+        .state-label {
+            font-size: 12px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 1px; color: var(--text-tertiary);
+            text-align: center; margin-bottom: 8px;
+            opacity: 0; animation: fadeInUp 0.5s 0.05s ease forwards;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .error-card { padding: 36px 24px; }
+            .big-code { font-size: 72px; }
+            .error-title { font-size: 26px; }
+            .error-actions { flex-direction: column; align-items: stretch; }
+            .btn-primary, .btn-secondary, .btn-github { justify-content: center; }
+            .top-nav { padding: 20px 16px 0; }
+            .page-content { padding: 28px 16px 60px; gap: 32px; }
+        }
+
+        @media (max-width: 400px) {
+            .big-code { font-size: 56px; }
+            .token-input-row { flex-direction: column; }
+        }
+    /* content-link-style */
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo) {
+            color: #06B6D4;
+            text-decoration: underline;
+            text-decoration-color: rgba(6, 182, 212, 0.4);
+            text-underline-offset: 3px;
+            transition: color 0.2s, text-decoration-color 0.2s;
+        }
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo):hover {
+            color: #A78BFA;
+            text-decoration-color: rgba(167, 139, 250, 0.6);
+        }
+</style>
+</head>
+<body>
+    <div class="gradient-bg">
+        <div class="gradient-orb orb-1"></div>
+        <div class="gradient-orb orb-2"></div>
+        <div class="gradient-orb orb-3"></div>
+    </div>
+
+    <!-- Top Nav -->
+    <nav class="top-nav">
+        <a href="dashboard.html" class="back-link">&#8592; Back</a>
+        <a href="dashboard.html" class="nav-logo">
+            <div class="nav-logo-icon">CW</div>
+            <span class="nav-logo-text">Code Wiki</span>
+        </a>
+    </nav>
+
+    <div class="page-content">
+
+        <!-- ===== STATE 1: Repository Not Found (404) ===== -->
+        <div class="state-label">State 1 of 3 &mdash; Repository Not Found</div>
+
+        <div class="error-card glass-card s-404">
+            <div class="big-code">404</div>
+            <h1 class="error-title">Repository Not Found</h1>
+            <p class="error-body">
+                We couldn't find <code>github.com/ranjit/missing-repo</code>. Make sure the URL is correct and the repository exists, or check that you have permission to access it.
+            </p>
+            <div class="error-actions">
+                <a href="submit.html" class="btn-primary">&#128270; Try a different URL</a>
+                <a href="dashboard.html" class="btn-secondary">&#127968; Go to Dashboard</a>
+            </div>
+        </div>
+
+        <!-- ===== STATE 2: Analysis Failed ===== -->
+        <div class="state-label">State 2 of 3 &mdash; Analysis Failed</div>
+
+        <div class="error-card glass-card s-failed">
+            <div class="warning-icon">&#9888;</div>
+            <h1 class="error-title">Analysis Failed</h1>
+            <p class="error-body">
+                We ran into an issue analyzing this repository. This usually happens with very large repos or unusual file structures. Our team has been notified.
+            </p>
+
+            <!-- Expandable Error Details -->
+            <div class="accordion">
+                <button class="accordion-trigger" id="err-trigger" onclick="toggleAccordion('err-trigger','err-body')" aria-expanded="false" aria-controls="err-body">
+                    <span>&#128441; Error Details</span>
+                    <span class="accordion-arrow">&#9660;</span>
+                </button>
+                <div class="accordion-body" id="err-body" role="region" aria-labelledby="err-trigger">
+                    <pre class="stack-trace"><span class="err-line">AnalysisError: Repository scan exceeded memory limit (2 GB)</span>
+  at RepositoryAnalyzer.scan (src/analysis/analyzer.py:203)
+  at BatchJob.run (src/jobs/batch.py:88)
+  at Worker.execute (src/workers/base.py:41)
+
+<span class="warn-line">Warning: 1,247 binary files skipped (non-text)</span>
+<span class="warn-line">Warning: Depth limit reached at 24 directory levels</span>
+
+<span class="info-line">Context:</span>
+  repository: github.com/example/monorepo
+  commit:     f6c11de
+  job_id:     job_9e3f4a2b
+  duration:   847.3s
+  files_seen: 48,291
+  memory_peak: 2.1 GB</pre>
+                </div>
+            </div>
+
+            <div class="error-actions">
+                <button class="btn-primary">&#8635; Retry Analysis</button>
+                <button class="btn-secondary">&#128338; Contact Support</button>
+            </div>
+        </div>
+
+        <!-- ===== STATE 3: Private Repository ===== -->
+        <div class="state-label">State 3 of 3 &mdash; Private Repository</div>
+
+        <div class="error-card glass-card s-private">
+            <div class="lock-icon">&#128274;</div>
+            <h1 class="error-title">Private Repository</h1>
+            <p class="error-body">
+                This repository is private. Connect your GitHub account to grant Code Wiki read access, or provide a Personal Access Token to continue.
+            </p>
+
+            <!-- GitHub OAuth Button -->
+            <div class="error-actions" style="margin-bottom: 0;">
+                <a href="login.html" class="btn-github">
+                    <svg class="github-logo" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
+                    </svg>
+                    Connect GitHub Account
+                </a>
+            </div>
+
+            <!-- Personal Access Token accordion -->
+            <div class="token-accordion">
+                <button class="token-trigger" id="token-trigger" onclick="toggleAccordion('token-trigger','token-body')" aria-expanded="false" aria-controls="token-body">
+                    <span>Or enter a Personal Access Token</span>
+                    <span class="accordion-arrow">&#9660;</span>
+                </button>
+                <div class="token-body" id="token-body" role="region" aria-labelledby="token-trigger">
+                    <label class="token-input-label" for="pat-input">GitHub Personal Access Token</label>
+                    <div class="token-input-row">
+                        <input
+                            type="password"
+                            id="pat-input"
+                            class="token-input"
+                            placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                            autocomplete="off"
+                            spellcheck="false"
+                        >
+                        <button class="btn-connect-token" type="button">Connect</button>
+                    </div>
+                    <p class="token-hint">
+                        Token requires <strong>repo</strong> scope.
+                        <a href="#" tabindex="-1">How to create a token &#8599;</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function toggleAccordion(triggerId, bodyId) {
+            var trigger = document.getElementById(triggerId);
+            var body    = document.getElementById(bodyId);
+            var isOpen  = body.classList.contains('open');
+
+            if (isOpen) {
+                body.classList.remove('open');
+                trigger.classList.remove('open');
+                trigger.setAttribute('aria-expanded', 'false');
+            } else {
+                body.classList.add('open');
+                trigger.classList.add('open');
+                trigger.setAttribute('aria-expanded', 'true');
+            }
+        }
+    </script>
+</body>
+</html>

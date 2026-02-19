@@ -1,0 +1,736 @@
+openapi: 3.0.3
+info:
+  title: Code Wiki Platform API
+  description: |
+    REST API for AI-powered code wiki generation and browsing.
+    Automatically generates structured documentation from code repositories.
+  version: 1.0.0
+  contact:
+    name: Code Wiki Platform
+servers:
+  - url: https://api.codewiki.dev/v1
+    description: Production
+  - url: http://localhost:8000/v1
+    description: Development
+
+tags:
+  - name: repositories
+    description: Repository management and analysis
+  - name: wikis
+    description: Wiki generation and browsing
+  - name: chat
+    description: AI chat assistant
+  - name: search
+    description: Search functionality
+
+paths:
+  # ==================== REPOSITORIES ====================
+
+  /repositories:
+    post:
+      tags: [repositories]
+      summary: Add a new repository
+      description: Submit a repository URL for analysis and wiki generation
+      operationId: createRepository
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  example: "https://github.com/user/repo"
+                access_token:
+                  type: string
+                  description: Optional token for private repositories
+      responses:
+        '202':
+          description: Repository accepted for analysis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Repository'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    get:
+      tags: [repositories]
+      summary: List user's repositories
+      operationId: listRepositories
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, analyzing, ready, error]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: List of repositories
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  repositories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Repository'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /repositories/{repositoryId}:
+    get:
+      tags: [repositories]
+      summary: Get repository details
+      operationId: getRepository
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '200':
+          description: Repository details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Repository'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [repositories]
+      summary: Remove repository
+      operationId: deleteRepository
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '204':
+          description: Repository deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /repositories/{repositoryId}/refresh:
+    post:
+      tags: [repositories]
+      summary: Manually refresh repository analysis
+      operationId: refreshRepository
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '202':
+          description: Refresh initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateEvent'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== WIKIS ====================
+
+  /wikis/{repositoryId}:
+    get:
+      tags: [wikis]
+      summary: Get wiki for repository
+      operationId: getWiki
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '200':
+          description: Wiki details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wiki'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /wikis/{repositoryId}/pages:
+    get:
+      tags: [wikis]
+      summary: List all wiki pages
+      operationId: listWikiPages
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - name: page_type
+          in: query
+          schema:
+            type: string
+            enum: [home, module, getting_started, function_index, glossary, api_reference]
+      responses:
+        '200':
+          description: List of wiki pages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WikiPage'
+
+  /wikis/{repositoryId}/pages/{pageSlug}:
+    get:
+      tags: [wikis]
+      summary: Get wiki page by slug
+      operationId: getWikiPage
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - name: pageSlug
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "authentication-system"
+      responses:
+        '200':
+          description: Wiki page content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiPage'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /wikis/{repositoryId}/modules:
+    get:
+      tags: [wikis]
+      summary: List detected modules
+      operationId: listModules
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '200':
+          description: List of modules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Module'
+
+  /wikis/{repositoryId}/modules/{moduleSlug}:
+    get:
+      tags: [wikis]
+      summary: Get module details
+      operationId: getModule
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - name: moduleSlug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Module details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Module'
+
+  /wikis/{repositoryId}/entities/{entityQualifiedName}:
+    get:
+      tags: [wikis]
+      summary: Get code entity details
+      operationId: getCodeEntity
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - name: entityQualifiedName
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "auth.login.authenticate_user"
+      responses:
+        '200':
+          description: Code entity details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeEntity'
+
+  # ==================== CHAT ====================
+
+  /chat/{repositoryId}/conversations:
+    post:
+      tags: [chat]
+      summary: Start a new chat conversation
+      operationId: createConversation
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '201':
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversation'
+
+    get:
+      tags: [chat]
+      summary: List user's conversations for repository
+      operationId: listConversations
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '200':
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatConversation'
+
+  /chat/conversations/{conversationId}/messages:
+    post:
+      tags: [chat]
+      summary: Send a message in conversation
+      operationId: sendMessage
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  example: "How does authentication work in this codebase?"
+      responses:
+        '200':
+          description: AI response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== SEARCH ====================
+
+  /search/{repositoryId}:
+    get:
+      tags: [search]
+      summary: Search wiki and code
+      operationId: search
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query
+          example: "authentication login"
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [all, pages, entities, modules]
+            default: all
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+
+# ==================== COMPONENTS ====================
+
+components:
+  parameters:
+    RepositoryId:
+      name: repositoryId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Repository unique identifier
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Repository:
+      type: object
+      required: [id, url, name, owner, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+        name:
+          type: string
+        owner:
+          type: string
+        primary_languages:
+          type: array
+          items:
+            type: string
+          example: ["Python", "JavaScript"]
+        size_lines:
+          type: integer
+        size_files:
+          type: integer
+        last_analyzed_commit:
+          type: string
+        last_analyzed_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, analyzing, ready, error]
+        access_level:
+          type: string
+          enum: [public, private]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Wiki:
+      type: object
+      required: [id, repository_id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        repository_id:
+          type: string
+          format: uuid
+        home_page_id:
+          type: string
+          format: uuid
+        structure_version:
+          type: integer
+        module_count:
+          type: integer
+        page_count:
+          type: integer
+        status:
+          type: string
+          enum: [generating, ready, updating]
+        generated_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    WikiPage:
+      type: object
+      required: [id, page_type, title, slug, content]
+      properties:
+        id:
+          type: string
+          format: uuid
+        wiki_id:
+          type: string
+          format: uuid
+        page_type:
+          type: string
+          enum: [home, module, getting_started, function_index, glossary, api_reference]
+        title:
+          type: string
+        slug:
+          type: string
+        content:
+          type: object
+          description: Structured page content (sections)
+        related_page_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        source_files:
+          type: array
+          items:
+            type: string
+        commit_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Module:
+      type: object
+      required: [id, name, slug, file_paths]
+      properties:
+        id:
+          type: string
+          format: uuid
+        wiki_id:
+          type: string
+          format: uuid
+        wiki_page_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        file_paths:
+          type: array
+          items:
+            type: string
+        file_count:
+          type: integer
+        line_count:
+          type: integer
+        description:
+          type: string
+        detection_confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        dependencies_module_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    CodeEntity:
+      type: object
+      required: [id, entity_type, name, qualified_name, file_path, line_number]
+      properties:
+        id:
+          type: string
+          format: uuid
+        module_id:
+          type: string
+          format: uuid
+        entity_type:
+          type: string
+          enum: [function, class, method, module, file, variable]
+        name:
+          type: string
+        qualified_name:
+          type: string
+        file_path:
+          type: string
+        line_number:
+          type: integer
+        signature:
+          type: string
+        description:
+          type: string
+        docstring:
+          type: string
+        visibility:
+          type: string
+          enum: [public, private, protected]
+        relationships:
+          type: object
+          properties:
+            calls:
+              type: array
+              items:
+                type: string
+            imports:
+              type: array
+              items:
+                type: string
+            inherits_from:
+              type: array
+              items:
+                type: string
+
+    ChatConversation:
+      type: object
+      required: [id, repository_id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        repository_id:
+          type: string
+          format: uuid
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ChatMessage:
+      type: object
+      required: [role, content, timestamp]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        references:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [wiki_page, code_entity, file]
+              id:
+                type: string
+              title:
+                type: string
+
+    UpdateEvent:
+      type: object
+      required: [id, repository_id, commit_hash, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        repository_id:
+          type: string
+          format: uuid
+        commit_hash:
+          type: string
+        changed_files:
+          type: array
+          items:
+            type: string
+        affected_module_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        error_message:
+          type: string
+
+    SearchResults:
+      type: object
+      properties:
+        query:
+          type: string
+        total_results:
+          type: integer
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [page, entity, module]
+              id:
+                type: string
+              title:
+                type: string
+              snippet:
+                type: string
+              score:
+                type: number
+                format: float
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total_pages:
+          type: integer
+        total_items:
+          type: integer
+
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - BearerAuth: []

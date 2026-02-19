@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Wiki — Complete UX Prototype</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #8B5CF6;
+            --primary-light: #A78BFA;
+            --secondary: #06B6D4;
+            --accent: #EC4899;
+            --bg-dark: #0A0A0F;
+            --bg-darker: #050508;
+            --glass-bg: rgba(15, 15, 25, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #F9FAFB;
+            --text-secondary: #D1D5DB;
+            --text-tertiary: #9CA3AF;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-darker);
+            color: var(--text-primary);
+            line-height: 1.7;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+
+        /* Animated Gradient Background */
+        .gradient-bg {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background: var(--bg-dark);
+            overflow: hidden;
+        }
+
+        .gradient-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.35;
+            animation: float 20s ease-in-out infinite;
+        }
+
+        .orb-1 {
+            width: 700px;
+            height: 700px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            top: -300px;
+            left: -200px;
+            animation-delay: 0s;
+        }
+
+        .orb-2 {
+            width: 500px;
+            height: 500px;
+            background: linear-gradient(135deg, var(--accent), var(--primary));
+            bottom: -200px;
+            right: -150px;
+            animation-delay: -10s;
+        }
+
+        .orb-3 {
+            width: 400px;
+            height: 400px;
+            background: linear-gradient(135deg, var(--secondary), var(--primary-light));
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation-delay: -5s;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(40px, -40px) scale(1.08); }
+            66% { transform: translate(-25px, 25px) scale(0.93); }
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(28px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ===== LAYOUT ===== */
+        .page-wrap {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 64px 32px 100px;
+        }
+
+        /* ===== HEADER ===== */
+        .site-header {
+            text-align: center;
+            margin-bottom: 80px;
+            opacity: 0;
+            animation: fadeInUp 0.6s ease forwards;
+        }
+
+        .logo-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
+        .logo-icon {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 22px;
+            color: white;
+            box-shadow: 0 0 40px rgba(139, 92, 246, 0.5);
+        }
+
+        .logo-name {
+            font-size: 32px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .site-title {
+            font-size: 52px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            line-height: 1.1;
+            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 16px;
+        }
+
+        .site-subtitle {
+            font-size: 18px;
+            color: var(--text-secondary);
+            max-width: 560px;
+            margin: 0 auto;
+        }
+
+        /* ===== USER FLOW DIAGRAM ===== */
+        .flow-section {
+            margin-bottom: 80px;
+            opacity: 0;
+            animation: fadeInUp 0.6s 0.15s ease forwards;
+        }
+
+        .section-label {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--primary-light);
+            margin-bottom: 20px;
+        }
+
+        .section-heading {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 28px;
+        }
+
+        .flow-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 36px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.37);
+        }
+
+        .flow-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 24px;
+        }
+
+        .flow-col-title {
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-tertiary);
+            margin-bottom: 16px;
+        }
+
+        .flow-node {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(139, 92, 246, 0.35);
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--primary-light);
+            text-decoration: none;
+            transition: all 0.2s;
+            font-family: 'Fira Code', monospace;
+        }
+
+        .flow-node:hover {
+            background: rgba(139, 92, 246, 0.28);
+            transform: translateX(4px);
+        }
+
+        .flow-node.node-secondary {
+            background: rgba(6, 182, 212, 0.12);
+            border-color: rgba(6, 182, 212, 0.3);
+            color: var(--secondary);
+        }
+
+        .flow-node.node-secondary:hover {
+            background: rgba(6, 182, 212, 0.22);
+        }
+
+        .flow-node.node-accent {
+            background: rgba(236, 72, 153, 0.12);
+            border-color: rgba(236, 72, 153, 0.3);
+            color: #f472b6;
+        }
+
+        .flow-items {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .flow-arrow {
+            font-size: 13px;
+            color: var(--text-tertiary);
+            padding: 2px 0 2px 20px;
+        }
+
+        /* ===== PAGE SECTIONS ===== */
+        .pages-section {
+            margin-bottom: 64px;
+            opacity: 0;
+            animation: fadeInUp 0.6s 0.25s ease forwards;
+        }
+
+        .pages-section + .pages-section {
+            animation-delay: 0.35s;
+        }
+
+        .pages-section:nth-child(4) { animation-delay: 0.45s; }
+
+        .group-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .group-tag {
+            padding: 5px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        .tag-onboarding {
+            background: rgba(139, 92, 246, 0.2);
+            border: 1px solid rgba(139, 92, 246, 0.35);
+            color: var(--primary-light);
+        }
+
+        .tag-wiki {
+            background: rgba(6, 182, 212, 0.15);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            color: var(--secondary);
+        }
+
+        .tag-tools {
+            background: rgba(52, 211, 153, 0.15);
+            border: 1px solid rgba(52, 211, 153, 0.3);
+            color: #34d399;
+        }
+
+        .tag-states {
+            background: rgba(236, 72, 153, 0.15);
+            border: 1px solid rgba(236, 72, 153, 0.3);
+            color: #f472b6;
+        }
+
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 16px;
+        }
+
+        /* Page Card */
+        .page-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .page-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .page-card:hover {
+            transform: translateY(-6px);
+            border-color: rgba(139, 92, 246, 0.45);
+            box-shadow: 0 12px 40px rgba(139, 92, 246, 0.25);
+        }
+
+        .page-card:hover::before {
+            opacity: 0.08;
+        }
+
+        .card-inner {
+            position: relative;
+            z-index: 1;
+        }
+
+        .card-name {
+            font-family: 'Fira Code', monospace;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+
+        .card-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 16px;
+        }
+
+        .card-preview {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--primary-light);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .card-preview:hover {
+            color: var(--secondary);
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .site-title {
+                font-size: 36px;
+            }
+
+            .flow-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .cards-grid {
+                grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            }
+        }
+
+        @media (max-width: 600px) {
+            .page-wrap {
+                padding: 40px 16px 80px;
+            }
+
+            .site-title {
+                font-size: 28px;
+            }
+
+            .site-subtitle {
+                font-size: 15px;
+            }
+
+            .cards-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .flow-card {
+                padding: 24px 20px;
+            }
+        }
+    /* content-link-style */
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo) {
+            color: #06B6D4;
+            text-decoration: underline;
+            text-decoration-color: rgba(6, 182, 212, 0.4);
+            text-underline-offset: 3px;
+            transition: color 0.2s, text-decoration-color 0.2s;
+        }
+        a:not(.nav-item):not(.breadcrumb-link):not(.toc-item):not(.filter-btn):not(.follow-btn):not([class*="btn"]):not([class*="card"]):not([class*="logo"]):not([class*="chip"]):not([class*="badge"]):not(.tab):not(.mobile-logo):hover {
+            color: #A78BFA;
+            text-decoration-color: rgba(167, 139, 250, 0.6);
+        }
+</style>
+</head>
+<body>
+    <div class="gradient-bg">
+        <div class="gradient-orb orb-1"></div>
+        <div class="gradient-orb orb-2"></div>
+        <div class="gradient-orb orb-3"></div>
+    </div>
+
+    <div class="page-wrap">
+
+        <!-- ===== HEADER ===== -->
+        <header class="site-header">
+            <div class="logo-row">
+                <div class="logo-icon">CW</div>
+                <span class="logo-name">Code Wiki</span>
+            </div>
+            <h1 class="site-title">Complete UX Prototype</h1>
+            <p class="site-subtitle">All 15 pages wired together. Click any card to preview a page, or follow the user flow below.</p>
+        </header>
+
+        <!-- ===== USER FLOW ===== -->
+        <section class="flow-section">
+            <div class="section-label">Navigation Map</div>
+            <h2 class="section-heading">User Flow</h2>
+            <div class="flow-card">
+                <div class="flow-grid">
+                    <div>
+                        <div class="flow-col-title">Onboarding</div>
+                        <div class="flow-items">
+                            <a href="login.html" class="flow-node">login.html</a>
+                            <div class="flow-arrow">&#8627; sign in</div>
+                            <a href="dashboard.html" class="flow-node">dashboard.html</a>
+                            <div class="flow-arrow">&#8627; Add Repository</div>
+                            <a href="submit.html" class="flow-node">submit.html</a>
+                            <div class="flow-arrow">&#8627; submit</div>
+                            <a href="progress.html" class="flow-node">progress.html</a>
+                            <div class="flow-arrow">&#8627; wiki ready</div>
+                            <a href="home.html" class="flow-node node-secondary">home.html</a>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flow-col-title">Wiki Navigation</div>
+                        <div class="flow-items">
+                            <a href="home.html" class="flow-node node-secondary">home.html</a>
+                            <div class="flow-arrow">&#8627; module card</div>
+                            <a href="module.html" class="flow-node node-secondary">module.html</a>
+                            <div class="flow-arrow">&#8627; component link</div>
+                            <a href="function.html" class="flow-node node-secondary">function.html</a>
+                            <div class="flow-arrow">&#8627; breadcrumb</div>
+                            <a href="module.html" class="flow-node node-secondary">module.html</a>
+                            <div class="flow-arrow">&#8627; all repos</div>
+                            <a href="dashboard.html" class="flow-node">dashboard.html</a>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flow-col-title">Tools &amp; Features</div>
+                        <div class="flow-items">
+                            <a href="search.html" class="flow-node node-accent">search.html</a>
+                            <a href="chat.html" class="flow-node node-accent">chat.html</a>
+                            <a href="getting-started.html" class="flow-node node-accent">getting-started.html</a>
+                            <a href="api-reference.html" class="flow-node node-accent">api-reference.html</a>
+                            <a href="diagrams.html" class="flow-node node-accent">diagrams.html</a>
+                            <a href="glossary.html" class="flow-node node-accent">glossary.html</a>
+                            <a href="error.html" class="flow-node node-accent">error.html</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== ONBOARDING GROUP ===== -->
+        <section class="pages-section">
+            <div class="group-header">
+                <span class="group-tag tag-onboarding">Onboarding</span>
+            </div>
+            <div class="cards-grid">
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">login.html</div>
+                        <div class="card-desc">Sign-in page with GitHub, GitLab, Bitbucket OAuth and email/password form. Navigates to dashboard on success.</div>
+                        <a href="login.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">dashboard.html</div>
+                        <div class="card-desc">Repository list with sync status indicators, retry controls, empty state, and Add Repository CTA.</div>
+                        <a href="dashboard.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">submit.html</div>
+                        <div class="card-desc">Add repository form with URL validation, provider detection, visibility toggle, and OAuth sub-flow for private repos.</div>
+                        <a href="submit.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">progress.html</div>
+                        <div class="card-desc">Live analysis progress with animated stepper, progress bar, live stats, accordion of found modules, and completion celebration.</div>
+                        <a href="progress.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== WIKI GROUP ===== -->
+        <section class="pages-section">
+            <div class="group-header">
+                <span class="group-tag tag-wiki">Wiki</span>
+            </div>
+            <div class="cards-grid">
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">home.html</div>
+                        <div class="card-desc">Repository wiki root with stats, quick links, all 8 module cards, and recent activity timeline. Entry point for all wiki content.</div>
+                        <a href="home.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">module.html</div>
+                        <div class="card-desc">Module documentation page with file tree, key components grid, dependency table, code samples, and next-steps links.</div>
+                        <a href="module.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">function.html</div>
+                        <div class="card-desc">Function deep-dive with signature, parameters table, return value, usage examples, call graph, and full source code.</div>
+                        <a href="function.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">getting-started.html</div>
+                        <div class="card-desc">Step-by-step onboarding guide within the wiki — account creation, repo submission, progress tracking, and first exploration.</div>
+                        <a href="getting-started.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== TOOLS GROUP ===== -->
+        <section class="pages-section">
+            <div class="group-header">
+                <span class="group-tag tag-tools">Tools</span>
+            </div>
+            <div class="cards-grid">
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">search.html</div>
+                        <div class="card-desc">Full-text search results with type/module/visibility filters, tabs, relevance highlighting, and sortable result cards.</div>
+                        <a href="search.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">chat.html</div>
+                        <div class="card-desc">Conversational AI assistant with code snippets, inline doc links, suggested follow-up questions, and context switcher.</div>
+                        <a href="chat.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">diagrams.html</div>
+                        <div class="card-desc">Architecture overview, dependency graph, call graph, and data-flow tabs with clickable module nodes and export options.</div>
+                        <a href="diagrams.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">api-reference.html</div>
+                        <div class="card-desc">Filterable/sortable function and class index with list/grid toggle, language filters, type badges, and module chips.</div>
+                        <a href="api-reference.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">glossary.html</div>
+                        <div class="card-desc">Auto-detected domain terms with alphabet navigation, type badges, descriptions, and links to related modules.</div>
+                        <a href="glossary.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== STATES GROUP ===== -->
+        <section class="pages-section">
+            <div class="group-header">
+                <span class="group-tag tag-states">States</span>
+            </div>
+            <div class="cards-grid">
+                <div class="page-card">
+                    <div class="card-inner">
+                        <div class="card-name">error.html</div>
+                        <div class="card-desc">Three error states: Repository Not Found (404), Analysis Failed with expandable stack trace, and Private Repository with OAuth/PAT flow.</div>
+                        <a href="error.html" class="card-preview">Preview &#8594;</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+</body>
+</html>
