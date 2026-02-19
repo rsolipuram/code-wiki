@@ -571,8 +571,8 @@ According to specification workflow:
 6. ✅ UX mock spec review completed (gaps resolved)
 7. ✅ **Full glassmorphism mock set complete** (15 pages, all spec requirements covered)
 8. ✅ **3-agent wiki generation pipeline designed** (Gemini-reviewed)
-9. ✅ **Implementation task list generated** (`specs/001-code-wiki/tasks.md` — all phases, mock references, API contracts)
-10. ✅ **tasks.md exit criteria format decided and applied** — Option A: inline criteria on every task. UX tasks require explicit visual mock comparison (side-by-side against reference HTML, component-level checks, viewport anchors). Applied to T077–T082 as reference pattern.
+9. ✅ **Implementation task list generated** (`specs/001-code-wiki/tasks.md` — 112 tasks across 7 phases, MVP = Phases 1–3, mock references, API contracts)
+10. ✅ **tasks.md exit criteria format decided and applied** — Option A: inline criteria on every task. UX tasks require explicit visual mock comparison (side-by-side against reference HTML, component-level checks, viewport anchors). Applied to T077–T082 as reference pattern; 14 UX tasks total have mock file references in tasks.md front matter.
 11. ⏳ **Begin Phase 0: Foundation** (project scaffold, Docker setup)
 
 ---
@@ -590,5 +590,5 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-18 (Session b5e97117 — tasks.md exit criteria decision resolved, UX pattern established)*
+*Last updated: 2026-02-19 (Session b5e97117 — tasks.md 112-task scope confirmed, 14 UX mock references verified)*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
