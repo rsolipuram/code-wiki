@@ -4,7 +4,7 @@ AI-powered code documentation platform that automatically generates and maintain
 
 ## Project Overview
 
-**Status**: Specification phase (Draft)
+**Status**: Implementation phase (Active — Phase 0 + Frontend scaffolding complete)
 **Feature Branch**: `001-code-wiki`
 **Main Branch**: `main`
 
@@ -16,6 +16,40 @@ This platform addresses documentation drift by automatically analyzing repositor
 
 ```
 code-wiki/
+  backend/                       # FastAPI Python backend
+    src/
+      agents/                    # Facet intelligence agents (heuristic/, iterative/, single_pass/)
+      api/                       # FastAPI endpoints and routes
+      chat/                      # AI chat assistant module
+      dossier/                   # LangGraph shared state blackboard
+      llm/                       # LM Studio client interface
+      models/                    # Database models (PostgreSQL)
+      orchestrator/              # LangGraph StateGraph wiring
+      parsers/                   # Language-specific code parsers
+      recon/                     # Layer 0: Repo Reconnaissance
+      storage/                   # Neo4j + Qdrant storage layer
+      wiki/                      # Wiki page generation pipeline
+        page_builders/           # Module, dashboard, special page builders
+        context_builder.py       # RAG context assembly
+    requirements.txt
+  frontend/                      # Next.js + TypeScript frontend
+    src/
+      app/                       # Next.js App Router pages
+        [owner]/[name]/          # Wiki pages (home, modules/[slug], progress)
+        dashboard/               # Repository list management
+        login/                   # OAuth + email auth
+        submit/                  # Add repository form
+      components/ui/             # Shared UI components
+        Breadcrumbs.tsx          # Navigation breadcrumbs
+        CodeBlock.tsx            # Syntax-highlighted code with copy
+        GlassCard.tsx            # Glassmorphism card container
+        GradientBackground.tsx   # Animated gradient background
+        InfoBox.tsx              # Callout info boxes (4 variants)
+        Logo.tsx                 # App logo component
+        StatusIndicator.tsx      # Animated status dot
+        TypeBadge.tsx            # Entity type badge (class/function/etc.)
+      services/api.ts            # Typed API client with unified namespace
+  docker-compose.yml             # PostgreSQL, Neo4j, Qdrant services
   specs/
     001-code-wiki/
       spec.md                    # Complete feature specification
@@ -26,18 +60,12 @@ code-wiki/
       tasks.md                   # Implementation task list (all phases)
       contracts/
         openapi.yaml             # REST API specification
-      ux/                        # Design mockups and wireframes
-        module-page.html         # Module detail page mockup
-        repository-home.html     # Repository landing page
-        function-detail.html     # Function/class detail page
-        search.html              # Search results interface
-        documentation-layout.html # Three-column navigation template
-        docs-glassmorphism/      # Ultra-modern variant: frosted glass effects
-        docs-brutalist/          # Ultra-modern variant: stark minimalism
+      ux/
+        docs-glassmorphism/      # 15-page glassmorphism mock set (reference for implementation)
+        docs-brutalist/          # Brutalist design variant
   .specify/
     templates/                   # Specify framework templates
     memory/                      # Temporary state (gitignored)
-    scripts/                     # Framework automation scripts
   .claude/
     observability/              # Session tracking
     *.local.md                  # Local plugin config (gitignored)
@@ -573,7 +601,11 @@ According to specification workflow:
 8. ✅ **3-agent wiki generation pipeline designed** (Gemini-reviewed)
 9. ✅ **Implementation task list generated** (`specs/001-code-wiki/tasks.md` — 112 tasks across 7 phases, MVP = Phases 1–3, mock references, API contracts)
 10. ✅ **tasks.md exit criteria format decided and applied** — Option A: inline criteria on every task. UX tasks require explicit visual mock comparison (side-by-side against reference HTML, component-level checks, viewport anchors). Applied to T077–T082 as reference pattern; 14 UX tasks total have mock file references in tasks.md front matter.
-11. ⏳ **Begin Phase 0: Foundation** (project scaffold, Docker setup)
+11. ✅ **Phase 0: Foundation complete** — Docker Compose, PostgreSQL/Neo4j/Qdrant services, backend scaffold (`backend/src/` with agents/, api/, parsers/, recon/, wiki/, orchestrator/, dossier/ directories), requirements.txt
+12. ✅ **Phase 0–1: Frontend scaffold complete** — Next.js + TypeScript, API client (`frontend/src/services/api.ts` with unified namespace), 8 UI components (Breadcrumbs, CodeBlock, GlassCard, GradientBackground, InfoBox, Logo, StatusIndicator, TypeBadge), font optimization (Next.js font API)
+13. ✅ **Core pages implemented** — Landing hub (`/`), Dashboard (`/dashboard`), Submit (`/submit` with real-time URL validation + provider detection), Progress (`/[owner]/[name]/progress` with 5s polling + animated 6-step pipeline), Wiki Home (`/[owner]/[name]`), Module docs (`/[owner]/[name]/modules/[slug]` with 3-column layout)
+14. ✅ **Backend wiki pipeline scaffold** — Context builder with RAG integration, module/dashboard page builders, special page builders (getting started, function index, glossary, API reference)
+15. ⏳ **Next: Code parsers + entity extraction** (Phase 1: language-specific parsers for Python/TypeScript)
 
 ---
 
@@ -590,5 +622,5 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-19 (Session b5e97117 — tasks.md 112-task scope confirmed, 14 UX mock references verified)*
+*Last updated: 2026-02-21 (Session a95d405d — Phase 0 foundation + frontend scaffold complete, 8 UI components + 5 pages implemented)*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
