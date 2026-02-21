@@ -131,131 +131,131 @@
 
 ### 3A: Code Parsing (Backend)
 
-- [ ] T025 [P] [US1] Implement PythonParser in `backend/src/parsers/python_parser.py` using Jedi + Python AST to extract functions, classes, methods, imports, signatures, docstrings, and call relationships per research.md Section 1
+- [x] T025 [P] [US1] Implement PythonParser in `backend/src/parsers/python_parser.py` using Jedi + Python AST to extract functions, classes, methods, imports, signatures, docstrings, and call relationships per research.md Section 1
   - **Verify**: Parse a known Python file → extracts all functions with signatures including type hints; resolves cross-file imports (e.g., `from models.user import User` resolves to actual file); docstrings extracted; call graph shows caller/callee; 95%+ accuracy on test fixture
 
-- [ ] T026 [P] [US1] Implement TypeScriptParser in `backend/src/parsers/typescript_parser.py` using TypeScript Compiler API via subprocess to extract functions, classes, interfaces, imports, type signatures per research.md Section 1
+- [x] T026 [P] [US1] Implement TypeScriptParser in `backend/src/parsers/typescript_parser.py` using TypeScript Compiler API via subprocess to extract functions, classes, interfaces, imports, type signatures per research.md Section 1
   - **Verify**: Parse a known TS file → extracts all exports with full type signatures; resolves import paths; return types captured; interface/type definitions extracted; 95%+ accuracy on test fixture
 
-- [ ] T027 [US1] Create parser registry in `backend/src/parsers/__init__.py` mapping file extensions to parsers (.py→PythonParser, .ts/.tsx/.js/.jsx→TypeScriptParser) per research.md "Best of both worlds" section
+- [x] T027 [US1] Create parser registry in `backend/src/parsers/__init__.py` mapping file extensions to parsers (.py→PythonParser, .ts/.tsx/.js/.jsx→TypeScriptParser) per research.md "Best of both worlds" section
   - **Verify**: `get_parser(".py")` returns PythonParser; `get_parser(".ts")` returns TypeScriptParser; unknown extensions raise `UnsupportedLanguageError`
 
-- [ ] T028 [US1] Implement entity extraction pipeline in `backend/src/parsers/extractor.py` that walks a repo directory, parses each supported file, and produces CodeEntity records for PostgreSQL + Neo4j per data-model.md Entity 5
+- [x] T028 [US1] Implement entity extraction pipeline in `backend/src/parsers/extractor.py` that walks a repo directory, parses each supported file, and produces CodeEntity records for PostgreSQL + Neo4j per data-model.md Entity 5
   - **Verify**: Given a repo path, extracts all code entities from all supported files; writes to PostgreSQL (CodeEntity rows) and Neo4j (nodes + relationships); handles 10k-line repo in <60s; skips `node_modules`, `.git`, `dist` directories
 
 ### 3B: Repo Reconnaissance (Layer 0)
 
-- [ ] T029 [US1] Implement RepoRecon agent in `backend/src/recon/repo_recon.py` that scans file tree, detects languages, counts LOC, identifies config files (Docker, CI, IaC, package manifests) per plan.md Layer 1
+- [x] T029 [US1] Implement RepoRecon agent in `backend/src/recon/repo_recon.py` that scans file tree, detects languages, counts LOC, identifies config files (Docker, CI, IaC, package manifests) per plan.md Layer 1
   - **Verify**: Given repo path → produces RepoFingerprint with languages, file_count, loc, detected tools; zero LLM calls; completes in <2s for 50k LOC repo
 
-- [ ] T030 [P] [US1] Create RepoFingerprint dataclass in `backend/src/recon/fingerprint.py` with fields: languages, primary_language, system_type, tools_present, file_count, loc, config_files
+- [x] T030 [P] [US1] Create RepoFingerprint dataclass in `backend/src/recon/fingerprint.py` with fields: languages, primary_language, system_type, tools_present, file_count, loc, config_files
   - **Verify**: Dataclass instantiates with all fields; serializable to JSON; immutable after creation
 
-- [ ] T031 [P] [US1] Create config detector in `backend/src/recon/config_detector.py` that identifies Dockerfiles, CI configs (GitHub Actions, Jenkins), IaC files (Terraform, K8s), package manifests (package.json, pyproject.toml, go.mod)
+- [x] T031 [P] [US1] Create config detector in `backend/src/recon/config_detector.py` that identifies Dockerfiles, CI configs (GitHub Actions, Jenkins), IaC files (Terraform, K8s), package manifests (package.json, pyproject.toml, go.mod)
   - **Verify**: Detects each config type by filename pattern; returns dict of `{config_type: [file_paths]}`; handles repos with no configs gracefully
 
 ### 3C: Dossier (Shared Blackboard)
 
-- [ ] T032 [US1] Create Dossier Pydantic schema in `backend/src/dossier/schema.py` with all nested models: SecurityFinding, DependencyAnalysis, ContainerTopology, CIPipeline, ArchitectureStyle, BusinessRule, TechnicalDebt, ConflictAnalysis per plan.md Architecture section and research.md Decision 16.1
+- [x] T032 [US1] Create Dossier Pydantic schema in `backend/src/dossier/schema.py` with all nested models: SecurityFinding, DependencyAnalysis, ContainerTopology, CIPipeline, ArchitectureStyle, BusinessRule, TechnicalDebt, ConflictAnalysis per plan.md Architecture section and research.md Decision 16.1
   - **Verify**: All Dossier sections are typed Pydantic models; SecurityFinding has id, type, severity, related_files, related_modules, description, evidence_lines fields (atomic queryable units, not blobs); entire Dossier serializable to JSON
 
-- [ ] T033 [US1] Create DossierManager in `backend/src/dossier/manager.py` with write_finding(), query_findings(), get_section(), clear() methods that operate on the Dossier state
+- [x] T033 [US1] Create DossierManager in `backend/src/dossier/manager.py` with write_finding(), query_findings(), get_section(), clear() methods that operate on the Dossier state
   - **Verify**: write_finding appends to correct section; query_findings filters by module/severity; thread-safe for concurrent agent writes; empty Dossier returns empty results (not errors)
 
-- [ ] T034 [US1] Create Dossier RAG index in `backend/src/dossier/rag_index.py` that embeds all Dossier findings into Qdrant `dossier_findings` collection with metadata filters (related_files, related_modules, severity)
+- [x] T034 [US1] Create Dossier RAG index in `backend/src/dossier/rag_index.py` that embeds all Dossier findings into Qdrant `dossier_findings` collection with metadata filters (related_files, related_modules, severity)
   - **Verify**: After indexing 50 findings, semantic search for "authentication security" returns relevant SecurityFindings; metadata filter for specific module returns only that module's findings; re-indexing overwrites previous entries
 
 ### 3D: Facet Intelligence Agents (Layer 1)
 
-- [ ] T035 [US1] Implement TriageAgent in `backend/src/agents/triage/triage_agent.py` that reads RepoFingerprint and produces an execution plan (which agents to run, budget, order) via single-pass LLM call per plan.md Layer 2 Triage
+- [x] T035 [US1] Implement TriageAgent in `backend/src/agents/triage/triage_agent.py` that reads RepoFingerprint and produces an execution plan (which agents to run, budget, order) via single-pass LLM call per plan.md Layer 2 Triage
   - **Verify**: Given a RepoFingerprint → returns structured execution plan listing agents to invoke; respects LLM budget constraints; plan is deterministic for same fingerprint (cached)
 
-- [ ] T036 [P] [US1] Implement DependencyAuditor in `backend/src/agents/heuristic/dependency_auditor.py` that parses lock files (requirements.txt, package-lock.json, go.sum) and optionally queries OSV.dev for CVEs per plan.md Heuristic Agents
+- [x] T036 [P] [US1] Implement DependencyAuditor in `backend/src/agents/heuristic/dependency_auditor.py` that parses lock files (requirements.txt, package-lock.json, go.sum) and optionally queries OSV.dev for CVEs per plan.md Heuristic Agents
   - **Verify**: Parses requirements.txt → extracts all packages with versions; writes DependencyAnalysis to Dossier; zero LLM calls; handles missing lock files gracefully
 
-- [ ] T037 [P] [US1] Implement ContainerAnalyzer in `backend/src/agents/heuristic/container_analyzer.py` that parses Dockerfiles and docker-compose.yml to extract services, ports, volumes
+- [x] T037 [P] [US1] Implement ContainerAnalyzer in `backend/src/agents/heuristic/container_analyzer.py` that parses Dockerfiles and docker-compose.yml to extract services, ports, volumes
   - **Verify**: Parses multi-stage Dockerfile → extracts base images, exposed ports; docker-compose → extracts service topology; writes to Dossier `container_topology`
 
-- [ ] T038 [P] [US1] Implement CIPipelineAnalyzer in `backend/src/agents/heuristic/ci_pipeline_analyzer.py` that parses GitHub Actions workflows and Jenkinsfiles to extract pipeline stages
+- [x] T038 [P] [US1] Implement CIPipelineAnalyzer in `backend/src/agents/heuristic/ci_pipeline_analyzer.py` that parses GitHub Actions workflows and Jenkinsfiles to extract pipeline stages
   - **Verify**: Parses `.github/workflows/*.yml` → extracts jobs, steps, triggers; writes to Dossier `ci_pipeline`; handles repos without CI gracefully
 
-- [ ] T039 [P] [US1] Implement remaining heuristic agents: IaCAnalyzer, APIContractExtractor, OwnershipExtractor, FeatureFlagMapper in `backend/src/agents/heuristic/` (one file each per plan.md directory structure)
+- [x] T039 [P] [US1] Implement remaining heuristic agents: IaCAnalyzer, APIContractExtractor, OwnershipExtractor, FeatureFlagMapper in `backend/src/agents/heuristic/` (one file each per plan.md directory structure)
   - **Verify**: Each agent reads specific config files, writes to its Dossier section, uses zero LLM calls; repos without relevant configs produce empty sections (not errors)
 
-- [ ] T040 [US1] Implement SecuritySentinel ReAct agent in `backend/src/agents/iterative/security_sentinel.py` using `create_react_agent` from LangGraph with tools (read_file, search_code, query_dossier, write_finding) per research.md Decision 17
+- [x] T040 [US1] Implement SecuritySentinel ReAct agent in `backend/src/agents/iterative/security_sentinel.py` using `create_react_agent` from LangGraph with tools (read_file, search_code, query_dossier, write_finding) per research.md Decision 17
   - **Verify**: Given a repo with auth code → traces auth flows across files; writes SecurityFindings progressively to Dossier; respects MAX_STEPS=30 and TIME_LIMIT=300s; maintains visited_nodes set (no re-reads); stops on convergence (3 consecutive no-new-findings)
 
-- [ ] T041 [P] [US1] Implement DataFlowTracer ReAct agent in `backend/src/agents/iterative/data_flow_tracer.py` using same pattern as SecuritySentinel
+- [x] T041 [P] [US1] Implement DataFlowTracer ReAct agent in `backend/src/agents/iterative/data_flow_tracer.py` using same pattern as SecuritySentinel
   - **Verify**: Traces data transformations from entry points; writes to Dossier `data_flows`; respects same termination safeguards
 
-- [ ] T042 [P] [US1] Implement AuthFlowTracer and VulnerabilityChainTracer in `backend/src/agents/iterative/auth_flow_tracer.py` and `vuln_chain_tracer.py` per plan.md ReAct agents table
+- [x] T042 [P] [US1] Implement AuthFlowTracer and VulnerabilityChainTracer in `backend/src/agents/iterative/auth_flow_tracer.py` and `vuln_chain_tracer.py` per plan.md ReAct agents table
   - **Verify**: AuthFlowTracer triggers only on tag `pattern:jwt-auth`; VulnChainTracer triggers on tag `risk:sql-injection`; both respect termination safeguards
 
-- [ ] T043 [P] [US1] Implement all 6 single-pass LLM agents in `backend/src/agents/single_pass/`: ArchitecturalClassifier, BusinessRuleExtractor, ObservabilityAuditor, ErrorResilienceAnalyzer, TechnicalDebtAssessor, PerformanceHotspotScanner per plan.md Single-Pass table
+- [x] T043 [P] [US1] Implement all 6 single-pass LLM agents in `backend/src/agents/single_pass/`: ArchitecturalClassifier, BusinessRuleExtractor, ObservabilityAuditor, ErrorResilienceAnalyzer, TechnicalDebtAssessor, PerformanceHotspotScanner per plan.md Single-Pass table
   - **Verify**: Each agent makes exactly 1 LLM call; writes structured output to its Dossier section; handles LLM errors gracefully (retries, then writes error entry)
 
-- [ ] T044 [US1] Implement ConflictSynthesizer in `backend/src/agents/conflict_synthesizer.py` that identifies contradictions between facet findings and generates questions (never resolves) per research.md Decision 16.6
+- [x] T044 [US1] Implement ConflictSynthesizer in `backend/src/agents/conflict_synthesizer.py` that identifies contradictions between facet findings and generates questions (never resolves) per research.md Decision 16.6
   - **Verify**: Given contradictory findings (e.g., "microservice" vs "monolith coupling") → writes ConflictAnalysis with facet_a, facet_b, why_both_coexist, developer_questions; NEVER writes conclusion or winner
 
-- [ ] T045 [US1] Create capability primitives in `backend/src/agents/primitives/` (file_reader.py, ast_parser_tool.py, pattern_matcher.py, security_lens.py, structured_output_writer.py) per research.md Decision 16.3
+- [x] T045 [US1] Create capability primitives in `backend/src/agents/primitives/` (file_reader.py, ast_parser_tool.py, pattern_matcher.py, security_lens.py, structured_output_writer.py) per research.md Decision 16.3
   - **Verify**: Each primitive is a callable tool usable by ReAct agents; file_reader returns file contents; structured_output_writer appends to Dossier; all have typed inputs/outputs
 
-- [ ] T046 [US1] Implement TAG_TRIGGERS registry in `backend/src/orchestrator/tag_triggers.py` mapping agent-emitted tags to downstream agents per research.md Decision 16.5
+- [x] T046 [US1] Implement TAG_TRIGGERS registry in `backend/src/orchestrator/tag_triggers.py` mapping agent-emitted tags to downstream agents per research.md Decision 16.5
   - **Verify**: `TAG_TRIGGERS["pattern:jwt-auth"]` returns `["auth_flow_tracer"]`; tags are strings; lookup for unknown tag returns empty list
 
-- [ ] T047 [US1] Implement LangGraph StateGraph orchestration in `backend/src/orchestrator/graph.py` wiring Layer 0 → Triage → parallel facet agents → ConflictSynthesizer → Layer 2 wiki per plan.md Multi-Agent Architecture
+- [x] T047 [US1] Implement LangGraph StateGraph orchestration in `backend/src/orchestrator/graph.py` wiring Layer 0 → Triage → parallel facet agents → ConflictSynthesizer → Layer 2 wiki per plan.md Multi-Agent Architecture
   - **Verify**: Full pipeline executes end-to-end on a test repo; Dossier is populated after Layer 1; heuristic agents run in parallel; ReAct agents respect tag triggers; ConflictSynthesizer runs last; can visualize execution graph
 
-- [ ] T048 [US1] Implement heuristic routing functions in `backend/src/orchestrator/routing.py` per research.md Decision 16.5 (pure Python conditional edges, no mid-pipeline LLM routing)
+- [x] T048 [US1] Implement heuristic routing functions in `backend/src/orchestrator/routing.py` per research.md Decision 16.5 (pure Python conditional edges, no mid-pipeline LLM routing)
   - **Verify**: `route_after_security(dossier)` returns correct next agent based on Dossier state; all routing is deterministic; no LLM calls in routing functions
 
 ### 3E: Wiki Generation Pipeline (Layer 2)
 
-- [ ] T049 [US1] Implement StructuralAnalyst in `backend/src/wiki/interestingness.py` with rule-based interestingness scoring (high call-in-degree, cyclomatic complexity, cross-module deps, public API surface, unusual patterns) per CLAUDE.md Wiki Generation Pipeline
+- [x] T049 [US1] Implement StructuralAnalyst in `backend/src/wiki/interestingness.py` with rule-based interestingness scoring (high call-in-degree, cyclomatic complexity, cross-module deps, public API surface, unusual patterns) per CLAUDE.md Wiki Generation Pipeline
   - **Verify**: Given module entities → scores each entity 0.0-1.0; high-callee functions score higher; dynamic threshold selects top-N% (not fixed cap); zero LLM calls; produces canonical hash for change detection
 
-- [ ] T050 [US1] Implement ImplementationExplainer in `backend/src/wiki/orchestrator.py` that makes parallel LLM calls (up to 15) for top-scored entities, providing function signature + docstring + body + caller/callee + class body context per CLAUDE.md Wiki Generation Pipeline
+- [x] T050 [US1] Implement ImplementationExplainer in `backend/src/wiki/orchestrator.py` that makes parallel LLM calls (up to 15) for top-scored entities, providing function signature + docstring + body + caller/callee + class body context per CLAUDE.md Wiki Generation Pipeline
   - **Verify**: Given top-N entities → makes parallel LLM calls; each prompt includes class body context (not just caller/callee); answers "why does this exist?" not just "what does it do?"; evidence_lines validated against actual source (hallucination mitigation)
 
-- [ ] T051 [US1] Implement ModuleWeaver in `backend/src/wiki/orchestrator.py` that synthesizes StructuralAnalyst report + ImplementationExplainer explanations + Dossier RAG context into coherent module narrative
+- [x] T051 [US1] Implement ModuleWeaver in `backend/src/wiki/orchestrator.py` that synthesizes StructuralAnalyst report + ImplementationExplainer explanations + Dossier RAG context into coherent module narrative
   - **Verify**: Output includes: module purpose, design patterns, data flow, gotchas, security context (from Dossier), business rules (from Dossier), technical debt; single LLM call; references actual file paths
 
-- [ ] T052 [US1] Create wiki context builder in `backend/src/wiki/context_builder.py` that retrieves relevant Dossier findings via Qdrant RAG for a given module, merging with direct source code
+- [x] T052 [US1] Create wiki context builder in `backend/src/wiki/context_builder.py` that retrieves relevant Dossier findings via Qdrant RAG for a given module, merging with direct source code
   - **Verify**: For module "auth" → retrieves security findings mentioning auth files; combines RAG results with actual source; total context fits within LLM context window (262k tokens for qwen3-coder)
 
-- [ ] T053 [US1] Implement page builders in `backend/src/wiki/page_builders/`: home_page.py, module_page.py, dashboard.py per plan.md wiki/ directory
+- [x] T053 [US1] Implement page builders in `backend/src/wiki/page_builders/`: home_page.py, module_page.py, dashboard.py per plan.md wiki/ directory
   - **Verify**: home_page builds WikiPage with page_type=home, stats, module list, quick links; module_page builds with all 8 structured sections per spec FR-010 (overview, location, how-it-works, key-components, dependencies, configuration, related-pages, known-issues); all pages have valid JSONB content matching data-model.md WikiPage Content Structure
 
-- [ ] T054 [US1] Implement getting_started, function_index, glossary, api_reference page builders in `backend/src/wiki/page_builders/`
+- [x] T054 [US1] Implement getting_started, function_index, glossary, api_reference page builders in `backend/src/wiki/page_builders/`
   - **Verify**: getting_started extracts prerequisites + setup steps from README/config files (FR-007); function_index lists all public code entities with links (FR-008); glossary extracts domain terms from docstrings/comments (FR-009); api_reference creates alphabetical index (FR-008)
 
 ### 3F: API Endpoints
 
-- [ ] T055 [US1] Implement POST /v1/repositories endpoint in `backend/src/api/routes/repositories.py` that validates URL, enqueues analysis job via RQ, returns 202 per openapi.yaml
+- [x] T055 [US1] Implement POST /v1/repositories endpoint in `backend/src/api/routes/repositories.py` that validates URL, enqueues analysis job via RQ, returns 202 per openapi.yaml
   - **Verify**: Valid GitHub URL → returns 202 with Repository object (status=pending); invalid URL → returns 400; duplicate URL → returns 409; job enqueued in RQ
 
-- [ ] T056 [US1] Implement GET /v1/repositories and GET /v1/repositories/{id} endpoints per openapi.yaml with pagination
+- [x] T056 [US1] Implement GET /v1/repositories and GET /v1/repositories/{id} endpoints per openapi.yaml with pagination
   - **Verify**: List returns paginated results matching Pagination schema; GET by ID returns full Repository; 404 for unknown ID; status filter works
 
-- [ ] T057 [US1] Implement DELETE /v1/repositories/{id} and POST /v1/repositories/{id}/refresh endpoints per openapi.yaml
+- [x] T057 [US1] Implement DELETE /v1/repositories/{id} and POST /v1/repositories/{id}/refresh endpoints per openapi.yaml
   - **Verify**: Delete removes repo + wiki + all entities; refresh enqueues new analysis job, returns UpdateEvent; both return 404 for unknown ID
 
-- [ ] T058 [US1] Implement GET /v1/wikis/{repositoryId} and GET /v1/wikis/{repositoryId}/pages endpoints per openapi.yaml
+- [x] T058 [US1] Implement GET /v1/wikis/{repositoryId} and GET /v1/wikis/{repositoryId}/pages endpoints per openapi.yaml
   - **Verify**: Returns Wiki with module_count, page_count; pages endpoint supports page_type filter; 404 when wiki not yet generated
 
-- [ ] T059 [US1] Implement GET /v1/wikis/{repositoryId}/pages/{pageSlug} endpoint per openapi.yaml returning full WikiPage with structured JSONB content
+- [x] T059 [US1] Implement GET /v1/wikis/{repositoryId}/pages/{pageSlug} endpoint per openapi.yaml returning full WikiPage with structured JSONB content
   - **Verify**: Returns WikiPage with all sections; content matches data-model.md JSONB structure; hyperlinks to other pages/entities included; 404 for unknown slug
 
-- [ ] T060 [US1] Implement GET /v1/wikis/{repositoryId}/modules and /modules/{moduleSlug} endpoints per openapi.yaml
+- [x] T060 [US1] Implement GET /v1/wikis/{repositoryId}/modules and /modules/{moduleSlug} endpoints per openapi.yaml
   - **Verify**: Returns module list with detection_confidence, file_count, line_count; module detail includes dependencies_module_ids; 404 for unknown slug
 
-- [ ] T061 [US1] Implement GET /v1/wikis/{repositoryId}/entities/{entityQualifiedName} endpoint per openapi.yaml returning CodeEntity with relationships (calls, imports, inherits_from)
+- [x] T061 [US1] Implement GET /v1/wikis/{repositoryId}/entities/{entityQualifiedName} endpoint per openapi.yaml returning CodeEntity with relationships (calls, imports, inherits_from)
   - **Verify**: Returns entity with signature, description, relationships from Neo4j; 404 for unknown qualified name
 
-- [ ] T062 [US1] Implement GET /v1/search/{repositoryId} endpoint per openapi.yaml with hybrid search (keyword + semantic via Qdrant)
+- [x] T062 [US1] Implement GET /v1/search/{repositoryId} endpoint per openapi.yaml with hybrid search (keyword + semantic via Qdrant)
   - **Verify**: Search "authentication" returns relevant pages, entities, modules; type filter works (all/pages/entities/modules); results sorted by relevance score; response time <2s (SC-013)
 
-- [ ] T063 [US1] Implement repository analysis background job in `backend/src/jobs/analyze.py` that orchestrates the full pipeline: clone repo → parse code → recon → facet agents → wiki generation → update status
+- [x] T063 [US1] Implement repository analysis background job in `backend/src/jobs/analyze.py` that orchestrates the full pipeline: clone repo → parse code → recon → facet agents → wiki generation → update status
   - **Verify**: End-to-end: submit repo URL → job completes → Repository status=ready → Wiki exists with pages; handles failures gracefully (status=error with error message); 50k LOC repo completes in <15 minutes (SC-001)
 
 ### 3G: Frontend - Design System & Shared Components

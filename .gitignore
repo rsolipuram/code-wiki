@@ -66,4 +66,17 @@ yarn.lock
 *.tmp
 *.temp
 .cache/
-.claude
+cache/
+
+# Backend
+backend/venv/
+backend/.env
+backend/__pycache__/
+
+# Frontend
+frontend/.env.local
+frontend/.next/
+frontend/out/
+
+# Docker
+.dockerignore
