@@ -382,11 +382,13 @@ Controls user access to repositories.
 - `code_entities` (nodes with properties matching CodeEntity model)
 - Relationships: `CALLS`, `IMPORTS`, `INHERITS_FROM`, `DEFINES`, `USES`, `OVERRIDES`
 
-### pgvector
+### Qdrant (Vector Database)
 
-- Embeddings for WikiPages (semantic search)
-- Embeddings for CodeEntities (semantic code search)
-- Stored as `vector(1536)` columns in respective tables
+- Embeddings for WikiPages (semantic search) — stored in `wiki_pages` collection
+- Embeddings for CodeEntities (semantic code search) — stored in `code_entities` collection
+- Embeddings for Dossier findings — stored in `dossier_findings` collection
+- Vector dimension: **384** (sentence-transformers `all-MiniLM-L6-v2`)
+- Self-hosted via Docker; replaces pgvector per research.md Decision 5
 
 ---
 

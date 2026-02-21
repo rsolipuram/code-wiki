@@ -726,11 +726,4 @@ components:
         details:
           type: object
 
-  securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-
-security:
-  - BearerAuth: []
+  # NOTE: No securitySchemes — MVP has no authentication (Decision 9 in research.md)
