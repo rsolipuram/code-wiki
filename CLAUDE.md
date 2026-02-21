@@ -368,6 +368,7 @@ The spec currently focuses on AI-powered generation but may be missing the **det
 - Default link color: `var(--secondary)` = `#06B6D4` (cyan)
 - Hover link color: `var(--primary-light)` = `#A78BFA` (light purple)
 - Scope carefully — avoid interfering with nav/sidebar/button links
+- Apply ONLY to content pages (home.html, module.html, etc.) — NOT to navigation hub pages like `index.html`
 
 **Interaction Patterns**:
 - Gradient accent bars (sky-to-purple) reveal on hover
@@ -622,5 +623,5 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-21 (Session a95d405d — Phase 0 foundation + frontend scaffold complete, 8 UI components + 5 pages implemented)*
+*Last updated: 2026-02-21 (Session 8de9054a — Link style scoping clarified for glassmorphism mocks)*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
