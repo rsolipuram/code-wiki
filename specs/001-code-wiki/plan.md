@@ -554,10 +554,11 @@ Tracks known inconsistencies across spec artifacts. Updated 2026-02-21.
 |----------|-----|-------|--------|
 | `data-model.md` | ~~pgvector reference~~ replaced with Qdrant | Phase 1 | ✅ Fixed (T109) |
 | `openapi.yaml` | ~~BearerAuth~~ removed (MVP no auth) | Phase 5 | ✅ Fixed (T108) |
-| `data-model.md` | No Dossier schema (`DossierEntry`, `RepoFingerprint`) | Phase 1 | ⚠ Open |
-| `openapi.yaml` | No webhook endpoint (`POST /repositories/{id}/webhook`) | Phase 7 | ⚠ Open (post-MVP) |
+| `data-model.md` | ~~No Dossier schema~~ added `DossierEntry`, `RepoFingerprint` (entity 8) | Phase 1 | ✅ Fixed (2026-02-21) |
+| `openapi.yaml` | ~~No webhook endpoint~~ added `POST /repositories/{id}/webhook` | Phase 7 | ✅ Fixed (2026-02-21) |
+| `openapi.yaml` | ~~`GET /repositories/{id}/status` missing~~ — added with `RepositoryStatus` schema | Phase 3 | ✅ Fixed (2026-02-21) |
+| `openapi.yaml` | ~~No diagrams endpoint~~ added `GET /wikis/{id}/diagrams` with `DiagramsResponse` schema | Phase 5 | ✅ Fixed (2026-02-21) |
 | `openapi.yaml` | No multi-dimensional wiki view endpoints (security, infra, domain) | Phase 7 | ⚠ Open (post-MVP) |
-| `openapi.yaml` | `GET /repositories/{id}/status` not in spec | Phase 3 | ⚠ Implemented, not in openapi.yaml |
 | `plan.md` | Agent names: CLAUDE.md uses `ArchitectureAnalyzer`; plan uses `ArchitecturalClassifier` | — | ⚠ Standardize on `ArchitecturalClassifier` (matches directory) |
 
 ---

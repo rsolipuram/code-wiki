@@ -141,6 +141,68 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /repositories/{repositoryId}/status:
+    get:
+      tags: [repositories]
+      summary: Get current analysis status and latest update event
+      operationId: getRepositoryStatus
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '200':
+          description: Repository status with latest update event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /repositories/{repositoryId}/webhook:
+    post:
+      tags: [repositories]
+      summary: Receive push webhook from GitHub/GitLab
+      operationId: receiveWebhook
+      description: >
+        Accepts push event payloads from GitHub (`X-GitHub-Event: push`) or
+        GitLab (`X-Gitlab-Event: Push Hook`). Validates HMAC-SHA256 signature,
+        creates an UpdateEvent, and enqueues an incremental sync job.
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - name: X-GitHub-Event
+          in: header
+          schema:
+            type: string
+          description: GitHub event type (e.g. "push")
+        - name: X-GitLab-Event
+          in: header
+          schema:
+            type: string
+          description: GitLab event type (e.g. "Push Hook")
+        - name: X-Hub-Signature-256
+          in: header
+          schema:
+            type: string
+          description: HMAC-SHA256 signature for GitHub payloads
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Raw push event payload from provider
+      responses:
+        '202':
+          description: Webhook accepted, sync job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateEvent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ==================== WIKIS ====================
 
   /wikis/{repositoryId}:
@@ -262,6 +324,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CodeEntity'
+
+  /wikis/{repositoryId}/diagrams:
+    get:
+      tags: [wikis]
+      summary: Get diagram data for architecture, dependency graph, and module relationships
+      operationId: getDiagrams
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+        - name: view
+          in: query
+          schema:
+            type: string
+            enum: [architecture, dependency, module_relationships]
+            default: architecture
+          description: Which diagram view to return
+      responses:
+        '200':
+          description: Diagram data for the requested view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagramsResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ==================== CHAT ====================
 
@@ -714,6 +800,87 @@ components:
           type: integer
         total_items:
           type: integer
+
+    RepositoryStatus:
+      type: object
+      required: [repository_id, status]
+      properties:
+        repository_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, analyzing, ready, error]
+        latest_update_event:
+          $ref: '#/components/schemas/UpdateEvent'
+        progress_message:
+          type: string
+          description: Human-readable status description (e.g., "Analyzing 3 of 7 modules")
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+
+    DiagramNode:
+      type: object
+      required: [id, label, type]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        type:
+          type: string
+          enum: [module, file, entity, external]
+        metadata:
+          type: object
+          description: Additional display properties (color, size, etc.)
+
+    DiagramEdge:
+      type: object
+      required: [source, target, relationship]
+      properties:
+        source:
+          type: string
+          description: Source node id
+        target:
+          type: string
+          description: Target node id
+        relationship:
+          type: string
+          enum: [depends_on, calls, imports, inherits, defines]
+        weight:
+          type: integer
+          description: Edge weight / call frequency
+
+    DiagramData:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiagramNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiagramEdge'
+
+    DiagramsResponse:
+      type: object
+      required: [repository_id, view, data]
+      properties:
+        repository_id:
+          type: string
+          format: uuid
+        view:
+          type: string
+          enum: [architecture, dependency, module_relationships]
+        data:
+          $ref: '#/components/schemas/DiagramData'
+        generated_at:
+          type: string
+          format: date-time
 
     Error:
       type: object

@@ -324,7 +324,64 @@ Represents a commit or code change that triggers wiki regeneration.
 
 ---
 
-## 8. User
+## 8. Dossier (LangGraph Shared State)
+
+The shared blackboard that all Facet Intelligence agents read from and write to. Implemented as a LangGraph `TypedDict` state — not a database table, but documented here as the primary inter-agent contract.
+
+### Structure
+
+```python
+class Dossier(TypedDict):
+    repository_id: str                  # UUID of repository being analyzed
+    repo_fingerprint: RepoFingerprint   # Layer 0 reconnaissance output
+    facet_findings: dict[str, list[DossierEntry]]  # agent_name → findings
+    active_tags: list[str]              # Tags emitted by agents (drive TAG_TRIGGERS routing)
+    visited_files: set[str]             # ReAct agent visited-set (prevents re-reading)
+    iteration_counts: dict[str, int]    # Per-agent iteration counter (hard cap enforcement)
+    errors: list[dict]                  # Per-agent error records
+```
+
+### DossierEntry
+
+```python
+class DossierEntry(TypedDict):
+    agent: str           # Which facet agent produced this
+    finding_type: str    # e.g., "security_risk", "dependency", "pattern"
+    title: str           # Short summary
+    detail: str          # Full explanation
+    evidence_lines: list[str]  # File:line references (REQUIRED — prevents hallucination)
+    confidence: float    # 0.0–1.0 agent self-assessment
+    tags: list[str]      # Emitted tags (matched against TAG_TRIGGERS catalog)
+    created_at: str      # ISO timestamp
+```
+
+### RepoFingerprint
+
+Output of Layer 0 (Repo Reconnaissance — no LLM):
+
+```python
+class RepoFingerprint(TypedDict):
+    file_tree: list[str]           # All file paths
+    detected_languages: list[str]  # e.g., ["Python", "TypeScript"]
+    config_files: list[str]        # package.json, pyproject.toml, Dockerfile, etc.
+    entry_points: list[str]        # main.py, index.ts, app.py, etc.
+    test_directories: list[str]    # tests/, __tests__/, spec/, etc.
+    total_files: int
+    total_lines: int
+    primary_language: str          # Most common language by LOC
+```
+
+### Invariants
+
+- Agents NEVER communicate directly — all findings go through Dossier
+- `evidence_lines` is REQUIRED on every DossierEntry (prevents LLM hallucination of fake file:line refs)
+- ReAct agents write findings mid-loop (not just at completion) to enable cross-agent knowledge sharing
+- `visited_files` is per-agent; each agent maintains its own set in `iteration_counts` key namespace
+- Hard iteration cap: 30 iterations per ReAct agent (enforced by LangGraph conditional edge)
+
+---
+
+## 10. User
 
 Represents a platform user.
 
@@ -347,7 +404,7 @@ Represents a platform user.
 
 ---
 
-## 9. RepositoryAccess (Join Table)
+## 11. RepositoryAccess (Join Table)
 
 Controls user access to repositories.
 
@@ -437,4 +494,5 @@ pending → processing → completed
 ---
 
 **Data Model Complete**: 2026-02-15
+**Updated**: 2026-02-21 — Added Dossier/DossierEntry/RepoFingerprint (entities 8); renumbered User→10, RepositoryAccess→11; fixed Qdrant section (replaces pgvector)
 **Ready for API Contracts**: ✅
