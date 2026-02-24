@@ -4,7 +4,7 @@ AI-powered code documentation platform that automatically generates and maintain
 
 ## Project Overview
 
-**Status**: Implementation phase (Active — Phase 0 + Frontend scaffolding complete)
+**Status**: Implementation phase (Active — Integration fixes applied, unified wiki reader implemented)
 **Feature Branch**: `001-code-wiki`
 **Main Branch**: `main`
 
@@ -35,7 +35,9 @@ code-wiki/
   frontend/                      # Next.js + TypeScript frontend
     src/
       app/                       # Next.js App Router pages
-        [owner]/[name]/          # Wiki pages (home, modules/[slug], progress)
+        [owner]/[name]/          # Unified wiki reader (3-column: sidebar + content + TOC)
+          [slug]/                # Wiki section pages (all rendered by unified reader)
+          progress/              # Analysis progress page
         dashboard/               # Repository list management
         login/                   # OAuth + email auth
         submit/                  # Add repository form
@@ -61,7 +63,7 @@ code-wiki/
       contracts/
         openapi.yaml             # REST API specification
       ux/
-        docs-glassmorphism/      # 15-page glassmorphism mock set (reference for implementation)
+        docs-glassmorphism/      # 9-page glassmorphism mock set (6 wiki-content pages absorbed into unified reader)
         docs-brutalist/          # Brutalist design variant
   .specify/
     templates/                   # Specify framework templates
@@ -415,18 +417,13 @@ The spec currently focuses on AI-powered generation but may be missing the **det
 - ✅ `research.md` - Technology decisions with detailed rationale
 - ✅ `quickstart.md` - Development environment setup guide
 - ✅ `ux/*.html` - Frontend design mockups (5 complete pages + navigation template)
-- ✅ `ux/docs-glassmorphism/` - **15-page glassmorphism mock set** (full coverage):
-  - `home.html`, `module.html`, `function.html`, `search.html`, `chat.html`, `getting-started.html` (original 6)
-  - `login.html` - OAuth + email auth flow
-  - `dashboard.html` - Repository list management
-  - `submit.html` - Add repository form with live URL validation and provider detection
-  - `progress.html` - Animated analysis pipeline with live stats and completion celebration
-  - `diagrams.html` - Architecture, dependency graph, module relationship views
-  - `glossary.html` - Alphabetical term browser with scroll-spy and live search
-  - `api-reference.html` - Full API reference with alphabetical index (covers FR-008)
-  - `error.html` - Error states (404, failure, private repo auth fallback)
-  - `index.html` - Navigation hub linking all pages
+- ✅ `ux/docs-glassmorphism/` - **9-page glassmorphism mock set** (6 wiki-content pages absorbed into unified reader):
+  - `module.html` - **Primary wiki reader template** (3-column: sidebar + content + TOC)
+  - `function.html` - Entity drill-down detail page
+  - `search.html`, `chat.html` - Interactive features
+  - `login.html`, `dashboard.html`, `submit.html`, `progress.html`, `error.html` - App chrome pages
   - `README.md` - Mock set documentation
+  - **Deleted** (absorbed into sidebar navigation): `home.html`, `getting-started.html`, `glossary.html`, `api-reference.html`, `diagrams.html`, `index.html`
 
 ## Mobile Nav Fix Pattern (Reference Implementation)
 
@@ -439,24 +436,21 @@ Applied to all wiki pages with sidebars (module.html, function.html, search.html
 
 **Gotcha**: function.html had a divergent legacy pattern (fixed circular button + `.active` toggle) — required removing old CSS/HTML before applying standard pattern.
 
-## UX Mock Status (2026-02-16)
+## UX Mock Status (2026-02-24)
 
-All gaps resolved. Full 15-page mock set covers all spec requirements:
+**Consolidated to 9 mocks** after unified wiki reader decision. 6 wiki-content pages (home, getting-started, glossary, api-reference, diagrams, index) absorbed into sidebar navigation within the unified reader.
 
-| Page | Spec Requirement | Status |
+| Page | Role | Status |
 |---|---|---|
-| `submit.html` | FR-001 (accept repo URLs) | ✅ Add repository with URL validation + provider detection |
-| `glossary.html` | FR-009 (auto-extracted glossary) | ✅ Alphabetical browser with scroll-spy + live search |
-| `diagrams.html` | FR-013 (architecture diagrams) | ✅ Architecture, dependency graph, module relationships |
-| `login.html` | FR-030 (auth flow) | ✅ OAuth + email auth |
-| `dashboard.html` | FR-002 (repo management) | ✅ Repository list with sync status |
-| `progress.html` | FR-003 (analysis pipeline) | ✅ Animated 6-step pipeline with completion celebration |
-| `chat.html` | FR-027 (repo-scoped chat) | ✅ Repo context bar added to header |
-| `module.html` | FR-010 (module structure) | ✅ Rebuilt with Location, Key Components, Dependencies sections |
-| `api-reference.html` | FR-008 (API reference index) | ✅ Full alphabetical index with filtering |
-| `error.html` | Error states | ✅ 404, analysis failure, private repo auth fallback |
-
-**All spec requirements fully mocked.** No remaining gaps.
+| `module.html` | **Primary wiki reader** (3-column layout template) | ✅ All wiki content rendered here |
+| `function.html` | Entity drill-down detail | ✅ |
+| `search.html` | Search interface | ✅ |
+| `chat.html` | AI chat assistant | ✅ |
+| `login.html` | OAuth + email auth | ✅ |
+| `dashboard.html` | Repository list management | ✅ |
+| `submit.html` | Add repository form | ✅ |
+| `progress.html` | Analysis pipeline visualization | ✅ |
+| `error.html` | Error states (404, failure) | ✅ |
 
 ## Facet Intelligence System Architecture (2026-02-18)
 
@@ -538,7 +532,28 @@ backend/src/
 
 ### Final Wiki Navigation
 
-Dashboard → 6 domain views (Architecture, Security, Infrastructure, Operations, Domain, Dependencies) + per-Module wikis
+Dashboard → Unified wiki reader with sidebar navigation (all wiki content in single 3-column layout)
+
+### Unified Wiki Reader Architecture (2026-02-24)
+
+**Decision**: Consolidated all wiki content into a single 3-column reader (sidebar nav + main content + table of contents) matching `module.html` mockup pattern. Eliminates 6 separate page routes.
+
+**Frontend route structure**:
+- `/[owner]/[name]` — Wiki home (redirects or renders overview)
+- `/[owner]/[name]/[slug]` — Wiki section page (module, getting-started, glossary, etc.)
+- `/[owner]/[name]/progress` — Analysis progress page (separate route)
+
+**Sidebar sections**: All wiki page types (modules, getting-started, glossary, api-reference, diagrams) become sidebar navigation items within the unified reader, not separate routes.
+
+### Backend Integration Fixes Applied (2026-02-24)
+
+Five integration seam repairs (not architectural changes):
+
+1. **RepoFingerprint metadata** (`recon/repo_recon.py`): Now extracts `project_description`, `project_version`, `primary_language`, `build_output_dirs` from package.json/pyproject.toml/Cargo.toml/go.mod
+2. **Build artifact filtering** (`jobs/analyze.py`): Skips minified `.cjs`/`.min.js`/`dist/`/`build/` files during entity extraction using `build_output_dirs` from fingerprint
+3. **Semantic module detection** (`jobs/analyze.py`): Replaced directory-depth heuristic with functional grouping from package.json workspaces, src/ subdirectories, and manifest-defined entry points
+4. **Entity path normalization** (`jobs/analyze.py`): Converts absolute clone paths to repo-relative paths before persistence
+5. **Home page project identity** (`wiki/page_builders/home_page.py`): Populates `project_description` from RepoFingerprint instead of hardcoded fallback
 
 ## Wiki Generation Pipeline Architecture (2026-02-18)
 
@@ -613,7 +628,9 @@ According to specification workflow:
 14. ✅ **Backend wiki pipeline scaffold** — Context builder with RAG integration, module/dashboard page builders, special page builders (getting started, function index, glossary, API reference)
 15. ✅ **All 109 tasks complete** — Frontend (login, chat, search, diagrams, glossary, API reference, error, getting-started pages), Backend (webhook handler, Phase 7 Polish tasks T102–T109)
 16. ✅ **Spec artifacts updated** — `openapi.yaml`: added `/status`, `/webhook`, `/diagrams` endpoints + 5 new schemas; `data-model.md`: added Dossier entity (DossierEntry, RepoFingerprint), fixed Qdrant section; `plan.md`: full rewrite to 685 lines with all architecture decisions; Artifact Gap Tracker: 6 of 7 gaps resolved
-17. ⏳ **Next: Backend implementation** — Code parsers (Jedi/Python AST, TypeScript Compiler API), Facet Intelligence agents, Neo4j/Qdrant integration, FastAPI endpoints
+17. ✅ **Integration fixes applied** — RepoFingerprint metadata extraction, build artifact filtering, semantic module detection, entity path normalization, home page project identity
+18. ✅ **Unified wiki reader** — Consolidated 6+ wiki page routes into single 3-column reader with sidebar navigation; deleted 6 redundant glassmorphism mocks
+19. ⏳ **Next: Backend implementation** — Code parsers (Jedi/Python AST, TypeScript Compiler API), Facet Intelligence agents, Neo4j/Qdrant integration, FastAPI endpoints
 
 ---
 
@@ -630,5 +647,5 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-23 (Runtime gotchas from end-to-end test: macOS fork safety, RQ queue name, SimpleWorker, Neo4j degraded mode, psycopg2 Python 3.13 ARM)*
+*Last updated: 2026-02-24 (Unified wiki reader, integration fixes, mock consolidation 15→9)*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
