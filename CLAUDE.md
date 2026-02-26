@@ -287,7 +287,7 @@ npm install
 | `docker-compose up -d` | Start PostgreSQL, Neo4j, and Qdrant services |
 | `docker-compose ps` | Check service status |
 | `uvicorn src.api.main:app --reload --port 8000` | Start backend dev server (from backend/) |
-| `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES rq worker analysis --simple` | Start RQ worker on macOS (from backend/, requires `venv` active) |
+| `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES rq worker analysis` | Start RQ worker on macOS (from backend/, requires `venv` active) |
 | `npm run dev` | Start frontend dev server on port 3000 (from frontend/) |
 | `curl http://localhost:8000/health` | Test backend health endpoint |
 | `curl http://localhost:1234/v1/models` | Verify LM Studio is running |
@@ -307,7 +307,8 @@ npm install
 - **LM Studio required**: Backend depends on LM Studio running on localhost:1234 - start it before backend
 - **GPU recommended**: QwenCoder 7B model runs best with 8GB+ VRAM (NVIDIA GPU)
 - **Qdrant in Docker**: Vector database runs in container, data persists in `qdrant_data` volume
-- **macOS fork safety**: RQ worker crashes on macOS without `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`; use `--simple` flag to run `SimpleWorker` (avoids forking entirely)
+- **macOS fork safety**: RQ worker crashes on macOS without `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`
+- **RQ worker code changes**: RQ worker must be restarted after backend code changes — it caches imported Python modules in memory
 - **RQ queue name**: Jobs are enqueued to the `analysis` queue — always start the worker with `rq worker analysis`, not the default queue
 - **Neo4j optional**: Backend starts in degraded mode without Neo4j (graph queries disabled); safe to skip during local dev if disk space is limited — comment out the `neo4j` service in `docker-compose.yml`
 - **psycopg2 on Python 3.13 + ARM**: Use `psycopg2-binary>=2.9.9`; older versions fail to build on Python 3.13 ARM (Apple Silicon)
