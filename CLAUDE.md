@@ -51,7 +51,7 @@ code-wiki/
         StatusIndicator.tsx      # Animated status dot
         TypeBadge.tsx            # Entity type badge (class/function/etc.)
       services/api.ts            # Typed API client with unified namespace
-  docker-compose.yml             # PostgreSQL, Neo4j, Qdrant services
+  docker-compose.yml             # PostgreSQL, Neo4j, Qdrant, Redis services
   specs/
     001-code-wiki/
       spec.md                    # Complete feature specification
@@ -142,7 +142,7 @@ This project uses **Specify** framework for requirements management:
 
 **Self-Hosted Stack**: LM Studio + Qdrant eliminate external API costs and privacy concerns
 - LLM runs locally via LM Studio (OpenAI-compatible API on localhost:1234)
-- QwenCoder model optimized specifically for code tasks
+- qwen3-coder-30b model optimized specifically for code tasks (configured via `LLM_MODEL` in `backend/.env`)
 - Qdrant vector DB runs in Docker container (ports 6333/6334)
 
 **Accuracy Over Uniformity**: Language-specific parsers prioritized over universal Tree-sitter
@@ -284,7 +284,7 @@ npm install
 
 | Command | Description |
 |---------|-------------|
-| `docker-compose up -d` | Start PostgreSQL, Neo4j, and Qdrant services |
+| `docker-compose up -d` | Start PostgreSQL, Neo4j, Qdrant, and Redis services |
 | `docker-compose ps` | Check service status |
 | `uvicorn src.api.main:app --reload --port 8000` | Start backend dev server (from backend/) |
 | `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES rq worker analysis` | Start RQ worker on macOS (from backend/, requires `venv` active) |
@@ -297,15 +297,17 @@ npm install
 - Backend API: `http://localhost:8000`
 - API Docs: `http://localhost:8000/docs` (auto-generated Swagger)
 - Frontend: `http://localhost:3000`
-- PostgreSQL: `localhost:5432`
+- PostgreSQL: `localhost:5434` (host) → container 5432 (remapped to avoid local postgres conflict)
 - Neo4j Browser: `http://localhost:7474`
 - Qdrant: `http://localhost:6333` (REST), `localhost:6334` (gRPC)
+- Redis: `localhost:6380` (host) → container 6379 (remapped to avoid local redis conflict)
 - LM Studio: `http://localhost:1234` (OpenAI-compatible API)
 
 ## Gotchas
 
 - **LM Studio required**: Backend depends on LM Studio running on localhost:1234 - start it before backend
-- **GPU recommended**: QwenCoder 7B model runs best with 8GB+ VRAM (NVIDIA GPU)
+- **GPU recommended**: qwen3-coder-30b model runs best with sufficient VRAM; configure model name in `backend/.env` via `LLM_MODEL`
+- **Port conflicts**: PostgreSQL and Redis host ports are remapped (5434 and 6380) to avoid conflicts with local services — ensure `DATABASE_URL` and `REDIS_URL` in `backend/.env` match docker-compose port mappings
 - **Qdrant in Docker**: Vector database runs in container, data persists in `qdrant_data` volume
 - **macOS fork safety**: RQ worker crashes on macOS without `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`
 - **RQ worker code changes**: RQ worker must be restarted after backend code changes — it caches imported Python modules in memory
@@ -648,5 +650,5 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-24 (Unified wiki reader, integration fixes, mock consolidation 15→9)*
+*Last updated: 2026-02-26 (Port remapping, Redis service, LLM model update to qwen3-coder-30b, Alembic migrations initialized)*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
