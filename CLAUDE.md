@@ -280,6 +280,39 @@ cd frontend
 npm install
 ```
 
+### Running the App (Every Session)
+
+```bash
+# 1. Start Docker services (requires Rancher Desktop or Docker Desktop to be open)
+docker-compose up -d
+docker-compose ps   # verify all 4 services are Up
+
+# 2. Run migrations (only needed after schema changes or first run)
+cd backend
+DATABASE_URL="postgresql://codewiki:codewiki@localhost:5434/codewiki" alembic upgrade head
+
+# 3. Start backend (from backend/, venv active)
+source venv/bin/activate
+DATABASE_URL="postgresql://codewiki:codewiki@localhost:5434/codewiki" \
+  uvicorn src.api.main:app --reload --port 8000
+
+# 4. Start frontend (separate terminal, from frontend/)
+npm run dev
+
+# 5. Optionally start RQ worker for background analysis jobs (separate terminal, from backend/)
+source venv/bin/activate
+OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES \
+  DATABASE_URL="postgresql://codewiki:codewiki@localhost:5434/codewiki" \
+  rq worker analysis
+```
+
+**Verify everything is up:**
+```bash
+curl http://localhost:8000/health   # all services should show "healthy"
+open http://localhost:3000          # frontend
+open http://localhost:8000/docs     # Swagger API docs
+```
+
 ### Development Commands
 
 | Command | Description |
