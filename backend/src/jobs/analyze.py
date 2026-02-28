@@ -163,16 +163,23 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             )
             logger.info("[%s] Step 5 done (%.1fs)", repository_id, time.monotonic() - t0)
 
-            # ── Step 6: Persist entities to Neo4j ──────────────────────────
+            # ── Step 6: Persist entities to Neo4j (optional — graceful skip on failure)
             _progress(6, "Building relationship graph", "Creating nodes and edges...")
             t0 = time.monotonic()
             logger.info("[%s] Step 6: Writing to Neo4j", repository_id)
-            neo4j_stats = _write_neo4j(entities)
-            stats["neo4j_nodes"] = neo4j_stats["nodes"]
-            stats["neo4j_edges"] = neo4j_stats["edges"]
-            stats["neo4j_unresolved"] = neo4j_stats["unresolved"]
-            logger.info("[%s] Step 6 done (%.1fs)", repository_id, time.monotonic() - t0)
-            _progress(6, "Building relationship graph", f"{neo4j_stats['nodes']} nodes, {neo4j_stats['edges']} edges")
+            try:
+                neo4j_stats = _write_neo4j(entities)
+                stats["neo4j_nodes"] = neo4j_stats["nodes"]
+                stats["neo4j_edges"] = neo4j_stats["edges"]
+                stats["neo4j_unresolved"] = neo4j_stats["unresolved"]
+                logger.info("[%s] Step 6 done (%.1fs)", repository_id, time.monotonic() - t0)
+                _progress(6, "Building relationship graph", f"{neo4j_stats['nodes']} nodes, {neo4j_stats['edges']} edges")
+            except Exception as neo4j_exc:
+                logger.warning("[%s] Step 6 skipped — Neo4j write failed: %s", repository_id, neo4j_exc)
+                stats["neo4j_nodes"] = 0
+                stats["neo4j_edges"] = 0
+                stats["neo4j_unresolved"] = 0
+                _progress(6, "Building relationship graph", "Skipped (Neo4j unavailable)")
 
             # ── Step 7: Detect modules ──────────────────────────────────────
             _progress(7, "Detecting modules", "Analyzing structure...")
@@ -345,6 +352,14 @@ def _write_neo4j(entities: list[ParsedEntity]) -> dict[str, int]:
     Returns:
         Dict with keys: nodes, edges, unresolved.
     """
+    import os
+    import platform
+
+    # On macOS, Neo4j driver uses native Obj-C networking that causes SIGABRT
+    # in forked RQ work-horse processes. Skip Neo4j writes on macOS to avoid crashes.
+    if platform.system() == "Darwin":
+        logger.info("Skipping Neo4j writes on macOS (fork safety)")
+        return {"nodes": 0, "edges": 0, "unresolved": 0}
     # Build lookup: short name → qualified_name for fuzzy matching
     name_to_qname: dict[str, str] = {}
     for entity in entities:
