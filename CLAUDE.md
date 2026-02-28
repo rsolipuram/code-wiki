@@ -4,7 +4,7 @@ AI-powered code documentation platform that automatically generates and maintain
 
 ## Project Overview
 
-**Status**: Implementation phase (Active — Integration fixes applied, unified wiki reader implemented)
+**Status**: Implementation phase (Active — Pipeline logging + gap fixes applied, branch support wired end-to-end)
 **Feature Branch**: `001-code-wiki`
 **Main Branch**: `main`
 
@@ -348,6 +348,9 @@ open http://localhost:8000/docs     # Swagger API docs
 - **Neo4j optional**: Backend starts in degraded mode without Neo4j (graph queries disabled); safe to skip during local dev if disk space is limited — comment out the `neo4j` service in `docker-compose.yml`
 - **psycopg2 on Python 3.13 + ARM**: Use `psycopg2-binary>=2.9.9`; older versions fail to build on Python 3.13 ARM (Apple Silicon)
 - **FastAPI error envelope**: Backend wraps error responses in `{"detail": {...}}` — frontend `request()` must unwrap the nested `detail` object to extract meaningful error messages (e.g., 409 duplicate repository). Forgetting this causes silent error swallowing
+- **Neo4j dangling edges**: Entity IDs use qualified names (`module.ClassName.method`) but relationship targets store raw call names (`method`). The `_write_neo4j` function builds a name→qualified_name lookup map to resolve targets before creating CALLS relationships. Without this, MATCH queries fail silently and the call graph has missing edges
+- **Alembic migrations**: Run `alembic upgrade head` after pulling changes that add database columns (e.g., `branch` column on repositories). The migration uses `batch_alter_table` for SQLite compatibility
+- **Branch parameter**: Wired end-to-end: `Repository.branch` model column → Alembic migration → `RepositoryCreate` schema → API route sets on create → passed to RQ job → `analyze_repository()` receives it → frontend `api.ts` sends in POST body. Default branch is `main`
 - `.specify/memory/` is gitignored - contains temporary framework state
 - `.claude/*.local.md` files are gitignored - local plugin configuration
 - Specification follows Specify framework patterns (business focus, no implementation details)
@@ -667,7 +670,8 @@ According to specification workflow:
 16. ✅ **Spec artifacts updated** — `openapi.yaml`: added `/status`, `/webhook`, `/diagrams` endpoints + 5 new schemas; `data-model.md`: added Dossier entity (DossierEntry, RepoFingerprint), fixed Qdrant section; `plan.md`: full rewrite to 685 lines with all architecture decisions; Artifact Gap Tracker: 6 of 7 gaps resolved
 17. ✅ **Integration fixes applied** — RepoFingerprint metadata extraction, build artifact filtering, semantic module detection, entity path normalization, home page project identity
 18. ✅ **Unified wiki reader** — Consolidated 6+ wiki page routes into single 3-column reader with sidebar navigation; deleted 6 redundant glassmorphism mocks
-19. ⏳ **Next: Backend implementation** — Code parsers (Jedi/Python AST, TypeScript Compiler API), Facet Intelligence agents, Neo4j/Qdrant integration, FastAPI endpoints
+19. ✅ **Pipeline logging + gap fixes** — Comprehensive structured logging across 8 backend modules; fixed 6 pipeline gaps (duplicate recon, Neo4j dangling edges, error_message persistence, API schema updates, frontend error state, branch field wired end-to-end with Alembic migration)
+20. ⏳ **Next: Backend implementation** — Code parsers (Jedi/Python AST, TypeScript Compiler API), Facet Intelligence agents, Neo4j/Qdrant integration, FastAPI endpoints
 
 ---
 
@@ -684,5 +688,5 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-27 (Fixed stale repo creation gotcha → FastAPI error envelope pattern)*
+*Last updated: 2026-02-28 (Pipeline logging + 6 gap fixes: Neo4j edges, error_message, branch wiring)*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
