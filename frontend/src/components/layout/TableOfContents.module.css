@@ -1,0 +1,68 @@
+/* TableOfContents — matches .toc-item from module.html mock */
+
+.tocNav {
+  position: sticky;
+  top: 0;
+}
+
+.tocTitle {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-tertiary);
+  margin-bottom: 20px;
+}
+
+.tocList {
+  display: flex;
+  flex-direction: column;
+}
+
+.tocItem {
+  padding: 8px 0 8px 16px;
+  font-size: 14px;
+  color: var(--text-tertiary);
+  text-decoration: none;
+  transition: all 0.3s;
+  border-left: 2px solid transparent;
+  position: relative;
+}
+
+/* Gradient left border (animated height) */
+.tocItem::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 0;
+  background: linear-gradient(180deg, var(--primary), var(--secondary));
+  transition: height 0.3s;
+}
+
+.tocItem:hover {
+  color: var(--text-primary);
+  padding-left: 20px;
+}
+
+.tocItem:hover::before {
+  height: 60%;
+}
+
+/* Active state */
+.active {
+  color: var(--primary-light) !important;
+  font-weight: 600;
+}
+
+.active::before {
+  height: 100% !important;
+}
+
+/* Level 3 indent */
+.level3 {
+  padding-left: 28px;
+  font-size: 13px;
+}

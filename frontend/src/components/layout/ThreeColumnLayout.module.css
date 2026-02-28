@@ -1,0 +1,103 @@
+/* ThreeColumnLayout — matches .docs-layout from module.html mock */
+
+.docsLayout {
+  display: grid;
+  grid-template-columns: 300px 1fr 280px;
+  max-width: 1800px;
+  margin: 0 auto;
+  min-height: 100vh;
+  gap: 24px;
+  padding: 24px;
+}
+
+.sidebarLeft {
+  position: sticky;
+  top: 24px;
+  height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 32px;
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary) rgba(255, 255, 255, 0.05);
+}
+
+.sidebarLeft::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebarLeft::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+.sidebarLeft::-webkit-scrollbar-thumb {
+  background: var(--primary);
+  border-radius: 3px;
+}
+
+.mainContent {
+  padding: 48px 64px;
+  max-width: 900px;
+  opacity: 0;
+  animation: fadeInUp 0.8s 0.2s ease forwards;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sidebarRight {
+  position: sticky;
+  top: 24px;
+  height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 28px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(139, 92, 246, 0.3) transparent;
+}
+
+/* Hide right TOC below 1400px */
+@media (max-width: 1400px) {
+  .docsLayout {
+    grid-template-columns: 300px 1fr;
+  }
+
+  .sidebarRight {
+    display: none;
+  }
+}
+
+/* Single column + hamburger below 900px */
+@media (max-width: 900px) {
+  .docsLayout {
+    grid-template-columns: 1fr;
+    padding: 0;
+    padding-top: 60px; /* space for sticky topbar */
+  }
+
+  .sidebarLeft {
+    position: fixed;
+    left: -320px;
+    top: 0;
+    height: 100vh;
+    width: 300px;
+    z-index: 1000;
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 0;
+  }
+
+  .sidebarLeft.open {
+    left: 0;
+  }
+
+  .mainContent {
+    padding: 24px 16px;
+  }
+}
