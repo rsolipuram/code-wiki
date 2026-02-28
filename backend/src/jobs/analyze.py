@@ -14,7 +14,7 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -46,6 +46,28 @@ logger = logging.getLogger(__name__)
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "dist", "build"}
 
 
+def _emit_progress(
+    session: Session,
+    repo: Repository,
+    step: int,
+    label: str,
+    detail: str,
+    stats: dict,
+    pipeline_start: float,
+    started_at: str,
+) -> None:
+    """Persist pipeline progress to the repository row so the frontend can poll it."""
+    repo.progress = {
+        "current_step": step,
+        "step_label": label,
+        "step_detail": detail,
+        "stats": stats,
+        "started_at": started_at,
+        "elapsed_seconds": round(time.monotonic() - pipeline_start, 1),
+    }
+    session.commit()
+
+
 def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, Any]:
     """Full pipeline for a repository analysis job.
 
@@ -59,6 +81,10 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
     settings = get_settings()
     engine = create_engine(settings.database_url)
     pipeline_start = time.monotonic()
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    # Accumulated stats dict updated throughout the pipeline
+    stats: dict[str, Any] = {}
 
     with Session(engine) as session:
         repo = session.get(Repository, repository_id)
@@ -67,7 +93,18 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
 
         repo_url = repo.url
         repo.status = RepositoryStatus.analyzing
+        repo.progress = {
+            "current_step": 1,
+            "step_label": "Cloning repository",
+            "step_detail": f"Cloning {repo_url}...",
+            "stats": stats,
+            "started_at": started_at,
+            "elapsed_seconds": 0,
+        }
         session.commit()
+
+        def _progress(step: int, label: str, detail: str) -> None:
+            _emit_progress(session, repo, step, label, detail, stats, pipeline_start, started_at)
 
         try:
             # ── Step 1: Clone / pull ────────────────────────────────────────
@@ -76,48 +113,79 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             local_path = clone(repo_url, branch=branch)
             commit_hash = get_commit_hash(repo_url) or "unknown"
             logger.info("[%s] Step 1 done (%.1fs): commit=%s", repository_id, time.monotonic() - t0, commit_hash[:12])
+            _progress(1, "Cloning repository", f"Cloned, commit {commit_hash[:12]}")
 
             # ── Step 2: Recon (run early for build artifact filtering) ───────
+            _progress(2, "Scanning file structure", "Scanning...")
             t0 = time.monotonic()
             logger.info("[%s] Step 2: Running reconnaissance", repository_id)
             fingerprint = repo_recon.run(str(local_path))
+            stats["files_scanned"] = fingerprint.file_count
+            stats["loc"] = fingerprint.loc
+            stats["languages"] = fingerprint.languages[:5]
             logger.info("[%s] Step 2 done (%.1fs): %d files, %d LOC", repository_id, time.monotonic() - t0, fingerprint.file_count, fingerprint.loc)
+            _progress(2, "Scanning file structure", f"{fingerprint.file_count} files, {fingerprint.loc:,} lines of code")
 
             # ── Step 3: Parse code entities (filtered) ───────────────────────
+            _progress(3, "Parsing source files", "Parsing...")
             t0 = time.monotonic()
             logger.info("[%s] Step 3: Extracting entities", repository_id)
             entities = extract_entities(
                 str(local_path),
                 build_output_dirs=fingerprint.build_output_dirs,
             )
+            stats["entities_found"] = len(entities)
             logger.info("[%s] Step 3 done (%.1fs): %d entities", repository_id, time.monotonic() - t0, len(entities))
+            _progress(3, "Parsing source files", f"Extracted {len(entities)} entities from {fingerprint.file_count} files")
 
             # ── Step 4: Persist entities to PostgreSQL ──────────────────────
+            _progress(4, "Persisting entities", "Saving to database...")
             t0 = time.monotonic()
             logger.info("[%s] Step 4: Persisting entities to PostgreSQL", repository_id)
             module_id = _get_or_create_wiki(session, repository_id)
             logger.info("[%s] Step 4 done (%.1fs)", repository_id, time.monotonic() - t0)
+            _progress(4, "Persisting entities", f"Saved {len(entities)} entities")
 
             # ── Step 5: Run facet analysis (orchestrator) ───────────────────
+            _progress(5, "Running AI analysis", "Starting agents...")
             t0 = time.monotonic()
             logger.info("[%s] Step 5: Running orchestrator", repository_id)
-            dossier = run_analysis(str(local_path), repository_id, fingerprint=fingerprint)
+
+            def _agent_progress_callback(completed: int, total: int, agent_name: str) -> None:
+                stats["agents_completed"] = completed
+                stats["agents_total"] = total
+                _progress(5, "Running AI analysis", f"Agent {agent_name} complete ({completed}/{total})")
+
+            dossier = run_analysis(
+                str(local_path), repository_id,
+                fingerprint=fingerprint,
+                progress_callback=_agent_progress_callback,
+            )
             logger.info("[%s] Step 5 done (%.1fs)", repository_id, time.monotonic() - t0)
 
             # ── Step 6: Persist entities to Neo4j ──────────────────────────
+            _progress(6, "Building relationship graph", "Creating nodes and edges...")
             t0 = time.monotonic()
             logger.info("[%s] Step 6: Writing to Neo4j", repository_id)
-            _write_neo4j(entities)
+            neo4j_stats = _write_neo4j(entities)
+            stats["neo4j_nodes"] = neo4j_stats["nodes"]
+            stats["neo4j_edges"] = neo4j_stats["edges"]
+            stats["neo4j_unresolved"] = neo4j_stats["unresolved"]
             logger.info("[%s] Step 6 done (%.1fs)", repository_id, time.monotonic() - t0)
+            _progress(6, "Building relationship graph", f"{neo4j_stats['nodes']} nodes, {neo4j_stats['edges']} edges")
 
             # ── Step 7: Detect modules ──────────────────────────────────────
+            _progress(7, "Detecting modules", "Analyzing structure...")
             t0 = time.monotonic()
             logger.info("[%s] Step 7: Detecting modules", repository_id)
             modules_data = _detect_modules(local_path, entities, fingerprint)
             mod_names = [m["name"] for m in modules_data]
+            stats["modules_detected"] = len(modules_data)
             logger.info("[%s] Step 7 done (%.1fs): %d modules — %s", repository_id, time.monotonic() - t0, len(modules_data), mod_names)
+            _progress(7, "Detecting modules", f"Found {len(modules_data)} modules")
 
             # ── Step 8: Generate wiki pages ─────────────────────────────────
+            _progress(8, "Generating wiki pages", "Generating...")
             t0 = time.monotonic()
             logger.info("[%s] Step 8: Generating wiki pages", repository_id)
             wiki = session.query(Wiki).filter_by(repository_id=repository_id).first()
@@ -128,6 +196,15 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
 
             # Persist Module and CodeEntity records to PostgreSQL
             _persist_modules_and_entities(session, wiki.id, modules_data, local_path)
+
+            # Compute total pages (modules + special pages)
+            total_pages = len(modules_data) + 5  # home + getting-started + function-index + glossary + api-reference
+            stats["pages_generated"] = 0
+            stats["pages_total"] = total_pages
+
+            def _page_progress_callback(pages_done: int, page_name: str) -> None:
+                stats["pages_generated"] = pages_done
+                _progress(8, "Generating wiki pages", f"Page {pages_done}/{total_pages}: {page_name}")
 
             pages_created = _generate_all_pages(
                 session=session,
@@ -141,19 +218,24 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                 fingerprint=fingerprint,
                 dossier=dossier,
                 commit_hash=commit_hash,
+                page_progress_callback=_page_progress_callback,
             )
 
             wiki.page_count = pages_created
             wiki.module_count = len(modules_data)
+            stats["pages_generated"] = pages_created
+            stats["pages_total"] = pages_created
             logger.info("[%s] Step 8 done (%.1fs): %d pages", repository_id, time.monotonic() - t0, pages_created)
 
-            # ── Step 9: Update repository status ───────────────────────────
+            # ── Step 9: Finalizing ──────────────────────────────────────────
+            _progress(9, "Finalizing", "Saving final state...")
             repo.status = RepositoryStatus.ready
             repo.last_analyzed_commit = commit_hash
             repo.last_analyzed_at = datetime.now(timezone.utc)
             repo.primary_languages = fingerprint.languages[:5]
             repo.size_files = fingerprint.file_count
             repo.size_lines = fingerprint.loc
+            _progress(9, "Finalizing", "Complete")
             session.commit()
 
             total_elapsed = time.monotonic() - pipeline_start
@@ -173,6 +255,13 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             logger.error("[%s] Analysis failed: %s", repository_id, exc)
             repo.status = RepositoryStatus.error
             repo.error_message = str(exc)
+            # Keep progress at the step that failed, with error detail
+            if repo.progress:
+                repo.progress = {
+                    **repo.progress,
+                    "step_detail": f"Error: {str(exc)[:200]}",
+                    "elapsed_seconds": round(time.monotonic() - pipeline_start, 1),
+                }
             session.commit()
             raise
 
@@ -247,11 +336,14 @@ def _get_or_create_wiki(session: Session, repository_id: str) -> str | None:
     return str(wiki.id)
 
 
-def _write_neo4j(entities: list[ParsedEntity]) -> None:
+def _write_neo4j(entities: list[ParsedEntity]) -> dict[str, int]:
     """Write all entities and relationships to Neo4j.
 
     Builds a name→qualified_name lookup to resolve call targets that use
     short names instead of fully qualified names (fixes dangling edges).
+
+    Returns:
+        Dict with keys: nodes, edges, unresolved.
     """
     # Build lookup: short name → qualified_name for fuzzy matching
     name_to_qname: dict[str, str] = {}
@@ -305,6 +397,7 @@ def _write_neo4j(entities: list[ParsedEntity]) -> None:
     if edges_unresolved:
         logger.warning("Neo4j: %d call targets unresolved (no matching entity)", edges_unresolved)
     logger.info("Neo4j stats: nodes=%d, edges=%d, unresolved=%d", nodes_created, edges_created, edges_unresolved)
+    return {"nodes": nodes_created, "edges": edges_created, "unresolved": edges_unresolved}
 
 
 def _detect_modules(local_path: Path, entities: list[ParsedEntity], fingerprint) -> list[dict]:
@@ -455,9 +548,14 @@ def _generate_all_pages(
     fingerprint,
     dossier,
     commit_hash: str,
+    page_progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> int:
     """Generate and persist all wiki pages. Returns count of pages created."""
     pages = 0
+
+    def _report_page(page_name: str) -> None:
+        if page_progress_callback:
+            page_progress_callback(pages, page_name)
 
     # Module pages
     module_summaries = []
@@ -490,6 +588,7 @@ def _generate_all_pages(
             session.add(page)
             session.flush()
             pages += 1
+            _report_page(mod["name"])
             module_summaries.append({
                 "name": mod["name"],
                 "slug": mod["slug"],
@@ -513,6 +612,7 @@ def _generate_all_pages(
         slug="home", content=home_content, commit_hash=commit_hash,
     ))
     pages += 1
+    _report_page("Home")
 
     try:
         gs_content = build_getting_started(repo_name, repo_path, fingerprint.to_dict())
@@ -521,6 +621,7 @@ def _generate_all_pages(
             slug="getting-started", content=gs_content, commit_hash=commit_hash,
         ))
         pages += 1
+        _report_page("Getting Started")
     except Exception as exc:
         logger.warning("Getting started page failed: %s", exc)
 
@@ -531,6 +632,7 @@ def _generate_all_pages(
             slug="function-index", content=fi_content, commit_hash=commit_hash,
         ))
         pages += 1
+        _report_page("Function Index")
     except Exception as exc:
         logger.warning("Function index page failed: %s", exc)
 
@@ -541,6 +643,7 @@ def _generate_all_pages(
             slug="glossary", content=glossary_content, commit_hash=commit_hash,
         ))
         pages += 1
+        _report_page("Glossary")
     except Exception as exc:
         logger.warning("Glossary page failed: %s", exc)
 
@@ -551,6 +654,7 @@ def _generate_all_pages(
             slug="api-reference", content=api_content, commit_hash=commit_hash,
         ))
         pages += 1
+        _report_page("API Reference")
     except Exception as exc:
         logger.warning("API reference page failed: %s", exc)
 

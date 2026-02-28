@@ -1,30 +1,31 @@
 'use client';
 
 /**
- * Progress page — animated analysis pipeline for a repository.
+ * Progress page — live pipeline telemetry for repository analysis.
+ * Shows 9 real steps driven by backend progress, with live stats and elapsed time.
  * Mock: specs/001-code-wiki/ux/docs-glassmorphism/progress.html
  */
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Logo } from '@/components/ui/Logo';
 import { api } from '@/services/api';
-import type { Repository } from '@/services/api';
+import type { Repository, PipelineProgress } from '@/services/api';
 
 const PIPELINE_STEPS = [
-  { label: 'Cloning repository', doneDesc: 'Done' },
-  { label: 'Parsing source files', doneDesc: 'Files analyzed' },
-  { label: 'Detecting modules', activeDesc: 'Modules found…' },
-  { label: 'Building knowledge graph', pendingDesc: 'Pending' },
-  { label: 'Generating wiki pages', pendingDesc: 'Pending' },
-  { label: 'Creating visual diagrams', pendingDesc: 'Pending' },
+  { label: 'Cloning repository', icon: '\u{1F4E5}' },
+  { label: 'Scanning file structure', icon: '\u{1F50D}' },
+  { label: 'Parsing source files', icon: '\u2699\uFE0F' },
+  { label: 'Persisting entities', icon: '\u{1F4BE}' },
+  { label: 'Running AI analysis', icon: '\u{1F9E0}' },
+  { label: 'Building relationship graph', icon: '\u{1F517}' },
+  { label: 'Detecting modules', icon: '\u{1F4E6}' },
+  { label: 'Generating wiki pages', icon: '\u{1F4C4}' },
+  { label: 'Finalizing', icon: '\u2728' },
 ];
-
-// Progress percentage per step (cumulative)
-const STEP_PROGRESS = [10, 25, 45, 65, 85, 100];
 
 type StepState = 'complete' | 'active' | 'pending';
 
@@ -36,25 +37,60 @@ function getStepStates(activeIndex: number): StepState[] {
   });
 }
 
+function formatElapsed(seconds?: number): string {
+  if (seconds == null) return '';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  if (m > 0) return `${m}m ${s}s elapsed`;
+  return `${s}s elapsed`;
+}
+
+function formatNumber(n?: number): string {
+  if (n == null) return '';
+  return n.toLocaleString();
+}
+
+interface StatItem {
+  label: string;
+  value: string;
+}
+
+function buildLiveStats(stats?: PipelineProgress['stats']): StatItem[] {
+  if (!stats) return [];
+  const items: StatItem[] = [];
+  if (stats.files_scanned != null) items.push({ label: 'Files', value: formatNumber(stats.files_scanned) });
+  if (stats.loc != null) items.push({ label: 'Lines', value: formatNumber(stats.loc) });
+  if (stats.entities_found != null) items.push({ label: 'Entities', value: formatNumber(stats.entities_found) });
+  if (stats.modules_detected != null) items.push({ label: 'Modules', value: formatNumber(stats.modules_detected) });
+  if (stats.agents_completed != null && stats.agents_total != null) {
+    items.push({ label: 'Agents', value: `${stats.agents_completed}/${stats.agents_total}` });
+  }
+  if (stats.pages_generated != null && stats.pages_total != null && stats.pages_total > 0) {
+    items.push({ label: 'Pages', value: `${stats.pages_generated}/${stats.pages_total}` });
+  }
+  return items;
+}
+
 export default function ProgressPage() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const router = useRouter();
 
   const owner = params.owner as string;
   const name = params.name as string;
   const repoId = searchParams.get('id') ?? '';
 
   const [repo, setRepo] = useState<Repository | null>(null);
-  const [activeStep, setActiveStep] = useState(0);
-  const [accordionOpen, setAccordionOpen] = useState(false);
+  const [progress, setProgress] = useState<PipelineProgress | null>(null);
   const [done, setDone] = useState(false);
   const [repoStatus, setRepoStatus] = useState<Repository['status'] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Poll repo status every 5s
+  // Demo mode step advancement (when no repoId)
+  const [demoStep, setDemoStep] = useState(0);
+  const demoRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Poll repo status every 3s
   useEffect(() => {
     if (!repoId) return;
 
@@ -63,20 +99,13 @@ export default function ProgressPage() {
         const r = await api.repositories.get(repoId);
         setRepo(r);
         setRepoStatus(r.status);
+        setProgress(r.progress ?? null);
         if (r.status === 'ready') {
           clearInterval(pollRef.current!);
-          clearInterval(tickRef.current!);
-          setActiveStep(PIPELINE_STEPS.length); // all complete
           setDone(true);
         } else if (r.status === 'error') {
           clearInterval(pollRef.current!);
-          clearInterval(tickRef.current!);
           setErrorMessage(r.error_message || 'An unexpected error occurred during analysis.');
-        } else if (r.status === 'pending') {
-          setActiveStep(0);
-        } else if (r.status === 'analyzing') {
-          // Ensure we're at least on step 1 when analyzing starts
-          setActiveStep((s) => Math.max(s, 1));
         }
       } catch {
         // ignore polling errors
@@ -84,56 +113,44 @@ export default function ProgressPage() {
     };
 
     poll();
-    pollRef.current = setInterval(poll, 5000);
-    return () => {
-      clearInterval(pollRef.current!);
-      clearInterval(tickRef.current!);
-    };
+    pollRef.current = setInterval(poll, 3000);
+    return () => clearInterval(pollRef.current!);
   }, [repoId]);
 
-  // Simulate step progression while analyzing (advances steps 1→4 every ~20s)
-  useEffect(() => {
-    if (!repoId || repoStatus !== 'analyzing') return;
-    clearInterval(tickRef.current!);
-    tickRef.current = setInterval(() => {
-      setActiveStep((s) => {
-        // Don't advance past step 4 (leave "Creating visual diagrams" for ready state)
-        if (s >= 4) return s;
-        return s + 1;
-      });
-    }, 20000);
-    return () => clearInterval(tickRef.current!);
-  }, [repoId, repoStatus]);
-
-  // Simulate step progression every 8s when no repoId (demo mode)
+  // Demo mode: advance steps every 3s when no repoId
   useEffect(() => {
     if (repoId) return;
-    const timer = setInterval(() => {
-      setActiveStep((s) => {
+    demoRef.current = setInterval(() => {
+      setDemoStep((s) => {
         if (s >= PIPELINE_STEPS.length - 1) {
-          clearInterval(timer);
+          clearInterval(demoRef.current!);
           setDone(true);
           return PIPELINE_STEPS.length;
         }
         return s + 1;
       });
-    }, 8000);
-    return () => clearInterval(timer);
+    }, 3000);
+    return () => clearInterval(demoRef.current!);
   }, [repoId]);
 
+  // Compute active step from backend progress or demo
+  const activeStep = repoId
+    ? done
+      ? PIPELINE_STEPS.length
+      : repoStatus === 'pending'
+        ? 0
+        : (progress?.current_step ?? 1) - 1 // backend is 1-indexed, UI is 0-indexed
+    : done
+      ? PIPELINE_STEPS.length
+      : demoStep;
+
   const stepStates = getStepStates(Math.min(activeStep, PIPELINE_STEPS.length - 1));
-  const pct = done ? 100 : STEP_PROGRESS[Math.min(activeStep, STEP_PROGRESS.length - 1)] ?? 10;
+  const pct = done ? 100 : Math.round(((activeStep + 1) / PIPELINE_STEPS.length) * 100);
   const displayName = repo?.name ?? name;
   const displayUrl = repo?.url ?? `github.com/${owner}/${name}`;
+  const liveStats = buildLiveStats(progress?.stats);
 
-  const MOCK_MODULES = [
-    { icon: '📦', name: 'authentication', count: '24 functions' },
-    { icon: '📦', name: 'api/routes', count: '18 functions' },
-    { icon: '📦', name: 'database', count: '12 functions' },
-    { icon: '📦', name: 'utils', count: '31 functions' },
-    { icon: '📦', name: 'middleware', count: '9 functions' },
-  ];
-
+  // ─── Error state ────────────────────────────────────────────────────────────
   if (repoStatus === 'error') {
     return (
       <>
@@ -147,7 +164,6 @@ export default function ProgressPage() {
             padding: '40px 24px 80px',
           }}
         >
-          {/* Top bar */}
           <div
             style={{
               width: '100%',
@@ -173,14 +189,13 @@ export default function ProgressPage() {
                 transition: 'color 0.2s',
               }}
             >
-              ← Back
+              &larr; Back
             </Link>
             <div style={{ marginLeft: 'auto' }}>
               <Logo href="/dashboard" size="sm" />
             </div>
           </div>
 
-          {/* Error card */}
           <GlassCard
             style={{
               width: '100%',
@@ -190,7 +205,6 @@ export default function ProgressPage() {
             }}
             className="animate-fade-in-up"
           >
-            {/* Error icon */}
             <div
               style={{
                 width: 80,
@@ -212,22 +226,21 @@ export default function ProgressPage() {
               </svg>
             </div>
 
-            <h1
-              style={{
-                fontSize: 28,
-                fontWeight: 800,
-                color: '#f87171',
-                marginBottom: 12,
-              }}
-            >
+            <h1 style={{ fontSize: 28, fontWeight: 800, color: '#f87171', marginBottom: 12 }}>
               Analysis Failed
             </h1>
+
+            {/* Show which step failed */}
+            {progress?.step_label && (
+              <p style={{ fontSize: 14, color: 'var(--text-tertiary)', marginBottom: 8 }}>
+                Failed at step {progress.current_step}: {progress.step_label}
+              </p>
+            )}
 
             <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginBottom: 16 }}>
               Something went wrong while analyzing {displayName}.
             </p>
 
-            {/* Error message */}
             {errorMessage && (
               <div
                 style={{
@@ -253,7 +266,6 @@ export default function ProgressPage() {
               </div>
             )}
 
-            {/* Action buttons */}
             <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
               <Link
                 href="/submit"
@@ -318,6 +330,7 @@ export default function ProgressPage() {
     );
   }
 
+  // ─── Completion state ───────────────────────────────────────────────────────
   if (done) {
     return (
       <>
@@ -331,7 +344,6 @@ export default function ProgressPage() {
             padding: '40px 24px 80px',
           }}
         >
-          {/* Top bar */}
           <div
             style={{
               width: '100%',
@@ -357,14 +369,13 @@ export default function ProgressPage() {
                 transition: 'color 0.2s',
               }}
             >
-              ← Back
+              &larr; Back
             </Link>
             <div style={{ marginLeft: 'auto' }}>
               <Logo href="/dashboard" size="sm" />
             </div>
           </div>
 
-          {/* Completion card */}
           <GlassCard
             style={{
               width: '100%',
@@ -374,7 +385,6 @@ export default function ProgressPage() {
             }}
             className="animate-fade-in-up"
           >
-            {/* Sparkles */}
             <div
               style={{
                 width: 100,
@@ -390,7 +400,7 @@ export default function ProgressPage() {
                 boxShadow: '0 0 60px rgba(139,92,246,0.6)',
               }}
             >
-              ✨
+              {'\u2728'}
             </div>
             <h1
               style={{
@@ -405,9 +415,41 @@ export default function ProgressPage() {
             >
               Wiki is ready!
             </h1>
-            <p style={{ fontSize: 16, color: 'var(--text-secondary)', marginBottom: 36 }}>
+            <p style={{ fontSize: 16, color: 'var(--text-secondary)', marginBottom: 16 }}>
               Your documentation has been generated successfully.
             </p>
+            {progress?.elapsed_seconds != null && (
+              <p style={{ fontSize: 14, color: 'var(--text-tertiary)', marginBottom: 24 }}>
+                Completed in {formatElapsed(progress.elapsed_seconds)}
+              </p>
+            )}
+
+            {/* Final stats summary */}
+            {liveStats.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 20,
+                  flexWrap: 'wrap',
+                  justifyContent: 'center',
+                  padding: '16px 0',
+                  borderTop: '1px solid var(--glass-border)',
+                  marginBottom: 28,
+                  fontSize: 13,
+                }}
+              >
+                {liveStats.map((s) => (
+                  <div
+                    key={s.label}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-tertiary)' }}
+                  >
+                    {s.label}:{' '}
+                    <span style={{ color: 'var(--primary-light)', fontWeight: 700 }}>{s.value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <Link
               href={`/${owner}/${name}`}
               style={{
@@ -434,7 +476,7 @@ export default function ProgressPage() {
                 e.currentTarget.style.boxShadow = '0 4px 24px rgba(139,92,246,0.5)';
               }}
             >
-              View Wiki →
+              View Wiki &rarr;
             </Link>
           </GlassCard>
         </div>
@@ -442,6 +484,7 @@ export default function ProgressPage() {
     );
   }
 
+  // ─── Active analysis state ──────────────────────────────────────────────────
   return (
     <>
       <GradientBackground />
@@ -546,10 +589,13 @@ export default function ProgressPage() {
             {displayUrl}
           </div>
 
-          {/* Vertical stepper */}
+          {/* Vertical stepper — 9 real steps */}
           <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 40, position: 'relative' }}>
             {PIPELINE_STEPS.map((step, i) => {
               const state = stepStates[i];
+              const isActive = state === 'active';
+              const stepDetail = isActive ? progress?.step_detail : null;
+
               return (
                 <div
                   key={step.label}
@@ -557,7 +603,7 @@ export default function ProgressPage() {
                     display: 'flex',
                     alignItems: 'flex-start',
                     gap: 16,
-                    paddingBottom: i < PIPELINE_STEPS.length - 1 ? 28 : 0,
+                    paddingBottom: i < PIPELINE_STEPS.length - 1 ? 24 : 0,
                     position: 'relative',
                   }}
                 >
@@ -614,7 +660,7 @@ export default function ProgressPage() {
                           }),
                     }}
                   >
-                    {state === 'complete' ? '✓' : i + 1}
+                    {state === 'complete' ? '\u2713' : i + 1}
                   </div>
 
                   {/* Step content */}
@@ -635,8 +681,9 @@ export default function ProgressPage() {
                         gap: 8,
                       }}
                     >
+                      <span style={{ fontSize: 14 }}>{step.icon}</span>
                       {step.label}
-                      {state === 'active' && (
+                      {isActive && (
                         <span
                           style={{
                             display: 'inline-block',
@@ -654,14 +701,15 @@ export default function ProgressPage() {
                       style={{
                         fontSize: 13,
                         color:
-                          state === 'active' ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                          isActive ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                        transition: 'all 0.3s',
                       }}
                     >
                       {state === 'complete'
-                        ? step.doneDesc ?? 'Done'
-                        : state === 'active'
-                        ? step.activeDesc ?? 'In progress…'
-                        : step.pendingDesc ?? 'Pending'}
+                        ? 'Done'
+                        : isActive
+                        ? stepDetail || 'In progress\u2026'
+                        : 'Pending'}
                     </div>
                   </div>
                 </div>
@@ -677,7 +725,7 @@ export default function ProgressPage() {
             }
           `}</style>
 
-          {/* Progress bar */}
+          {/* Progress bar + elapsed time */}
           <div style={{ marginBottom: 28 }}>
             <div
               style={{
@@ -691,7 +739,11 @@ export default function ProgressPage() {
                 {pct}%
               </span>
               <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
-                Estimated time remaining: ~{Math.max(1, Math.round((100 - pct) / 10))} minutes
+                {progress?.elapsed_seconds != null
+                  ? formatElapsed(progress.elapsed_seconds)
+                  : repoStatus === 'pending'
+                  ? 'Waiting to start\u2026'
+                  : ''}
               </span>
             </div>
             <div
@@ -716,113 +768,66 @@ export default function ProgressPage() {
             </div>
           </div>
 
-          {/* Live stats */}
-          <div
-            style={{
-              display: 'flex',
-              gap: 20,
-              flexWrap: 'wrap',
-              padding: '16px 0',
-              borderTop: '1px solid var(--glass-border)',
-              borderBottom: '1px solid var(--glass-border)',
-              marginBottom: 28,
-              fontSize: 13,
-            }}
-          >
-            {[
-              { label: 'Files', val: repo?.size_files ?? '312' },
-              { label: 'Modules', val: '8' },
-              { label: 'Functions', val: '124' },
-            ].map((s) => (
-              <div
-                key={s.label}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-tertiary)' }}
-              >
-                {s.label}:{' '}
-                <span style={{ color: 'var(--primary-light)', fontWeight: 700 }}>{s.val}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Accordion — discovered modules */}
-          <div
-            style={{
-              borderRadius: 14,
-              overflow: 'hidden',
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid var(--glass-border)',
-              marginBottom: 32,
-            }}
-          >
-            <button
-              onClick={() => setAccordionOpen((o) => !o)}
+          {/* Live stats panel — only shows stats that have arrived */}
+          {liveStats.length > 0 && (
+            <div
               style={{
-                width: '100%',
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '14px 20px',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 14,
-                fontWeight: 600,
-                color: 'var(--text-secondary)',
-                fontFamily: "'Outfit', sans-serif",
-                minHeight: 50,
-                transition: 'background 0.2s',
+                gap: 20,
+                flexWrap: 'wrap',
+                padding: '16px 0',
+                borderTop: '1px solid var(--glass-border)',
+                borderBottom: '1px solid var(--glass-border)',
+                marginBottom: 28,
+                fontSize: 13,
               }}
             >
-              <span>🔍 Modules discovered so far</span>
-              <span
-                style={{
-                  fontSize: 11,
-                  color: 'var(--text-tertiary)',
-                  transform: accordionOpen ? 'rotate(180deg)' : 'none',
-                  transition: 'transform 0.25s',
-                }}
-              >
-                ▼
-              </span>
-            </button>
+              {liveStats.map((s) => (
+                <div
+                  key={s.label}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    color: 'var(--text-tertiary)',
+                    transition: 'opacity 0.3s',
+                  }}
+                >
+                  {s.label}:{' '}
+                  <span style={{ color: 'var(--primary-light)', fontWeight: 700 }}>{s.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
-            {accordionOpen && (
-              <div style={{ padding: '0 20px 16px' }} className="animate-fade-in">
-                <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {MOCK_MODULES.map((mod) => (
-                    <li
-                      key={mod.name}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        fontSize: 13,
-                        color: 'var(--text-secondary)',
-                        padding: '8px 12px',
-                        background: 'rgba(255,255,255,0.03)',
-                        borderRadius: 8,
-                        border: '1px solid var(--glass-border)',
-                      }}
-                    >
-                      <span style={{ fontSize: 15 }}>{mod.icon}</span>
-                      <span
-                        style={{
-                          fontFamily: "'Fira Code', monospace",
-                          color: 'var(--primary-light)',
-                          fontWeight: 500,
-                        }}
-                      >
-                        {mod.name}
-                      </span>
-                      <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-tertiary)' }}>
-                        {mod.count}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
+          {/* Languages detected */}
+          {progress?.stats?.languages && progress.stats.languages.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                marginBottom: 28,
+              }}
+            >
+              {progress.stats.languages.map((lang) => (
+                <span
+                  key={lang}
+                  style={{
+                    padding: '4px 12px',
+                    background: 'rgba(139,92,246,0.12)',
+                    border: '1px solid rgba(139,92,246,0.25)',
+                    borderRadius: 20,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--primary-light)',
+                  }}
+                >
+                  {lang}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Cancel */}
           <Link

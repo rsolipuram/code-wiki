@@ -33,6 +33,7 @@ class Repository(Base, TimestampMixin):
     )
     branch: Mapped[Optional[str]] = mapped_column(String(255))
     error_message: Mapped[Optional[str]] = mapped_column(Text)
+    progress: Mapped[Optional[dict]] = mapped_column(JSONB)
     last_analyzed_commit: Mapped[Optional[str]] = mapped_column(String(40))
     last_analyzed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     size_files: Mapped[Optional[int]] = mapped_column(Integer)

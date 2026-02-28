@@ -49,6 +49,7 @@ def _repo_to_response(repo: Repository) -> RepositoryResponse:
         branch=repo.branch,
         status=repo.status.value,
         error_message=repo.error_message,
+        progress=repo.progress,
         access_level="public",
         created_at=repo.created_at,
         updated_at=repo.updated_at,
@@ -149,6 +150,7 @@ async def get_repository_status(
         "id": str(repo.id),
         "status": repo.status.value,
         "error_message": repo.error_message,
+        "progress": repo.progress,
         "last_analyzed_commit": repo.last_analyzed_commit,
         "last_analyzed_at": repo.last_analyzed_at.isoformat() if repo.last_analyzed_at else None,
         "latest_event": {

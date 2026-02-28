@@ -11,7 +11,7 @@ Dossier IS the shared state. Agents read from / write to it via DossierManager.
 import concurrent.futures
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from src.agents import conflict_synthesizer
 from src.agents.heuristic import (
@@ -90,13 +90,23 @@ class AnalysisPipeline:
         repo_path: str,
         repository_id: str,
         fingerprint: Optional[RepoFingerprint] = None,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> None:
         self.repo_path = repo_path
         self.repository_id = repository_id
         self.fingerprint = fingerprint
+        self.progress_callback = progress_callback
+        self._agents_completed = 0
+        self._agents_total = 0
         self.dossier_manager = DossierManager(Dossier(
             repository_id=repository_id,
         ))
+
+    def _report_agent_progress(self, agent_name: str) -> None:
+        """Report agent completion via callback if configured."""
+        self._agents_completed += 1
+        if self.progress_callback:
+            self.progress_callback(self._agents_completed, self._agents_total, agent_name)
 
     def run(self) -> Dossier:
         """Execute the full pipeline and return the populated Dossier."""
@@ -126,11 +136,20 @@ class AnalysisPipeline:
             k: v for k, v in _HEURISTIC_AGENTS.items()
             if k in plan.get("heuristic_agents", list(_HEURISTIC_AGENTS))
         }
+        react_to_run = plan.get("react_agents", list(_REACT_AGENTS))
+        single_to_run = {
+            k: v for k, v in _SINGLE_PASS_AGENTS.items()
+            if k in plan.get("single_pass_agents", list(_SINGLE_PASS_AGENTS))
+        }
+
+        # Compute total agent count for progress reporting
+        self._agents_total = len(heuristic_to_run) + len(react_to_run) + len(single_to_run)
+        self._agents_completed = 0
+
         logger.info("[Layer 1a] Running %d heuristic agents in parallel", len(heuristic_to_run))
         self._run_parallel(heuristic_to_run)
 
         # ── Layer 1b: ReAct agents (sequential, tag-aware) ───────────────────
-        react_to_run = plan.get("react_agents", list(_REACT_AGENTS))
         logger.info("[Layer 1b] Running %d ReAct agents", len(react_to_run))
         self._run_react_agents(react_to_run, fingerprint)
 
@@ -139,14 +158,11 @@ class AnalysisPipeline:
         extra_react = [a for a in triggered if a in _REACT_AGENTS and
                        a not in self.dossier_manager.dossier.agents_completed]
         if extra_react:
+            self._agents_total += len(extra_react)
             logger.info("[Tag triggers] Running %d additional agents: %s", len(extra_react), extra_react)
             self._run_react_agents(extra_react, fingerprint)
 
         # ── Layer 1c: Single-pass agents (parallel) ───────────────────────────
-        single_to_run = {
-            k: v for k, v in _SINGLE_PASS_AGENTS.items()
-            if k in plan.get("single_pass_agents", list(_SINGLE_PASS_AGENTS))
-        }
         logger.info("[Layer 1c] Running %d single-pass agents", len(single_to_run))
         self._run_single_pass(single_to_run, fingerprint)
 
@@ -187,9 +203,11 @@ class AnalysisPipeline:
                 try:
                     future.result()
                     logger.info("[Heuristic] Agent %s completed", agent_name)
+                    self._report_agent_progress(agent_name)
                 except Exception as exc:
                     logger.error("Heuristic agent %s failed: %s", agent_name, exc)
                     self.dossier_manager.mark_agent_failed(agent_name)
+                    self._report_agent_progress(agent_name)
 
     def _run_react_agents(self, agent_names: list[str], fingerprint: RepoFingerprint) -> None:
         """Run ReAct agents sequentially (they share Dossier state)."""
@@ -204,6 +222,7 @@ class AnalysisPipeline:
                 _REACT_AGENTS[name](self.repo_path, self.dossier_manager)
                 elapsed = time.monotonic() - t0
                 logger.info("[ReAct] Agent %s completed (%.1fs)", name, elapsed)
+                self._report_agent_progress(name)
                 # Log any tags emitted by this agent
                 tags = self.dossier_manager.dossier.emitted_tags
                 if tags:
@@ -211,6 +230,7 @@ class AnalysisPipeline:
             except Exception as exc:
                 logger.error("ReAct agent %s failed: %s", name, exc)
                 self.dossier_manager.mark_agent_failed(name)
+                self._report_agent_progress(name)
 
     def _run_single_pass(self, agents: dict, fingerprint: RepoFingerprint) -> None:
         """Run single-pass agents (most accept fingerprint, some don't)."""
@@ -228,21 +248,25 @@ class AnalysisPipeline:
                 try:
                     future.result()
                     logger.info("[SinglePass] Agent %s completed", agent_name)
+                    self._report_agent_progress(agent_name)
                 except Exception as exc:
                     logger.error("Single-pass agent %s failed: %s", agent_name, exc)
                     self.dossier_manager.mark_agent_failed(agent_name)
+                    self._report_agent_progress(agent_name)
 
 
 def run_analysis(
     repo_path: str,
     repository_id: str,
     fingerprint: Optional[RepoFingerprint] = None,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> Dossier:
     """Entry point for the full analysis pipeline.
 
     Args:
         repo_path: Absolute local path to the cloned repository.
         repository_id: Repository UUID from PostgreSQL.
+        progress_callback: Optional (completed, total, agent_name) callback.
 
     Returns:
         Populated Dossier ready for wiki generation.
@@ -251,5 +275,6 @@ def run_analysis(
         repo_path=repo_path,
         repository_id=repository_id,
         fingerprint=fingerprint,
+        progress_callback=progress_callback,
     )
     return pipeline.run()

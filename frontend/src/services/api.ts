@@ -14,6 +14,28 @@ export interface Pagination {
   total_items: number;
 }
 
+export interface PipelineProgress {
+  current_step?: number;
+  step_label?: string;
+  step_detail?: string;
+  stats?: {
+    files_scanned?: number;
+    loc?: number;
+    languages?: string[];
+    entities_found?: number;
+    modules_detected?: number;
+    agents_completed?: number;
+    agents_total?: number;
+    neo4j_nodes?: number;
+    neo4j_edges?: number;
+    neo4j_unresolved?: number;
+    pages_generated?: number;
+    pages_total?: number;
+  };
+  started_at?: string;
+  elapsed_seconds?: number;
+}
+
 export interface Repository {
   id: string;
   url: string;
@@ -27,6 +49,7 @@ export interface Repository {
   branch?: string;
   status: "pending" | "analyzing" | "ready" | "error";
   error_message?: string;
+  progress?: PipelineProgress;
   access_level?: "public" | "private";
   created_at: string;
   updated_at: string;

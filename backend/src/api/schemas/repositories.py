@@ -28,6 +28,7 @@ class RepositoryResponse(BaseModel):
     branch: Optional[str] = None
     status: str  # pending | analyzing | ready | error
     error_message: Optional[str] = None
+    progress: Optional[dict] = None
     access_level: Optional[str] = None  # public | private
     created_at: datetime
     updated_at: datetime
