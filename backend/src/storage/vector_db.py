@@ -14,8 +14,8 @@ from qdrant_client.models import (
 
 from src.config import get_settings
 
-# Embedding dimension — all-MiniLM-L6-v2 produces 384-dim vectors
-EMBEDDING_DIM = 384
+# Embedding dimension — nomic-embed-text-v1.5 via LM Studio produces 768-dim vectors
+EMBEDDING_DIM = 768
 
 COLLECTION_CODE_ENTITIES = "code_entities"
 COLLECTION_DOSSIER_FINDINGS = "dossier_findings"

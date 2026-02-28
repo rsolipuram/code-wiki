@@ -1,37 +1,43 @@
-"""Sentence-transformers embedding utility using all-MiniLM-L6-v2 (384-dim)."""
+"""Embedding utility using LM Studio's OpenAI-compatible /v1/embeddings endpoint."""
 
 import logging
 from typing import Optional
 
+from openai import OpenAI
+
+from src.config import get_settings
+
 logger = logging.getLogger(__name__)
 
-_model = None
-MODEL_NAME = "all-MiniLM-L6-v2"
+_client: Optional[OpenAI] = None
+EMBEDDING_MODEL = "text-embedding-nomic-embed-text-v1.5"
 
 
-def _get_model():
-    global _model
-    if _model is None:
-        from sentence_transformers import SentenceTransformer
-
-        logger.info("Loading embedding model %s (first call only)", MODEL_NAME)
-        _model = SentenceTransformer(MODEL_NAME)
-    return _model
+def _get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        settings = get_settings()
+        _client = OpenAI(
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
+            timeout=60.0,
+        )
+    return _client
 
 
 def embed(text: str) -> list[float]:
-    """Encode a single string into a 384-dimensional vector."""
-    model = _get_model()
-    vector = model.encode(text, normalize_embeddings=True)
-    return vector.tolist()
+    """Encode a single string into a vector via LM Studio embeddings API."""
+    client = _get_client()
+    response = client.embeddings.create(model=EMBEDDING_MODEL, input=text)
+    return response.data[0].embedding
 
 
 def embed_batch(texts: list[str], batch_size: int = 64) -> list[list[float]]:
-    """Encode a list of strings into 384-dimensional vectors.
+    """Encode a list of strings into vectors via LM Studio embeddings API.
 
     Args:
         texts: List of strings to encode.
-        batch_size: Encoding batch size (trades memory for speed).
+        batch_size: Number of texts per API call.
 
     Returns:
         List of float vectors, one per input string.
@@ -39,11 +45,15 @@ def embed_batch(texts: list[str], batch_size: int = 64) -> list[list[float]]:
     if not texts:
         return []
 
-    model = _get_model()
-    vectors = model.encode(
-        texts,
-        batch_size=batch_size,
-        normalize_embeddings=True,
-        show_progress_bar=len(texts) > 100,
-    )
-    return [v.tolist() for v in vectors]
+    vectors: list[list[float]] = []
+    client = _get_client()
+
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
+        # Sort by index to preserve input order
+        sorted_data = sorted(response.data, key=lambda x: x.index)
+        vectors.extend([item.embedding for item in sorted_data])
+
+    logger.info("Embedded %d texts via LM Studio (%s)", len(texts), EMBEDDING_MODEL)
+    return vectors
