@@ -4,7 +4,7 @@ AI-powered code documentation platform that automatically generates and maintain
 
 ## Project Overview
 
-**Status**: Implementation phase (Active — Granular progress tracking wired end-to-end, pipeline logging + gap fixes applied)
+**Status**: Implementation phase (Active — Wiki pipeline quality fixes applied: entity Qdrant indexing, dedup, mega-module split, multi-file info box)
 **Feature Branch**: `001-code-wiki`
 **Main Branch**: `main`
 
@@ -674,7 +674,8 @@ According to specification workflow:
 18. ✅ **Unified wiki reader** — Consolidated 6+ wiki page routes into single 3-column reader with sidebar navigation; deleted 6 redundant glassmorphism mocks
 19. ✅ **Pipeline logging + gap fixes** — Comprehensive structured logging across 8 backend modules; fixed 6 pipeline gaps (duplicate recon, Neo4j dangling edges, error_message persistence, API schema updates, frontend error state, branch field wired end-to-end with Alembic migration)
 20. ✅ **Granular progress tracking** — `Repository.progress` JSONB column + Alembic migration, `_emit_progress()` helper in analyze.py reporting 9 pipeline steps with stats, orchestrator progress callback for per-agent reporting, API schema + route updates exposing `progress`, frontend progress page rewritten with 9 real steps + live telemetry (replacing cosmetic animation)
-21. ⏳ **Next: Backend implementation** — Code parsers (Jedi/Python AST, TypeScript Compiler API), Facet Intelligence agents, Neo4j/Qdrant integration, FastAPI endpoints
+21. ✅ **Wiki pipeline quality fixes (G1–G6)** — G1: `index_entities()` added to `rag_index.py` + wired into `analyze.py` step 4 (entities now Qdrant-indexed); G2: empty-text dossier records filtered before Qdrant upsert; G3: qualified_name dedup in `build_function_index()` + `build_api_reference()` (`special_pages.py`); G4+G5: mega-module split depth fixed + humanize safety net in `analyze.py`; G6: multi-file module info box in `WikiReader.tsx` (shows "N files including `<first>`" instead of hardcoded single path)
+22. ⏳ **Next: Backend implementation** — Code parsers (Jedi/Python AST, TypeScript Compiler API), Facet Intelligence agents, Neo4j/Qdrant integration, FastAPI endpoints
 
 ---
 
@@ -691,5 +692,5 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-28 (Granular progress tracking: JSONB column, 9-step pipeline telemetry, live frontend)*
+*Last updated: 2026-02-28 (Wiki pipeline quality fixes G1–G6: entity Qdrant indexing, empty-text filter, dedup, mega-module split, multi-file info box)*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
