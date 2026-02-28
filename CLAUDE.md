@@ -347,7 +347,7 @@ open http://localhost:8000/docs     # Swagger API docs
 - **RQ queue name**: Jobs are enqueued to the `analysis` queue — always start the worker with `rq worker analysis`, not the default queue
 - **Neo4j optional**: Backend starts in degraded mode without Neo4j (graph queries disabled); safe to skip during local dev if disk space is limited — comment out the `neo4j` service in `docker-compose.yml`
 - **psycopg2 on Python 3.13 + ARM**: Use `psycopg2-binary>=2.9.9`; older versions fail to build on Python 3.13 ARM (Apple Silicon)
-- **Repository creation broken**: `POST /v1/repositories` returns 500 — the SQLAlchemy `Repository` model defines an `owner` column that doesn't exist in the PostgreSQL schema (missing migration). Any query touching the `repositories` table fails with `ProgrammingError: column repositories.owner does not exist`
+- **FastAPI error envelope**: Backend wraps error responses in `{"detail": {...}}` — frontend `request()` must unwrap the nested `detail` object to extract meaningful error messages (e.g., 409 duplicate repository). Forgetting this causes silent error swallowing
 - `.specify/memory/` is gitignored - contains temporary framework state
 - `.claude/*.local.md` files are gitignored - local plugin configuration
 - Specification follows Specify framework patterns (business focus, no implementation details)
@@ -684,5 +684,5 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-27 (Added repositories.owner schema bug gotcha)*
+*Last updated: 2026-02-27 (Fixed stale repo creation gotcha → FastAPI error envelope pattern)*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
