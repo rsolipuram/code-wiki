@@ -32,6 +32,7 @@ from src.recon import repo_recon
 from src.storage import graph_db
 from src.storage.repo_cache import clone, get_commit_hash, list_files
 from src.wiki.orchestrator import generate_module_wiki
+from src.dossier.rag_index import index_entities
 from src.wiki.page_builders.home_page import build_home_page
 from src.wiki.page_builders.module_page import build_module_page, slugify
 from src.wiki.page_builders.special_pages import (
@@ -138,13 +139,16 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             logger.info("[%s] Step 3 done (%.1fs): %d entities", repository_id, time.monotonic() - t0, len(entities))
             _progress(3, "Parsing source files", f"Extracted {len(entities)} entities from {fingerprint.file_count} files")
 
-            # ── Step 4: Persist entities to PostgreSQL ──────────────────────
+            # ── Step 4: Persist entities to PostgreSQL + vector index ────────
             _progress(4, "Persisting entities", "Saving to database...")
             t0 = time.monotonic()
             logger.info("[%s] Step 4: Persisting entities to PostgreSQL", repository_id)
             module_id = _get_or_create_wiki(session, repository_id)
+            _progress(4, "Persisting entities", f"Saved {len(entities)} entities; indexing vectors...")
+            logger.info("[%s] Step 4: Indexing %d entities into Qdrant", repository_id, len(entities))
+            index_entities(entities, str(repo.id))
             logger.info("[%s] Step 4 done (%.1fs)", repository_id, time.monotonic() - t0)
-            _progress(4, "Persisting entities", f"Saved {len(entities)} entities")
+            _progress(4, "Persisting entities", f"Indexed {len(entities)} entities")
 
             # ── Step 5: Run facet analysis (orchestrator) ───────────────────
             _progress(5, "Running AI analysis", "Starting agents...")
@@ -453,9 +457,10 @@ def _detect_modules(local_path: Path, entities: list[ParsedEntity], fingerprint)
                 except ValueError:
                     rel = entity.file_path
                 parts = Path(rel).parts
-                # Use depth 3 for splitting
+                # Use depth 3 for splitting, but stop before the filename when file is at depth 3
                 if len(parts) >= 3:
-                    sub_key = "/".join(parts[:3])
+                    depth = 2 if len(parts) == 3 else 3
+                    sub_key = "/".join(parts[:depth])
                 else:
                     sub_key = mod_key
                 # Strip source root prefix for display
@@ -533,6 +538,9 @@ def _humanize_module_names(modules: list[dict]) -> None:
     for mod in modules:
         parts = mod["name"].split("/")
         base = parts[-1]
+        # Strip file extension as safety net (in case a filename sneaks through as a key)
+        if "." in base:
+            base = Path(base).stem
         human = base.replace("-", " ").replace("_", " ").title()
         if base_counts.get(human, 0) > 1 and len(parts) > 1:
             parent = parts[-2].replace("-", " ").replace("_", " ").title()

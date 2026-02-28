@@ -686,7 +686,10 @@ function SectionContent({
       {isModulePage && (
         <InfoBox variant="info">
           <strong>Auto-generated:</strong> This page is generated directly from source code in{' '}
-          <code>{filePaths[0] ?? `${slug}/`}</code>. All function signatures, file sizes, and
+          {filePaths.length > 1
+            ? <><strong>{filePaths.length} files</strong>{' '}including <code>{filePaths[0]}</code></>
+            : <code>{filePaths[0] ?? `${slug}/`}</code>
+          }. All function signatures, file sizes, and
           dependency data are extracted at analysis time and stay in sync with every commit.
         </InfoBox>
       )}

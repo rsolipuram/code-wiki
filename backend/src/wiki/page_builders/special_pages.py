@@ -78,6 +78,15 @@ def build_function_index(entities: list[ParsedEntity], repo_path: str = "") -> d
     ]
     public.sort(key=lambda e: e.name.lower())
 
+    # Deduplicate by qualified_name (a method may appear as both method and function)
+    seen: set[str] = set()
+    deduped = []
+    for entity in public:
+        if entity.qualified_name not in seen:
+            seen.add(entity.qualified_name)
+            deduped.append(entity)
+    public = deduped
+
     # Group by first letter
     index: dict[str, list[dict]] = {}
     for entity in public:
@@ -154,6 +163,15 @@ def build_api_reference(entities: list[ParsedEntity], repo_path: str = "") -> di
         if not e.name.startswith("_") and e.entity_type in ("function", "class")
     ]
     api_entities.sort(key=lambda e: e.name.lower())
+
+    # Deduplicate by qualified_name
+    seen_api: set[str] = set()
+    deduped_api = []
+    for entity in api_entities:
+        if entity.qualified_name not in seen_api:
+            seen_api.add(entity.qualified_name)
+            deduped_api.append(entity)
+    api_entities = deduped_api
 
     # Group by first letter
     index: dict[str, list[dict]] = {}

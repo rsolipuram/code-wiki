@@ -7,11 +7,12 @@ The wiki generation pipeline then queries this index for contextual enrichment.
 """
 
 import logging
+import uuid
 from typing import Any, Optional
 
 from src.dossier.schema import Dossier, SecurityFinding, TechnicalDebtItem
 from src.llm.embeddings import embed_batch
-from src.storage.vector_db import delete_by_filter, upsert
+from src.storage.vector_db import COLLECTION_CODE_ENTITIES, delete_by_filter, upsert
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,52 @@ def _build_records(dossier: Dossier) -> list[tuple[str, str, dict]]:
         }
         records.append((conflict.id, text, metadata))
 
+    # Drop records with blank text — empty vectors waste index space and produce junk search results
+    records = [(id_, text, payload) for id_, text, payload in records if text.strip()]
     return records
+
+
+def index_entities(entities: list[Any], repo_id: str) -> None:
+    """Index parsed code entities into the code_entities Qdrant collection.
+
+    Args:
+        entities: List of ParsedEntity objects from the code parser.
+        repo_id: Repository ID used as a filter key.
+    """
+    if not entities:
+        return
+
+    texts, ids, payloads = [], [], []
+    for e in entities:
+        text = f"{e.entity_type} {e.qualified_name}: {e.docstring or e.signature or e.name}"
+        if not text.strip():
+            continue
+        texts.append(text)
+        # Generate a deterministic UUID from qualified_name so upserts are idempotent
+        entity_id = str(uuid.uuid5(uuid.NAMESPACE_OID, e.qualified_name))
+        ids.append(entity_id)
+        payloads.append({
+            "repo_id": repo_id,
+            "name": e.name,
+            "qualified_name": e.qualified_name,
+            "entity_type": e.entity_type,
+            "file_path": e.file_path,
+            "line_start": e.line_start,
+            "signature": e.signature or "",
+        })
+
+    if not texts:
+        return
+
+    logger.info("Embedding %d entities for code_entities index (repo %s)", len(texts), repo_id)
+    vectors = embed_batch(texts)
+    upsert(
+        collection=COLLECTION_CODE_ENTITIES,
+        ids=ids,
+        vectors=vectors,
+        payloads=payloads,
+    )
+    logger.info("Indexed %d entities into %s", len(texts), COLLECTION_CODE_ENTITIES)
 
 
 def index_dossier(dossier: Dossier, repository_id: str) -> int:
