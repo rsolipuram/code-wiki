@@ -4,7 +4,7 @@ AI-powered code documentation platform that automatically generates and maintain
 
 ## Project Overview
 
-**Status**: Implementation phase (Active — Pipeline logging + gap fixes applied, branch support wired end-to-end)
+**Status**: Implementation phase (Active — Granular progress tracking wired end-to-end, pipeline logging + gap fixes applied)
 **Feature Branch**: `001-code-wiki`
 **Main Branch**: `main`
 
@@ -351,6 +351,7 @@ open http://localhost:8000/docs     # Swagger API docs
 - **Neo4j dangling edges**: Entity IDs use qualified names (`module.ClassName.method`) but relationship targets store raw call names (`method`). The `_write_neo4j` function builds a name→qualified_name lookup map to resolve targets before creating CALLS relationships. Without this, MATCH queries fail silently and the call graph has missing edges
 - **Alembic migrations**: Run `alembic upgrade head` after pulling changes that add database columns (e.g., `branch` column on repositories). The migration uses `batch_alter_table` for SQLite compatibility
 - **Branch parameter**: Wired end-to-end: `Repository.branch` model column → Alembic migration → `RepositoryCreate` schema → API route sets on create → passed to RQ job → `analyze_repository()` receives it → frontend `api.ts` sends in POST body. Default branch is `main`
+- **Progress tracking**: `Repository.progress` is a JSONB column storing `{step, label, detail, percent, started_at, stats{}}`. Updated by `_emit_progress()` in `analyze.py` at each of 9 pipeline steps (clone → recon → parse → modules → Neo4j → Qdrant → dossier → orchestrator → wiki pages). The orchestrator also reports per-agent progress via a callback. Frontend polls `/repositories/{id}/status` and renders real steps — not cosmetic animation. The `_generate_all_pages()` function reports per-page progress (e.g., "page 3 of 12"). Always restart the RQ worker after modifying `_emit_progress()` or the progress callback chain
 - `.specify/memory/` is gitignored - contains temporary framework state
 - `.claude/*.local.md` files are gitignored - local plugin configuration
 - Specification follows Specify framework patterns (business focus, no implementation details)
@@ -671,7 +672,8 @@ According to specification workflow:
 17. ✅ **Integration fixes applied** — RepoFingerprint metadata extraction, build artifact filtering, semantic module detection, entity path normalization, home page project identity
 18. ✅ **Unified wiki reader** — Consolidated 6+ wiki page routes into single 3-column reader with sidebar navigation; deleted 6 redundant glassmorphism mocks
 19. ✅ **Pipeline logging + gap fixes** — Comprehensive structured logging across 8 backend modules; fixed 6 pipeline gaps (duplicate recon, Neo4j dangling edges, error_message persistence, API schema updates, frontend error state, branch field wired end-to-end with Alembic migration)
-20. ⏳ **Next: Backend implementation** — Code parsers (Jedi/Python AST, TypeScript Compiler API), Facet Intelligence agents, Neo4j/Qdrant integration, FastAPI endpoints
+20. ✅ **Granular progress tracking** — `Repository.progress` JSONB column + Alembic migration, `_emit_progress()` helper in analyze.py reporting 9 pipeline steps with stats, orchestrator progress callback for per-agent reporting, API schema + route updates exposing `progress`, frontend progress page rewritten with 9 real steps + live telemetry (replacing cosmetic animation)
+21. ⏳ **Next: Backend implementation** — Code parsers (Jedi/Python AST, TypeScript Compiler API), Facet Intelligence agents, Neo4j/Qdrant integration, FastAPI endpoints
 
 ---
 
@@ -688,5 +690,5 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-28 (Pipeline logging + 6 gap fixes: Neo4j edges, error_message, branch wiring)*
+*Last updated: 2026-02-28 (Granular progress tracking: JSONB column, 9-step pipeline telemetry, live frontend)*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
