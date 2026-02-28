@@ -510,7 +510,35 @@ def _detect_modules(local_path: Path, entities: list[ParsedEntity], fingerprint)
             "description": "",
         })
 
+    # Humanize module names for display
+    _humanize_module_names(result)
+
     return result
+
+
+def _humanize_module_names(modules: list[dict]) -> None:
+    """Convert path-based module names to human-friendly display names.
+
+    E.g. 'python-backend/airline' → 'Airline'
+         'agents/triage' → 'Triage'
+    Handles duplicates by adding parent context.
+    """
+    # Count base names to detect duplicates
+    base_counts: dict[str, int] = {}
+    for mod in modules:
+        base = mod["name"].rsplit("/", 1)[-1]
+        human = base.replace("-", " ").replace("_", " ").title()
+        base_counts[human] = base_counts.get(human, 0) + 1
+
+    for mod in modules:
+        parts = mod["name"].split("/")
+        base = parts[-1]
+        human = base.replace("-", " ").replace("_", " ").title()
+        if base_counts.get(human, 0) > 1 and len(parts) > 1:
+            parent = parts[-2].replace("-", " ").replace("_", " ").title()
+            human = f"{parent} / {human}"
+        mod["name"] = human
+        # slug is already generated — keep it unchanged
 
 
 def _compute_module_key(parts: tuple[str, ...], source_roots: set[str]) -> str | None:
@@ -598,6 +626,16 @@ def _generate_all_pages(
         except Exception as exc:
             logger.warning("Module page failed for %s: %s", mod["name"], exc)
 
+    # Update Module DB records with AI-generated descriptions
+    for summary in module_summaries:
+        if summary.get("description"):
+            module_record = session.query(Module).filter_by(
+                wiki_id=wiki.id, slug=summary["slug"]
+            ).first()
+            if module_record:
+                module_record.description = summary["description"]
+    session.flush()
+
     # Special pages
     home_content = build_home_page(
         repo_name=repo_name,
@@ -626,7 +664,7 @@ def _generate_all_pages(
         logger.warning("Getting started page failed: %s", exc)
 
     try:
-        fi_content = build_function_index(entities)
+        fi_content = build_function_index(entities, repo_path)
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.function_index, title="Function Index",
             slug="function-index", content=fi_content, commit_hash=commit_hash,
@@ -648,7 +686,7 @@ def _generate_all_pages(
         logger.warning("Glossary page failed: %s", exc)
 
     try:
-        api_content = build_api_reference(entities)
+        api_content = build_api_reference(entities, repo_path)
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.api_reference, title="API Reference",
             slug="api-reference", content=api_content, commit_hash=commit_hash,

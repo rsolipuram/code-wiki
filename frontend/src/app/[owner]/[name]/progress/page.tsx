@@ -86,6 +86,11 @@ export default function ProgressPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Smooth elapsed timer — ticks locally between 3s polls
+  const [localElapsed, setLocalElapsed] = useState<number | null>(null);
+  const lastPollElapsed = useRef<number | null>(null);
+  const lastPollTime = useRef<number>(Date.now());
+
   // Demo mode step advancement (when no repoId)
   const [demoStep, setDemoStep] = useState(0);
   const demoRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -133,6 +138,28 @@ export default function ProgressPage() {
     return () => clearInterval(demoRef.current!);
   }, [repoId]);
 
+  // Sync elapsed from poll
+  useEffect(() => {
+    if (progress?.elapsed_seconds != null) {
+      lastPollElapsed.current = progress.elapsed_seconds;
+      lastPollTime.current = Date.now();
+      setLocalElapsed(progress.elapsed_seconds);
+    }
+  }, [progress?.elapsed_seconds]);
+
+  // Tick elapsed every second between polls for smooth display
+  const hasElapsed = localElapsed != null;
+  useEffect(() => {
+    if (done || repoStatus === 'error' || !hasElapsed) return;
+    const timer = setInterval(() => {
+      if (lastPollElapsed.current != null) {
+        const drift = (Date.now() - lastPollTime.current) / 1000;
+        setLocalElapsed(lastPollElapsed.current + drift);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [done, repoStatus, hasElapsed]);
+
   // Compute active step from backend progress or demo
   const activeStep = repoId
     ? done
@@ -145,7 +172,26 @@ export default function ProgressPage() {
       : demoStep;
 
   const stepStates = getStepStates(Math.min(activeStep, PIPELINE_STEPS.length - 1));
-  const pct = done ? 100 : Math.round(((activeStep + 1) / PIPELINE_STEPS.length) * 100);
+
+  // Interpolate progress bar within the active step using sub-progress data
+  const pct = (() => {
+    if (done) return 100;
+    const totalSteps = PIPELINE_STEPS.length;
+    const basePct = (activeStep / totalSteps) * 100;
+    const stepSize = 100 / totalSteps;
+    let subProgress = 0.5; // default: assume halfway through active step
+    const s = progress?.stats;
+    if (s) {
+      if (activeStep === 4 && s.agents_total && s.agents_total > 0) {
+        // Step 5 (0-indexed 4): agent progress
+        subProgress = (s.agents_completed ?? 0) / s.agents_total;
+      } else if (activeStep === 7 && s.pages_total && s.pages_total > 0) {
+        // Step 8 (0-indexed 7): page generation progress
+        subProgress = (s.pages_generated ?? 0) / s.pages_total;
+      }
+    }
+    return Math.min(99, Math.round(basePct + stepSize * subProgress));
+  })();
   const displayName = repo?.name ?? name;
   const displayUrl = repo?.url ?? `github.com/${owner}/${name}`;
   const liveStats = buildLiveStats(progress?.stats);
@@ -739,8 +785,8 @@ export default function ProgressPage() {
                 {pct}%
               </span>
               <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
-                {progress?.elapsed_seconds != null
-                  ? formatElapsed(progress.elapsed_seconds)
+                {localElapsed != null
+                  ? formatElapsed(localElapsed)
                   : repoStatus === 'pending'
                   ? 'Waiting to start\u2026'
                   : ''}

@@ -60,7 +60,17 @@ Return JSON only:
     return content
 
 
-def build_function_index(entities: list[ParsedEntity]) -> dict[str, Any]:
+def _rel_path(file_path: str, repo_path: str) -> str:
+    """Convert absolute cache path to repo-relative path."""
+    if not repo_path:
+        return file_path
+    try:
+        return str(Path(file_path).resolve().relative_to(Path(repo_path).resolve()))
+    except ValueError:
+        return file_path
+
+
+def build_function_index(entities: list[ParsedEntity], repo_path: str = "") -> dict[str, Any]:
     """Build an alphabetical index of all public code entities (FR-008)."""
     public = [
         e for e in entities
@@ -76,7 +86,7 @@ def build_function_index(entities: list[ParsedEntity]) -> dict[str, Any]:
             "name": entity.name,
             "qualified_name": entity.qualified_name,
             "type": entity.entity_type,
-            "file": entity.file_path,
+            "file": _rel_path(entity.file_path, repo_path),
             "line": entity.line_start,
             "signature": entity.signature,
             "summary": (entity.docstring or "").split("\n")[0][:100] if entity.docstring else "",
@@ -137,7 +147,7 @@ Exclude: generic programming terms (function, class, method, etc.)."""
     }
 
 
-def build_api_reference(entities: list[ParsedEntity]) -> dict[str, Any]:
+def build_api_reference(entities: list[ParsedEntity], repo_path: str = "") -> dict[str, Any]:
     """Build alphabetical API reference index (FR-008)."""
     api_entities = [
         e for e in entities
@@ -153,7 +163,7 @@ def build_api_reference(entities: list[ParsedEntity]) -> dict[str, Any]:
             "name": entity.name,
             "qualified_name": entity.qualified_name,
             "type": entity.entity_type,
-            "file": entity.file_path,
+            "file": _rel_path(entity.file_path, repo_path),
             "line": entity.line_start,
             "signature": entity.signature,
             "description": (entity.docstring or "").split("\n")[0][:200] if entity.docstring else "",
