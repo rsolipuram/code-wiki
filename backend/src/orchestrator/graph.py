@@ -182,18 +182,12 @@ class AnalysisPipeline:
         conflict_synthesizer.run(self.dossier_manager)
 
         # ── Index Dossier into Qdrant for RAG ─────────────────────────────────
-        # On macOS, SentenceTransformer (PyTorch) causes SIGABRT in forked RQ workers
-        # due to native framework initialization. Skip embedding on macOS.
-        import platform
-        if platform.system() == "Darwin":
-            logger.info("[RAG] Skipping Qdrant indexing on macOS (fork safety)")
-        else:
-            logger.info("[RAG] Indexing Dossier findings")
-            try:
-                indexed = index_dossier(self.dossier_manager.dossier, self.repository_id)
-                logger.info("[RAG] Indexed %d findings", indexed)
-            except Exception as exc:
-                logger.warning("[RAG] Indexing failed: %s", exc)
+        logger.info("[RAG] Indexing Dossier findings")
+        try:
+            indexed = index_dossier(self.dossier_manager.dossier, self.repository_id)
+            logger.info("[RAG] Indexed %d findings", indexed)
+        except Exception as exc:
+            logger.warning("[RAG] Indexing failed: %s", exc)
 
         return self.dossier_manager.dossier
 
