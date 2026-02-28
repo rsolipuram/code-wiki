@@ -353,6 +353,7 @@ open http://localhost:8000/docs     # Swagger API docs
 - **Alembic migrations**: Run `alembic upgrade head` after pulling changes that add database columns (e.g., `branch` column on repositories). The migration uses `batch_alter_table` for SQLite compatibility
 - **Branch parameter**: Wired end-to-end: `Repository.branch` model column → Alembic migration → `RepositoryCreate` schema → API route sets on create → passed to RQ job → `analyze_repository()` receives it → frontend `api.ts` sends in POST body. Default branch is `main`
 - **Progress tracking**: `Repository.progress` is a JSONB column storing `{step, label, detail, percent, started_at, stats{}}`. Updated by `_emit_progress()` in `analyze.py` at each of 9 pipeline steps (clone → recon → parse → modules → Neo4j → Qdrant → dossier → orchestrator → wiki pages). The orchestrator also reports per-agent progress via a callback. Frontend polls `/repositories/{id}/status` and renders real steps — not cosmetic animation. The `_generate_all_pages()` function reports per-page progress (e.g., "page 3 of 12"). Always restart the RQ worker after modifying `_emit_progress()` or the progress callback chain
+- **Dossier Qdrant payload bug (known)**: `index_dossier()` in `backend/src/dossier/rag_index.py` creates the correct number of vectors but payload fields (`repo_id`, `facet`, `agent`) come through as `None` and text content is empty. Filtered Qdrant queries by `repo_id` return 0 results. The G2 fix filters zero-length text before upsert, but the root cause (data extraction/payload mapping in `index_dossier()`) still needs investigation — the DossierEntry fields may not be mapping correctly to the Qdrant payload dict.
 - `.specify/memory/` is gitignored - contains temporary framework state
 - `.claude/*.local.md` files are gitignored - local plugin configuration
 - Specification follows Specify framework patterns (business focus, no implementation details)
@@ -692,5 +693,5 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-28 (Wiki pipeline quality fixes G1–G6: entity Qdrant indexing, empty-text filter, dedup, mega-module split, multi-file info box)*
+*Last updated: 2026-02-28 (G1–G6 wiki pipeline quality fixes applied; documented dossier Qdrant payload bug: index_dossier() creates vectors with None payload fields)*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
