@@ -303,7 +303,8 @@ npm run dev
 source venv/bin/activate
 OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES \
   DATABASE_URL="postgresql://codewiki:codewiki@localhost:5434/codewiki" \
-  rq worker analysis
+  REDIS_URL="redis://localhost:6380" \
+  rq worker --worker-class rq.SimpleWorker analysis --url redis://localhost:6380
 ```
 
 **Verify everything is up:**
@@ -320,7 +321,7 @@ open http://localhost:8000/docs     # Swagger API docs
 | `docker-compose up -d` | Start PostgreSQL, Neo4j, Qdrant, and Redis services |
 | `docker-compose ps` | Check service status |
 | `uvicorn src.api.main:app --reload --port 8000` | Start backend dev server (from backend/) |
-| `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES rq worker analysis` | Start RQ worker on macOS (from backend/, requires `venv` active) |
+| `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES REDIS_URL="redis://localhost:6380" rq worker --worker-class rq.SimpleWorker analysis --url redis://localhost:6380` | Start RQ worker on macOS (from backend/, requires `venv` active) |
 | `npm run dev` | Start frontend dev server on port 3000 (from frontend/) |
 | `curl http://localhost:8000/health` | Test backend health endpoint |
 | `curl http://localhost:1234/v1/models` | Verify LM Studio is running |
@@ -342,7 +343,7 @@ open http://localhost:8000/docs     # Swagger API docs
 - **GPU recommended**: qwen3-coder-30b model runs best with sufficient VRAM; configure model name in `backend/.env` via `LLM_MODEL`
 - **Port conflicts**: PostgreSQL and Redis host ports are remapped (5434 and 6380) to avoid conflicts with local services — ensure `DATABASE_URL` and `REDIS_URL` in `backend/.env` match docker-compose port mappings
 - **Qdrant in Docker**: Vector database runs in container, data persists in `qdrant_data` volume
-- **macOS fork safety**: RQ worker crashes on macOS without `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`
+- **macOS fork safety**: RQ's default forking worker causes SIGABRT on macOS when native frameworks (PyTorch/SentenceTransformer for embeddings, Neo4j driver, SSL) are used. `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` alone is insufficient. **Must use SimpleWorker**: `rq worker --worker-class rq.SimpleWorker analysis`. Neo4j writes and Qdrant/embedding indexing are auto-skipped on macOS (detected via `platform.system() == "Darwin"` in `analyze.py` and `graph.py`)
 - **RQ worker code changes**: RQ worker must be restarted after backend code changes — it caches imported Python modules in memory
 - **RQ queue name**: Jobs are enqueued to the `analysis` queue — always start the worker with `rq worker analysis`, not the default queue
 - **Neo4j optional**: Backend starts in degraded mode without Neo4j (graph queries disabled); safe to skip during local dev if disk space is limited — comment out the `neo4j` service in `docker-compose.yml`
