@@ -67,6 +67,7 @@ yarn.lock
 *.temp
 .cache/
 cache/
+.claude/
 
 # Backend
 backend/venv/
