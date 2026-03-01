@@ -21,6 +21,7 @@ import { TableOfContents, type TocEntry } from '@/components/layout/TableOfConte
 import { WikiSidebar } from '@/components/layout/WikiSidebar';
 import { api } from '@/services/api';
 import type { Module, Repository, WikiPage } from '@/services/api';
+import { V2SectionContent, V2HomeContent } from '@/components/wiki/V2Components';
 
 interface WikiReaderProps {
   owner: string;
@@ -297,7 +298,13 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
             padding: '32px 20px',
           }}
         >
-          <TableOfContents items={getTocItems(isHome, slug)} />
+          <TableOfContents items={getTocItems(
+            isHome,
+            slug,
+            isHome
+              ? (homePage?.content as Record<string, unknown> | null)
+              : (activePage?.content as Record<string, unknown> | null),
+          )} />
         </aside>
       </div>
     </>
@@ -322,6 +329,22 @@ function HomeContent({
   name: string;
 }) {
   const content = homePage?.content as Record<string, unknown> | null;
+
+  // V2 dispatch
+  if (content?.version === 2) {
+    return (
+      <>
+        <Breadcrumbs
+          crumbs={[
+            { label: 'dashboard', href: '/dashboard' },
+            { label: `${name} wiki` },
+          ]}
+        />
+        <V2HomeContent content={content} base={base} name={name} />
+      </>
+    );
+  }
+
   const overview = content?.overview as Record<string, unknown> | null;
   const stats = content?.stats as Record<string, number> | null;
   const statsObj = content?.stats as Record<string, number> | null;
@@ -611,6 +634,33 @@ function SectionContent({
   }
   if (pageType === 'api_reference' || slug === 'api-reference') {
     return <ApiReferenceContent content={content} base={base} name={name} />;
+  }
+
+  // V2 dispatch
+  if (content?.version === 2) {
+    return (
+      <>
+        <Breadcrumbs
+          crumbs={[
+            { label: 'dashboard', href: '/dashboard' },
+            { label: `${name} wiki`, href: base },
+            { label: displayName },
+          ]}
+        />
+        <h1
+          style={{
+            fontSize: 32,
+            fontWeight: 800,
+            marginTop: 24,
+            marginBottom: 8,
+            letterSpacing: '-0.02em',
+          }}
+        >
+          {displayName}
+        </h1>
+        <V2SectionContent content={content} base={base} name={name} />
+      </>
+    );
   }
 
   return (
@@ -908,7 +958,42 @@ function SectionContent({
 
 // ─── TOC helper ──────────────────────────────────────────────────────────────
 
-function getTocItems(isHome: boolean, slug?: string): TocEntry[] {
+function getTocItems(
+  isHome: boolean,
+  slug?: string,
+  content?: Record<string, unknown> | null,
+): TocEntry[] {
+  // V2 dynamic TOC from subsections and prose headings
+  if (content?.version === 2) {
+    const items: TocEntry[] = [];
+    const subsections = content.subsections as { id: string; title: string }[] | undefined;
+    if (subsections && subsections.length > 0) {
+      for (const sub of subsections) {
+        items.push({ id: sub.id, label: sub.title, level: 2 });
+      }
+    }
+    // Also extract headings from prose_segments for single-page rendering
+    const segments = content.prose_segments as { type: string; text?: string; level?: number }[] | undefined;
+    if (segments) {
+      for (const seg of segments) {
+        if (seg.type === 'heading' && seg.text) {
+          const anchorId = seg.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+          items.push({ id: anchorId, label: seg.text, level: seg.level === 3 ? 3 : 2 });
+        }
+      }
+    }
+    // For V2 home pages
+    if (isHome) {
+      const hasSections = (content.section_summaries as unknown[])?.length;
+      if (items.length === 0) {
+        items.push({ id: 'overview', label: 'Overview', level: 2 });
+        if (content.stats) items.push({ id: 'stats', label: 'Stats', level: 2 });
+        if (hasSections) items.push({ id: 'sections', label: 'Sections', level: 2 });
+      }
+    }
+    return items.length > 0 ? items : [{ id: 'overview', label: 'Overview', level: 2 }];
+  }
+
   if (isHome) {
     return [
       { id: 'overview', label: 'Overview', level: 2 },

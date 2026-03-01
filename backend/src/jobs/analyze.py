@@ -32,6 +32,7 @@ from src.recon import repo_recon
 from src.storage import graph_db
 from src.storage.repo_cache import clone, get_commit_hash, list_files
 from src.wiki.orchestrator import generate_module_wiki
+from src.wiki.v2_pipeline import generate_wiki_v2
 from src.dossier.rag_index import index_entities
 from src.wiki.page_builders.home_page import build_home_page
 from src.wiki.page_builders.module_page import build_module_page, slugify
@@ -198,9 +199,6 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                 session.add(wiki)
                 session.flush()
 
-            # Persist Module and CodeEntity records to PostgreSQL
-            _persist_modules_and_entities(session, wiki.id, modules_data, local_path)
-
             # Compute total pages (modules + special pages)
             total_pages = len(modules_data) + 5  # home + getting-started + function-index + glossary + api-reference
             stats["pages_generated"] = 0
@@ -210,20 +208,39 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                 stats["pages_generated"] = pages_done
                 _progress(8, "Generating wiki pages", f"Page {pages_done}/{total_pages}: {page_name}")
 
-            pages_created = _generate_all_pages(
-                session=session,
-                wiki=wiki,
-                entities=entities,
-                modules_data=modules_data,
-                repo_name=repo.name or repo_url.split("/")[-1],
-                repo_url=repo_url,
-                repo_path=str(local_path),
-                repository_id=repository_id,
-                fingerprint=fingerprint,
-                dossier=dossier,
-                commit_hash=commit_hash,
-                page_progress_callback=_page_progress_callback,
-            )
+            if settings.wiki_v2_enabled:
+                logger.info("[%s] Step 8: Using V2 wiki pipeline", repository_id)
+                pages_created = generate_wiki_v2(
+                    session=session,
+                    wiki=wiki,
+                    entities=entities,
+                    modules_data=modules_data,
+                    repo_name=repo.name or repo_url.split("/")[-1],
+                    repo_url=repo_url,
+                    repo_path=str(local_path),
+                    repository_id=repository_id,
+                    fingerprint=fingerprint,
+                    dossier=dossier,
+                    commit_hash=commit_hash,
+                    page_progress_callback=_page_progress_callback,
+                )
+            else:
+                # V1 fallback: persist modules then generate pages
+                _persist_modules_and_entities(session, wiki.id, modules_data, local_path)
+                pages_created = _generate_all_pages_v1(
+                    session=session,
+                    wiki=wiki,
+                    entities=entities,
+                    modules_data=modules_data,
+                    repo_name=repo.name or repo_url.split("/")[-1],
+                    repo_url=repo_url,
+                    repo_path=str(local_path),
+                    repository_id=repository_id,
+                    fingerprint=fingerprint,
+                    dossier=dossier,
+                    commit_hash=commit_hash,
+                    page_progress_callback=_page_progress_callback,
+                )
 
             wiki.page_count = pages_created
             wiki.module_count = len(modules_data)
@@ -572,7 +589,7 @@ def _compute_module_key(parts: tuple[str, ...], source_roots: set[str]) -> str |
     return parts[0]
 
 
-def _generate_all_pages(
+def _generate_all_pages_v1(
     session: Session,
     wiki: Wiki,
     entities: list[ParsedEntity],

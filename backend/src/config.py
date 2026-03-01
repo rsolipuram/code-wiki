@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # Feature flags
     enable_chat: bool = Field(default=True, alias="ENABLE_CHAT")
     enable_diagrams: bool = Field(default=False, alias="ENABLE_DIAGRAMS")
+    wiki_v2_enabled: bool = Field(default=True, alias="WIKI_V2_ENABLED")
 
     model_config = {"env_file": ".env", "populate_by_name": True}
 
