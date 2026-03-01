@@ -349,7 +349,9 @@ open http://localhost:8000/docs     # Swagger API docs
 
 ## Gotchas
 
-- **LM Studio required**: Backend depends on LM Studio running on localhost:1234 - start it before backend
+- **LM Studio required**: Backend depends on LM Studio running on localhost:1234 - start it before backend. **Always verify before pipeline runs**: `curl http://localhost:1234/v1/models` — V2 pipeline will error if LM Studio is down
+- **No local psql**: PostgreSQL CLI isn't installed on this machine — use `docker exec -i code-wiki-postgres-1 psql -U codewiki -d codewiki` for SQL commands
+- **Data store reset (E2E testing)**: Clear all stores before full pipeline tests: PostgreSQL (via Docker psql), Neo4j (`backend/scripts/reset_neo4j.py`), Redis (`docker exec code-wiki-redis-1 redis-cli -p 6379 FLUSHALL`), repo cache (`backend/cache/repos/`)
 - **GPU recommended**: qwen3-coder-30b model runs best with sufficient VRAM; configure model name in `backend/.env` via `LLM_MODEL`
 - **Port conflicts**: PostgreSQL and Redis host ports are remapped (5434 and 6380) to avoid conflicts with local services — ensure `DATABASE_URL` and `REDIS_URL` in `backend/.env` match docker-compose port mappings
 - **Qdrant in Docker**: Vector database runs in container, data persists in `qdrant_data` volume
