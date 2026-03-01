@@ -225,6 +225,8 @@ This project uses **Specify** framework for requirements management:
 
 **Avoid**: Outdated content, bloated/redundant info, lacks context, difficult navigation, too generic without project-specific tailoring
 
+**Competitive Benchmark (Google Code Wiki / Gemini, openai-cs-agents-demo)**: ~22 SVG architecture diagrams, ~377 GitHub source code links (at specific commit), ~8,292 words, 19+ sections in 3-level heading hierarchy, structured agent spec tables (6 agents × tools), professional prose explaining "why" not just "what", cross-references between sections. No traditional `<pre>` code blocks — uses custom inline rendering. Key gaps in our current system: SVG diagram generation, dense source-code link embedding, and 8K+ word depth per wiki.
+
 ### Edge Case Handling Architecture
 
 **Strategy**: Hybrid AI classification with rule-based pre-filtering
@@ -693,5 +695,6 @@ Established for all frontend page tasks. Each UX task must include:
 
 Applied to: T077 (design system), T078 (shared layout), T079 (home page), T080 (submit page), T081 (progress page), T082 (wiki dashboard).
 
-*Last updated: 2026-02-28 (G1–G6 wiki pipeline quality fixes applied; documented dossier Qdrant payload bug: index_dossier() creates vectors with None payload fields)*
+*Last updated: 2026-03-01 (Added Google Code Wiki competitive benchmarks to Quality Criteria: 22 SVGs, 377 source links, 8K+ words, 19+ sections per wiki — from research session on openai-cs-agents-demo)*
+*Managed by claude-md-manager skill. Quality target: 80+/100*
 *Managed by claude-md-manager skill. Quality target: 80+/100*
