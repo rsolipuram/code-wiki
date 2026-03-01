@@ -963,25 +963,40 @@ function getTocItems(
   slug?: string,
   content?: Record<string, unknown> | null,
 ): TocEntry[] {
-  // V2 dynamic TOC from subsections and prose headings
+  // V2 dynamic TOC — prefer prose_segments headings (accurate levels),
+  // fall back to subsections only when no heading segments exist.
   if (content?.version === 2) {
     const items: TocEntry[] = [];
-    const subsections = content.subsections as { id: string; title: string }[] | undefined;
-    if (subsections && subsections.length > 0) {
-      for (const sub of subsections) {
-        items.push({ id: sub.id, label: sub.title, level: 2 });
-      }
-    }
-    // Also extract headings from prose_segments for single-page rendering
+    const seen = new Set<string>();
+
+    // Primary source: heading segments from prose_segments
     const segments = content.prose_segments as { type: string; text?: string; level?: number }[] | undefined;
     if (segments) {
       for (const seg of segments) {
         if (seg.type === 'heading' && seg.text) {
           const anchorId = seg.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-          items.push({ id: anchorId, label: seg.text, level: seg.level === 3 ? 3 : 2 });
+          if (!seen.has(anchorId)) {
+            seen.add(anchorId);
+            const level = seg.level || 2;
+            items.push({ id: anchorId, label: seg.text, level: Math.min(level, 3) });
+          }
         }
       }
     }
+
+    // Fallback: use subsections only if no heading segments were found
+    if (items.length === 0) {
+      const subsections = content.subsections as { id: string; title: string }[] | undefined;
+      if (subsections && subsections.length > 0) {
+        for (const sub of subsections) {
+          if (!seen.has(sub.id)) {
+            seen.add(sub.id);
+            items.push({ id: sub.id, label: sub.title, level: 2 });
+          }
+        }
+      }
+    }
+
     // For V2 home pages
     if (isHome) {
       const hasSections = (content.section_summaries as unknown[])?.length;
