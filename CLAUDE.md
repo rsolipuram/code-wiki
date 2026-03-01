@@ -4,7 +4,7 @@ AI-powered code documentation platform that automatically generates and maintain
 
 ## Project Overview
 
-**Status**: Implementation phase (Active — Wiki pipeline quality fixes applied: entity Qdrant indexing, dedup, mega-module split, multi-file info box)
+**Status**: Implementation phase (Active — V2 wiki pipeline in progress: 5-phase architecture with compressor, planner, narrator, enricher, renderer)
 **Feature Branch**: `001-code-wiki`
 **Main Branch**: `main`
 
@@ -31,6 +31,13 @@ code-wiki/
       wiki/                      # Wiki page generation pipeline
         page_builders/           # Module, dashboard, special page builders
         context_builder.py       # RAG context assembly
+        v2_types.py              # V2 data structures (CompressedCodebase, WikiPlan, etc.)
+        v2_pipeline.py           # V2 orchestrator (5-phase: compress→plan→narrate→enrich→render)
+        compressor.py            # Phase 0: Hierarchical code summarization
+        planner.py               # Phase 1: Feature-based content planning
+        narrator.py              # Phase 2: Prose narrative generation
+        enricher.py              # Phase 3: Deterministic source links, code blocks, diagrams
+        renderer.py              # Phase 4: Adaptive single/multi-page output
     requirements.txt
   frontend/                      # Next.js + TypeScript frontend
     src/
@@ -42,6 +49,7 @@ code-wiki/
         login/                   # OAuth + email auth
         submit/                  # Add repository form
       components/ui/             # Shared UI components
+      components/wiki/           # V2 wiki rendering components (MermaidDiagram, ProseSegment, etc.)
         Breadcrumbs.tsx          # Navigation breadcrumbs
         CodeBlock.tsx            # Syntax-highlighted code with copy
         GlassCard.tsx            # Glassmorphism card container
