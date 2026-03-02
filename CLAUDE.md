@@ -37,7 +37,7 @@ code-wiki/
         planner.py               # Phase 1: Feature-based content planning
         narrator.py              # Phase 2: Prose narrative generation
         enricher.py              # Phase 3: Deterministic source links, code blocks, diagrams
-        diagram_generator.py     # Mermaid diagram generation (architecture, data flow, sequence)
+        diagram_generator.py     # Mermaid diagram generation (architecture, data_flow, sequence, class_hierarchy)
         table_generator.py       # Component/config/API summary tables
         renderer.py              # Phase 4: Adaptive single/multi-page output
     requirements.txt
@@ -368,6 +368,7 @@ open http://localhost:8000/docs     # Swagger API docs
 - **Branch parameter**: Wired end-to-end: `Repository.branch` model column → Alembic migration → `RepositoryCreate` schema → API route sets on create → passed to RQ job → `analyze_repository()` receives it → frontend `api.ts` sends in POST body. Default branch is `main`
 - **Progress tracking**: `Repository.progress` is a JSONB column storing `{step, label, detail, percent, started_at, stats{}}`. Updated by `_emit_progress()` in `analyze.py` at each of 9 pipeline steps (clone → recon → parse → modules → Neo4j → Qdrant → dossier → orchestrator → wiki pages). The orchestrator also reports per-agent progress via a callback. Frontend polls `/repositories/{id}/status` and renders real steps — not cosmetic animation. The `_generate_all_pages()` function reports per-page progress (e.g., "page 3 of 12"). Always restart the RQ worker after modifying `_emit_progress()` or the progress callback chain
 - **Dossier Qdrant payload bug (known)**: `index_dossier()` in `backend/src/dossier/rag_index.py` creates the correct number of vectors but payload fields (`repo_id`, `facet`, `agent`) come through as `None` and text content is empty. Filtered Qdrant queries by `repo_id` return 0 results. The G2 fix filters zero-length text before upsert, but the root cause (data extraction/payload mapping in `index_dossier()`) still needs investigation — the DossierEntry fields may not be mapping correctly to the Qdrant payload dict.
+- **Qdrant entity batch size**: `index_entities()` in `rag_index.py` batches upserts (default 50) to avoid Qdrant payload size limit errors on large repos. If analysis fails with payload overflow, reduce `BATCH_SIZE`
 - **Mermaid SVG rendering**: `V2Components.tsx` uses `innerHTML` assignment for mermaid-generated SVG output — this triggers hook warnings but is safe (SVG is library-generated from structured diagram syntax, not user HTML). Approve when prompted
 - `.specify/memory/` is gitignored - contains temporary framework state
 - `.claude/*.local.md` files are gitignored - local plugin configuration
