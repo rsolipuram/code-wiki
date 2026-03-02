@@ -120,12 +120,17 @@ def index_entities(entities: list[Any], repo_id: str) -> None:
 
     logger.info("Embedding %d entities for code_entities index (repo %s)", len(texts), repo_id)
     vectors = embed_batch(texts)
-    upsert(
-        collection=COLLECTION_CODE_ENTITIES,
-        ids=ids,
-        vectors=vectors,
-        payloads=payloads,
-    )
+
+    # Batch upserts to stay under Qdrant's payload size limit (~33MB)
+    BATCH_SIZE = 500
+    for i in range(0, len(texts), BATCH_SIZE):
+        end = min(i + BATCH_SIZE, len(texts))
+        upsert(
+            collection=COLLECTION_CODE_ENTITIES,
+            ids=ids[i:end],
+            vectors=vectors[i:end],
+            payloads=payloads[i:end],
+        )
     logger.info("Indexed %d entities into %s", len(texts), COLLECTION_CODE_ENTITIES)
 
 
