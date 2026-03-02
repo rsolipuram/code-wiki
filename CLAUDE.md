@@ -37,6 +37,8 @@ code-wiki/
         planner.py               # Phase 1: Feature-based content planning
         narrator.py              # Phase 2: Prose narrative generation
         enricher.py              # Phase 3: Deterministic source links, code blocks, diagrams
+        diagram_generator.py     # Mermaid diagram generation (architecture, data flow, sequence)
+        table_generator.py       # Component/config/API summary tables
         renderer.py              # Phase 4: Adaptive single/multi-page output
     requirements.txt
   frontend/                      # Next.js + TypeScript frontend
