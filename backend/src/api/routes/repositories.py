@@ -189,6 +189,10 @@ async def stream_progress(
 
         # Subscribe to Redis pub/sub for live events
         async for event in subscribe_progress(str(repository_id)):
+            if event is None:
+                # Keepalive comment — keeps connection alive through proxies
+                yield ": keepalive\n\n"
+                continue
             yield f"data: {json.dumps(event)}\n\n"
             if event.get("type") == "done":
                 break
