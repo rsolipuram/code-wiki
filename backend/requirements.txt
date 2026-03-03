@@ -16,9 +16,11 @@ qdrant-client==1.11.3
 # LLM / AI
 openai==1.51.0
 sentence-transformers==3.1.1
+langchain-openai>=0.2.0
 
 # Agent orchestration
 langgraph==0.2.38
+langchain-core>=0.3.0
 
 # Background jobs
 redis==5.1.1
