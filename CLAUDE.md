@@ -4,7 +4,7 @@ AI-powered code documentation platform that automatically generates and maintain
 
 ## Project Overview
 
-**Status**: Implementation phase (Active — V2 wiki pipeline in progress: 5-phase architecture with compressor, planner, narrator, enricher, renderer)
+**Status**: Implementation phase (Active — V2 wiki pipeline refactored to 7-agent multi-agent architecture with SSE progress reporting)
 **Feature Branch**: `001-code-wiki`
 **Main Branch**: `main`
 
@@ -29,6 +29,18 @@ code-wiki/
       recon/                     # Layer 0: Repo Reconnaissance
       storage/                   # Neo4j + Qdrant storage layer
       wiki/                      # Wiki page generation pipeline
+        agents/                  # 7-agent LangGraph pipeline
+          state.py               # WikiState TypedDict for LangGraph state
+          graph.py               # StateGraph orchestrator + report_agent_progress helper
+          model.py               # LLM model factory (ChatOpenAI for LM Studio)
+          tools.py               # Shared agent tools (query_call_graph, rag_search, read_source)
+          architect_agent.py     # Codebase architecture analysis
+          planner_agent.py       # Section planning and content strategy
+          writer_agent.py        # Prose narrative generation (per-section)
+          annotator_agent.py     # Source link injection
+          diagrammer_agent.py    # Mermaid diagram generation
+          tabulator_agent.py     # Summary table generation
+          assembler_agent.py     # Final assembly (deterministic, no LLM)
         page_builders/           # Module, dashboard, special page builders
         context_builder.py       # RAG context assembly
         v2_types.py              # V2 data structures (CompressedCodebase, WikiPlan, etc.)
@@ -370,6 +382,8 @@ open http://localhost:8000/docs     # Swagger API docs
 - **Dossier Qdrant payload bug (known)**: `index_dossier()` in `backend/src/dossier/rag_index.py` creates the correct number of vectors but payload fields (`repo_id`, `facet`, `agent`) come through as `None` and text content is empty. Filtered Qdrant queries by `repo_id` return 0 results. The G2 fix filters zero-length text before upsert, but the root cause (data extraction/payload mapping in `index_dossier()`) still needs investigation — the DossierEntry fields may not be mapping correctly to the Qdrant payload dict.
 - **Qdrant entity batch size**: `index_entities()` in `rag_index.py` batches upserts (default 50) to avoid Qdrant payload size limit errors on large repos. If analysis fails with payload overflow, reduce `BATCH_SIZE`
 - **Mermaid SVG rendering**: `V2Components.tsx` uses `innerHTML` assignment for mermaid-generated SVG output — this triggers hook warnings but is safe (SVG is library-generated from structured diagram syntax, not user HTML). Approve when prompted
+- **SSE progress for wiki agents**: Redis pub/sub on channel `wiki:progress:{repo_id}`. Each agent calls `report_agent_progress(state, agent_name, status)` which publishes JSON events. Frontend connects via `EventSource` to `/repositories/{id}/wiki-progress`. Terminal events (`complete`/`error`) close the stream. `progress_events.py` manages the Redis publish + SSE endpoint
+- **Wiki agent node pattern**: All 7 agents are node functions `def agent_name(state: dict) -> dict` returning partial WikiState updates. Graph wiring in `graph.py` handles execution order (architect → planner → writer → parallel[annotator, diagrammer, tabulator] → assembler). `repo_id` must be in WikiState for progress reporting to work
 - `.specify/memory/` is gitignored - contains temporary framework state
 - `.claude/*.local.md` files are gitignored - local plugin configuration
 - Specification follows Specify framework patterns (business focus, no implementation details)
