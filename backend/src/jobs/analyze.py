@@ -58,8 +58,8 @@ def _emit_progress(
     pipeline_start: float,
     started_at: str,
 ) -> None:
-    """Persist pipeline progress to the repository row so the frontend can poll it."""
-    repo.progress = {
+    """Persist pipeline progress to DB and publish to Redis for SSE consumers."""
+    progress = {
         "current_step": step,
         "step_label": label,
         "step_detail": detail,
@@ -67,7 +67,15 @@ def _emit_progress(
         "started_at": started_at,
         "elapsed_seconds": round(time.monotonic() - pipeline_start, 1),
     }
+    repo.progress = progress
     session.commit()
+
+    # Dual-write: also publish to Redis for SSE streaming
+    try:
+        from src.api.progress_events import publish_progress
+        publish_progress(str(repo.id), {"type": "step_progress", **progress})
+    except Exception:
+        pass  # Redis unavailable is non-fatal
 
 
 def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, Any]:
@@ -264,6 +272,14 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                 "[%s] Analysis complete in %.1fs: %d pages, %d modules, %d entities",
                 repository_id, total_elapsed, pages_created, len(modules_data), len(entities),
             )
+
+            # Publish terminal SSE event
+            try:
+                from src.api.progress_events import publish_progress
+                publish_progress(repository_id, {"type": "done", "status": "ready"})
+            except Exception:
+                pass
+
             return {
                 "status": "completed",
                 "pages_created": pages_created,
@@ -284,6 +300,15 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                     "elapsed_seconds": round(time.monotonic() - pipeline_start, 1),
                 }
             session.commit()
+
+            # Publish terminal error event
+            try:
+                from src.api.progress_events import publish_progress
+                publish_progress(repository_id, {
+                    "type": "done", "status": "error", "error": str(exc)[:200],
+                })
+            except Exception:
+                pass
             raise
 
 

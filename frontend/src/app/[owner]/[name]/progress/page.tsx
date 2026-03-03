@@ -12,8 +12,8 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { GradientBackground } from '@/components/ui/GradientBackground';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Logo } from '@/components/ui/Logo';
-import { api } from '@/services/api';
-import type { Repository, PipelineProgress } from '@/services/api';
+import { api, progressStreamUrl } from '@/services/api';
+import type { Repository, PipelineProgress, AgentProgressEvent } from '@/services/api';
 
 const PIPELINE_STEPS = [
   { label: 'Cloning repository', icon: '\u{1F4E5}' },
@@ -55,6 +55,26 @@ interface StatItem {
   value: string;
 }
 
+const WIKI_AGENTS = [
+  { id: 'architect', label: 'Architect', desc: 'Analyzing codebase structure' },
+  { id: 'planner', label: 'Planner', desc: 'Planning wiki sections' },
+  { id: 'writer', label: 'Writer', desc: 'Writing technical prose' },
+  { id: 'annotator', label: 'Annotator', desc: 'Adding entity references' },
+  { id: 'diagrammer', label: 'Diagrammer', desc: 'Generating diagrams' },
+  { id: 'tabulator', label: 'Tabulator', desc: 'Building summary tables' },
+  { id: 'assembler', label: 'Assembler', desc: 'Assembling final pages' },
+];
+
+type AgentState = { status: 'pending' | 'running' | 'complete'; detail: string };
+
+function getAgentStates(events: AgentProgressEvent[]): Record<string, AgentState> {
+  const states: Record<string, AgentState> = {};
+  for (const e of events) {
+    states[e.agent] = { status: e.status, detail: e.detail };
+  }
+  return states;
+}
+
 function buildLiveStats(stats?: PipelineProgress['stats']): StatItem[] {
   if (!stats) return [];
   const items: StatItem[] = [];
@@ -84,9 +104,9 @@ export default function ProgressPage() {
   const [done, setDone] = useState(false);
   const [repoStatus, setRepoStatus] = useState<Repository['status'] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [agentEvents, setAgentEvents] = useState<AgentProgressEvent[]>([]);
 
-  // Smooth elapsed timer — ticks locally between 3s polls
+  // Smooth elapsed timer — ticks locally between SSE events
   const [localElapsed, setLocalElapsed] = useState<number | null>(null);
   const lastPollElapsed = useRef<number | null>(null);
   const lastPollTime = useRef<number>(Date.now());
@@ -95,31 +115,67 @@ export default function ProgressPage() {
   const [demoStep, setDemoStep] = useState(0);
   const demoRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Poll repo status every 3s
+  // SSE-based progress streaming (replaces polling)
   useEffect(() => {
     if (!repoId) return;
 
-    const poll = async () => {
+    // Initial fetch for catch-up state
+    api.repositories.get(repoId).then((r) => {
+      setRepo(r);
+      setRepoStatus(r.status);
+      setProgress(r.progress ?? null);
+      if (r.status === 'ready') { setDone(true); return; }
+      if (r.status === 'error') {
+        setErrorMessage(r.error_message || 'An unexpected error occurred during analysis.');
+        return;
+      }
+    }).catch(() => {});
+
+    // Connect to SSE stream
+    const es = new EventSource(progressStreamUrl(repoId));
+
+    es.onmessage = (event) => {
       try {
-        const r = await api.repositories.get(repoId);
-        setRepo(r);
-        setRepoStatus(r.status);
-        setProgress(r.progress ?? null);
-        if (r.status === 'ready') {
-          clearInterval(pollRef.current!);
-          setDone(true);
-        } else if (r.status === 'error') {
-          clearInterval(pollRef.current!);
-          setErrorMessage(r.error_message || 'An unexpected error occurred during analysis.');
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'done') {
+          setRepoStatus(data.status);
+          if (data.status === 'ready') setDone(true);
+          if (data.status === 'error') setErrorMessage(data.error || 'Analysis failed');
+          es.close();
+          return;
+        }
+
+        if (data.type === 'step_progress') {
+          setProgress(data);
+        }
+
+        if (data.type === 'agent_progress') {
+          setAgentEvents((prev) => [...prev, data]);
+        }
+
+        // Handle initial catch-up data (no type field = DB progress snapshot)
+        if (!data.type && data.current_step) {
+          setProgress(data);
         }
       } catch {
-        // ignore polling errors
+        // ignore parse errors
       }
     };
 
-    poll();
-    pollRef.current = setInterval(poll, 3000);
-    return () => clearInterval(pollRef.current!);
+    es.onerror = () => {
+      es.close();
+      // Fallback: poll once to get final state
+      api.repositories.get(repoId).then((r) => {
+        setRepo(r);
+        setRepoStatus(r.status);
+        setProgress(r.progress ?? null);
+        if (r.status === 'ready') setDone(true);
+        if (r.status === 'error') setErrorMessage(r.error_message || 'Analysis failed');
+      }).catch(() => {});
+    };
+
+    return () => es.close();
   }, [repoId]);
 
   // Demo mode: advance steps every 3s when no repoId
@@ -173,6 +229,10 @@ export default function ProgressPage() {
 
   const stepStates = getStepStates(Math.min(activeStep, PIPELINE_STEPS.length - 1));
 
+  // Derive agent states for sub-stepper
+  const agentStates = getAgentStates(agentEvents);
+  const completedAgents = Object.values(agentStates).filter((a) => a.status === 'complete').length;
+
   // Interpolate progress bar within the active step using sub-progress data
   const pct = (() => {
     if (done) return 100;
@@ -183,10 +243,13 @@ export default function ProgressPage() {
     const s = progress?.stats;
     if (s) {
       if (activeStep === 4 && s.agents_total && s.agents_total > 0) {
-        // Step 5 (0-indexed 4): agent progress
+        // Step 5 (0-indexed 4): facet agent progress
         subProgress = (s.agents_completed ?? 0) / s.agents_total;
+      } else if (activeStep === 7 && agentEvents.length > 0) {
+        // Step 8 (0-indexed 7): wiki agent progress from SSE events
+        subProgress = completedAgents / WIKI_AGENTS.length;
       } else if (activeStep === 7 && s.pages_total && s.pages_total > 0) {
-        // Step 8 (0-indexed 7): page generation progress
+        // Step 8 fallback: page generation progress
         subProgress = (s.pages_generated ?? 0) / s.pages_total;
       }
     }
@@ -757,6 +820,79 @@ export default function ProgressPage() {
                         ? stepDetail || 'In progress\u2026'
                         : 'Pending'}
                     </div>
+
+                    {/* Agent sub-stepper for Step 8 (wiki generation) */}
+                    {i === 7 && (isActive || state === 'complete') && agentEvents.length > 0 && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: 6,
+                          marginTop: 10,
+                        }}
+                      >
+                        {WIKI_AGENTS.map((agent) => {
+                          const as = agentStates[agent.id];
+                          const agentStatus = as?.status ?? 'pending';
+                          const bg =
+                            agentStatus === 'complete'
+                              ? 'rgba(34,197,94,0.15)'
+                              : agentStatus === 'running'
+                              ? 'rgba(6,182,212,0.15)'
+                              : 'rgba(255,255,255,0.04)';
+                          const border =
+                            agentStatus === 'complete'
+                              ? 'rgba(34,197,94,0.4)'
+                              : agentStatus === 'running'
+                              ? 'rgba(6,182,212,0.4)'
+                              : 'var(--glass-border)';
+                          const color =
+                            agentStatus === 'complete'
+                              ? '#4ade80'
+                              : agentStatus === 'running'
+                              ? 'var(--secondary)'
+                              : 'var(--text-tertiary)';
+
+                          return (
+                            <span
+                              key={agent.id}
+                              title={as?.detail || agent.desc}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                padding: '3px 10px',
+                                background: bg,
+                                border: `1px solid ${border}`,
+                                borderRadius: 12,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color,
+                                transition: 'all 0.3s',
+                              }}
+                            >
+                              {agentStatus === 'complete' && (
+                                <span style={{ fontSize: 10 }}>{'\u2713'}</span>
+                              )}
+                              {agentStatus === 'running' && (
+                                <span
+                                  style={{
+                                    display: 'inline-block',
+                                    width: 8,
+                                    height: 8,
+                                    border: '1.5px solid rgba(6,182,212,0.3)',
+                                    borderTopColor: 'var(--secondary)',
+                                    borderRadius: '50%',
+                                    animation: 'spin 0.8s linear infinite',
+                                  }}
+                                />
+                              )}
+                              {agent.label}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               );

@@ -36,6 +36,26 @@ export interface PipelineProgress {
   elapsed_seconds?: number;
 }
 
+export interface AgentProgressEvent {
+  type: 'agent_progress';
+  agent: string;
+  status: 'running' | 'complete';
+  detail: string;
+  timestamp: number;
+}
+
+export interface StepProgressEvent extends PipelineProgress {
+  type: 'step_progress';
+}
+
+export interface DoneEvent {
+  type: 'done';
+  status: 'ready' | 'error';
+  error?: string;
+}
+
+export type SSEEvent = AgentProgressEvent | StepProgressEvent | DoneEvent | PipelineProgress;
+
 export interface Repository {
   id: string;
   url: string;
@@ -307,6 +327,12 @@ export const search = {
     return request<SearchResults>(`/search/${repositoryId}?${qs.toString()}`);
   },
 };
+
+// ─── SSE ──────────────────────────────────────────────────────────────────────
+
+export function progressStreamUrl(repoId: string): string {
+  return `${BASE_URL}/repositories/${repoId}/progress/stream`;
+}
 
 // ─── Unified namespace ────────────────────────────────────────────────────────
 

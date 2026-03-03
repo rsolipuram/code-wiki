@@ -1,14 +1,17 @@
 """Repository management endpoints."""
 
+import json
 import re
 from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from rq import Queue
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_db, get_job_queue
+from src.api.progress_events import subscribe_progress
 from src.api.schemas.common import Pagination
 from src.api.schemas.repositories import (
     RepositoryCreate,
@@ -162,6 +165,43 @@ async def get_repository_status(
             "error_message": latest_event.error_message,
         } if latest_event else None,
     }
+
+
+@router.get("/{repository_id}/progress/stream")
+async def stream_progress(
+    repository_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """SSE endpoint streaming real-time pipeline progress."""
+    repo = db.get(Repository, str(repository_id))
+    if not repo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found")
+
+    async def event_generator():
+        # Send initial state from DB (catch-up for late joiners)
+        if repo.progress:
+            yield f"data: {json.dumps(repo.progress)}\n\n"
+
+        # If already complete/error, send terminal event and close
+        if repo.status in (RepositoryStatus.ready, RepositoryStatus.error):
+            yield f"data: {json.dumps({'type': 'done', 'status': repo.status.value})}\n\n"
+            return
+
+        # Subscribe to Redis pub/sub for live events
+        async for event in subscribe_progress(str(repository_id)):
+            yield f"data: {json.dumps(event)}\n\n"
+            if event.get("type") == "done":
+                break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.delete("/{repository_id}", status_code=status.HTTP_204_NO_CONTENT)
