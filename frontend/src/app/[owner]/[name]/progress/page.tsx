@@ -148,6 +148,8 @@ export default function ProgressPage() {
 
         if (data.type === 'step_progress') {
           setProgress(data);
+          // Receiving step events means analysis is active
+          setRepoStatus((prev) => prev === 'pending' ? 'analyzing' : prev);
         }
 
         if (data.type === 'agent_progress') {
@@ -157,6 +159,7 @@ export default function ProgressPage() {
         // Handle initial catch-up data (no type field = DB progress snapshot)
         if (!data.type && data.current_step) {
           setProgress(data);
+          setRepoStatus((prev) => prev === 'pending' ? 'analyzing' : prev);
         }
       } catch {
         // ignore parse errors
