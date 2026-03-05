@@ -52,6 +52,7 @@ curl http://localhost:1234/v1/models
 
 # 3. Backend (from backend/, venv active)
 DATABASE_URL="postgresql://codewiki:codewiki@localhost:5434/codewiki" \
+  REDIS_URL="redis://localhost:6380" \
   uvicorn src.api.main:app --reload --port 8000
 
 # 4. Frontend (from frontend/)
@@ -74,8 +75,8 @@ open http://localhost:3000          # Frontend
 - **RQ must use SimpleWorker** on macOS — forking worker causes SIGABRT with Neo4j/Qdrant/embeddings
 - **Restart RQ worker** after any backend code change — it caches imported modules
 - **Port remapping**: PostgreSQL=5434, Redis=6380 (avoid local conflicts)
-- **No local psql**: Use `docker exec -i code-wiki-postgres-1 psql -U codewiki -d codewiki`
-- **Data store reset**: Clear PostgreSQL, Neo4j (`backend/scripts/reset_neo4j.py`), Redis (`docker exec code-wiki-redis-1 redis-cli -p 6379 FLUSHALL`), repo cache (`backend/cache/repos/`)
+- **No local psql**: Use `docker exec -i code-wiki-postgres psql -U codewiki -d codewiki`
+- **Data store reset**: Clear PostgreSQL, Neo4j (`backend/scripts/reset_neo4j.py`), Redis (`docker exec code-wiki-redis redis-cli -p 6379 FLUSHALL`), repo cache (`backend/cache/repos/`)
 - **Neo4j optional**: Backend degrades gracefully without it (graph queries disabled)
 
 ## Key Specs & Docs
