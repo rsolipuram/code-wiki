@@ -89,7 +89,7 @@ async def create_repository(
         repo.id,
         repo.branch or "main",
         job_id=f"analyze-{repo.id}",
-        job_timeout=1800,  # 30 minutes max
+        job_timeout=7200,  # 2 hours max (large repos with local LLM)
     )
 
     return _repo_to_response(repo)
