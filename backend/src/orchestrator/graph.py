@@ -193,7 +193,7 @@ class AnalysisPipeline:
 
     def _run_parallel(self, agents: dict) -> None:
         """Run heuristic agents in parallel using ThreadPoolExecutor."""
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(agents) or 1) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             futures = {
                 executor.submit(fn, self.repo_path, self.dossier_manager): name
                 for name, fn in agents.items()
@@ -234,7 +234,7 @@ class AnalysisPipeline:
 
     def _run_single_pass(self, agents: dict, fingerprint: RepoFingerprint) -> None:
         """Run single-pass agents (most accept fingerprint, some don't)."""
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(agents) or 1) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             futures = {}
             for name, fn in agents.items():
                 if name == "architectural_classifier":

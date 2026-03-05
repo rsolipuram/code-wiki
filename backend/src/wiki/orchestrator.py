@@ -20,7 +20,7 @@ from src.wiki.interestingness import ScoredEntity, score_entities
 logger = logging.getLogger(__name__)
 
 # Maximum parallel LLM calls for Agent 2
-_MAX_PARALLEL_ENTITY_CALLS = 15
+_MAX_PARALLEL_ENTITY_CALLS = 1
 
 _ENTITY_EXPLAINER_PROMPT = """Explain this code entity in context of the surrounding codebase.
 
