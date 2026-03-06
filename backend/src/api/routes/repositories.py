@@ -89,7 +89,7 @@ async def create_repository(
         repo.id,
         repo.branch or "main",
         job_id=f"analyze-{repo.id}",
-        job_timeout=7200,  # 2 hours max (large repos with local LLM)
+        job_timeout=-1,  # No timeout — let it run as long as there's progress
     )
 
     return _repo_to_response(repo)
@@ -251,7 +251,7 @@ async def refresh_repository(
         "src.jobs.analyze.analyze_repository",
         str(repository_id),
         job_id=f"analyze-{repository_id}-refresh",
-        job_timeout=7200,
+        job_timeout=-1,  # No timeout
     )
 
     return UpdateEventResponse(
