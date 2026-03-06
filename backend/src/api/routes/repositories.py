@@ -251,7 +251,7 @@ async def refresh_repository(
         "src.jobs.analyze.analyze_repository",
         str(repository_id),
         job_id=f"analyze-{repository_id}-refresh",
-        job_timeout=1800,
+        job_timeout=7200,
     )
 
     return UpdateEventResponse(
