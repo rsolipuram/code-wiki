@@ -70,8 +70,11 @@ def _rel_path(file_path: str, repo_path: str) -> str:
         return file_path
 
 
-def build_function_index(entities: list[ParsedEntity], repo_path: str = "") -> dict[str, Any]:
-    """Build an alphabetical index of all public code entities (FR-008)."""
+def build_function_index(entities: list[ParsedEntity], repo_path: str = "", max_entities: int = 500) -> dict[str, Any]:
+    """Build an alphabetical index of all public code entities (FR-008).
+
+    Caps at max_entities to prevent oversized pages on large repos.
+    """
     public = [
         e for e in entities
         if not e.name.startswith("_") and e.entity_type in ("function", "class", "method")
@@ -86,6 +89,11 @@ def build_function_index(entities: list[ParsedEntity], repo_path: str = "") -> d
             seen.add(entity.qualified_name)
             deduped.append(entity)
     public = deduped
+
+    total_count = len(public)
+    if len(public) > max_entities:
+        logger.info("Function index: capping from %d to %d entities", len(public), max_entities)
+        public = public[:max_entities]
 
     # Group by first letter
     index: dict[str, list[dict]] = {}
@@ -103,7 +111,8 @@ def build_function_index(entities: list[ParsedEntity], repo_path: str = "") -> d
 
     return {
         "page_type": "function_index",
-        "total_count": len(public),
+        "total_count": total_count,
+        "shown_count": len(public),
         "index": index,
     }
 
