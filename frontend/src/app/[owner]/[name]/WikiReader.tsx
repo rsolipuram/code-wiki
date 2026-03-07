@@ -21,7 +21,7 @@ import { TableOfContents, type TocEntry } from '@/components/layout/TableOfConte
 import { WikiSidebar } from '@/components/layout/WikiSidebar';
 import { api } from '@/services/api';
 import type { Module, Repository, WikiPage } from '@/services/api';
-import { V2SectionContent, V2HomeContent } from '@/components/wiki/V2Components';
+import { MermaidDiagram, V2SectionContent, V2HomeContent } from '@/components/wiki/V2Components';
 
 interface WikiReaderProps {
   owner: string;
@@ -108,7 +108,10 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
   const sidebarSections = [
     {
       label: 'Overview',
-      items: [{ label: 'Home', href: '', active: isHome }],
+      items: [
+        { label: 'Home', href: '', active: isHome },
+        { label: 'Getting Started', href: 'getting-started', active: slug === 'getting-started' },
+      ],
     },
     ...(uniqueModules.length > 0
       ? [
@@ -125,7 +128,6 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
     {
       label: 'Reference',
       items: [
-        { label: 'Getting Started', href: 'getting-started', active: slug === 'getting-started' },
         { label: 'API Reference', href: 'api-reference', active: slug === 'api-reference' },
         { label: 'Function Index', href: 'function-index', active: slug === 'function-index' },
         { label: 'Glossary', href: 'glossary', active: slug === 'glossary' },
@@ -349,6 +351,9 @@ function HomeContent({
   const stats = content?.stats as Record<string, number> | null;
   const statsObj = content?.stats as Record<string, number> | null;
   const moduleList = (content?.module_list as { name: string }[]) ?? [];
+  const overview_diagram = (content?.overview_diagram as { mermaid_source: string; caption: string } | null) ?? null;
+  const prose_segments = (content?.prose_segments as any[]) ?? [];
+
   const description =
     (overview?.project_description as string) ||
     (statsObj && modules.length > 0
@@ -418,6 +423,26 @@ function HomeContent({
           {description}
         </p>
       </div>
+
+      {/* ── Architecture Overview (Moved to Top) ── */}
+      {overview_diagram && (
+        <div style={{ margin: '32px 0' }}>
+          <h2 id="architecture-overview" style={{ fontSize: 22, fontWeight: 700, margin: '0 0 16px' }}>
+            Architecture Overview
+          </h2>
+          <MermaidDiagram
+            source={overview_diagram.mermaid_source}
+            caption={overview_diagram.caption}
+          />
+        </div>
+      )}
+
+      {/* ── System Narrative (Prose Segments with Headings) ── */}
+      {prose_segments.length > 0 && (
+        <div style={{ marginTop: 40 }}>
+          <V2SectionContent content={content} base={base} name={name} />
+        </div>
+      )}
 
       {/* ── Stats grid ── */}
       <h2 id="stats" style={{ fontSize: 22, fontWeight: 700, margin: '36px 0 16px' }}>

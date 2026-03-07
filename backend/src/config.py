@@ -24,11 +24,16 @@ class Settings(BaseSettings):
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
     qdrant_api_key: str = Field(default="", alias="QDRANT_API_KEY")
 
-    # LLM (LM Studio)
+    # LLM (Analysis/Chat)
     llm_provider: str = Field(default="lmstudio", alias="LLM_PROVIDER")
     llm_base_url: str = Field(default="http://localhost:1234/v1", alias="LLM_BASE_URL")
     llm_model: str = Field(default="Qwen2.5-Coder-7B-Instruct", alias="LLM_MODEL")
     llm_api_key: str = Field(default="not-needed", alias="LLM_API_KEY")
+
+    # Embeddings (Vector Indexing)
+    embedding_base_url: str = Field(default="http://localhost:1234/v1", alias="EMBEDDING_BASE_URL")
+    embedding_model: str = Field(default="text-embedding-nomic-embed-text-v1.5", alias="EMBEDDING_MODEL")
+    embedding_api_key: str = Field(default="not-needed", alias="EMBEDDING_API_KEY")
 
     # Redis
     redis_url: str = Field(default="redis://localhost:6379", alias="REDIS_URL")

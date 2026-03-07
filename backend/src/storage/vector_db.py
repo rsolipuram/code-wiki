@@ -62,6 +62,7 @@ def upsert(
         PointStruct(id=_stable_id(id_), vector=vec, payload=payload)
         for id_, vec, payload in zip(ids, vectors, payloads)
     ]
+    ensure_collections()
     get_client().upsert(collection_name=collection, points=points)
 
 

@@ -69,6 +69,11 @@ type AgentState = { status: 'pending' | 'running' | 'complete'; detail: string }
 
 function getAgentStates(events: AgentProgressEvent[]): Record<string, AgentState> {
   const states: Record<string, AgentState> = {};
+  // Pre-initialize all agents to pending
+  for (const agent of WIKI_AGENTS) {
+    states[agent.id] = { status: 'pending', detail: '' };
+  }
+  // Apply events in order (latest event for an agent wins)
   for (const e of events) {
     states[e.agent] = { status: e.status, detail: e.detail };
   }
@@ -248,12 +253,16 @@ export default function ProgressPage() {
       if (activeStep === 4 && s.agents_total && s.agents_total > 0) {
         // Step 5 (0-indexed 4): facet agent progress
         subProgress = (s.agents_completed ?? 0) / s.agents_total;
-      } else if (activeStep === 7 && agentEvents.length > 0) {
-        // Step 8 (0-indexed 7): wiki agent progress from SSE events
-        subProgress = completedAgents / WIKI_AGENTS.length;
-      } else if (activeStep === 7 && s.pages_total && s.pages_total > 0) {
-        // Step 8 fallback: page generation progress
-        subProgress = (s.pages_generated ?? 0) / s.pages_total;
+      } else if (activeStep === 7) {
+        // Step 8 (0-indexed 7): wiki agent progress
+        if (completedAgents > 0 || Object.values(agentStates).some(a => a.status === 'running')) {
+          subProgress = completedAgents / WIKI_AGENTS.length;
+        } else if (s.pages_total && s.pages_total > 0) {
+          // Fallback: page generation progress
+          subProgress = (s.pages_generated ?? 0) / s.pages_total;
+        } else {
+          subProgress = 0.05; // Starting Step 8
+        }
       }
     }
     return Math.min(99, Math.round(basePct + stepSize * subProgress));
@@ -825,7 +834,7 @@ export default function ProgressPage() {
                     </div>
 
                     {/* Agent sub-stepper for Step 8 (wiki generation) */}
-                    {i === 7 && (isActive || state === 'complete') && agentEvents.length > 0 && (
+                    {i === 7 && (isActive || state === 'complete') && (
                       <div
                         style={{
                           display: 'flex',
