@@ -214,7 +214,11 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
 
             def _page_progress_callback(pages_done: int, page_name: str) -> None:
                 stats["pages_generated"] = pages_done
-                _progress(8, "Generating wiki pages", f"Page {pages_done}/{total_pages}: {page_name}")
+                # If we are in the initial phase (pages_done == 0), don't show the fraction
+                if pages_done == 0:
+                    _progress(8, "Generating wiki pages", f"AI Analysis: {page_name}")
+                else:
+                    _progress(8, "Generating wiki pages", f"Page {pages_done}/{total_pages}: {page_name}")
 
             if settings.wiki_v2_enabled:
                 logger.info("[%s] Step 8: Using V2 wiki pipeline", repository_id)
