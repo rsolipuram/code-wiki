@@ -79,6 +79,8 @@ open http://localhost:3000          # Frontend
 - **Data store reset**: Clear PostgreSQL, Neo4j (`backend/scripts/reset_neo4j.py`), Redis (`docker exec code-wiki-redis redis-cli -p 6379 FLUSHALL`), repo cache (`backend/cache/repos/`)
 - **Neo4j optional**: Backend degrades gracefully without it (graph queries disabled)
 - **MermaidDiagram SVG cleaning**: The component replaces hardcoded pixel dimensions with `width="100%"` for inline layout. Pass the *original* (uncleaned) SVG to `DiagramExplorer` — the modal uses `position: absolute` with no intrinsic layout, so `width="100%"` resolves to nothing and the diagram becomes invisible.
+- **Mermaid dark theme**: LLM-generated diagrams inject inline `fill`/`stroke` with `!important` that override CSS theme variables. Strip these post-render. Also set all 12 `cScale0`–`cScale11` variables explicitly — otherwise mermaid's auto palette assigns light colors to subgraphs/clusters, breaking the dark theme.
+- **SVG foreignObject**: Rejects `height="auto"` — causes browser console errors. Use explicit pixel values or omit the attribute.
 
 ## Key Specs & Docs
 
