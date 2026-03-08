@@ -13,12 +13,14 @@ const path = require("path");
 const fs = require("fs");
 
 const filePath = process.argv[2];
+const repoPath = process.argv[3];
 if (!filePath) {
-  process.stderr.write("Usage: node extractor.js <file_path>\n");
+  process.stderr.write("Usage: node extractor.js <file_path> [repo_path]\n");
   process.exit(1);
 }
 
 const absolutePath = path.resolve(filePath);
+const rootPath = repoPath ? path.resolve(repoPath) : process.cwd();
 const source = fs.readFileSync(absolutePath, "utf8");
 
 const compilerOptions = {
@@ -126,7 +128,7 @@ function extractCalls(node, callerName) {
 }
 
 const moduleName = path
-  .relative(process.cwd(), absolutePath)
+  .relative(rootPath, absolutePath)
   .replace(/\\/g, "/")
   .replace(/\.(ts|tsx|js|jsx)$/, "")
   .replace(/\//g, ".");

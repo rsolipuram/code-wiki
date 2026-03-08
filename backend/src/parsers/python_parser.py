@@ -93,17 +93,30 @@ def _extract_calls(node: ast.AST) -> list[str]:
 class PythonParser(CodeParser):
     """Parser for Python source files using ast + Jedi."""
 
-    def _module_name(self, file_path: str) -> str:
-        """Derive dotted module name from file path (best-effort)."""
-        p = Path(file_path)
-        # strip .py extension and convert slashes to dots
+    def _module_name(self, file_path: str, repo_path: str = "") -> str:
+        """Derive dotted module name from file path.
+        
+        If repo_path is provided, the module name is relative to it.
+        Otherwise, best-effort from the filename.
+        """
+        p = Path(file_path).resolve()
+        
+        if repo_path:
+            root = Path(repo_path).resolve()
+            try:
+                # Get relative path from repo root
+                rel = p.with_suffix("").relative_to(root)
+                return ".".join(rel.parts)
+            except ValueError:
+                pass
+        
+        # Fallback to older best-effort logic
         parts = list(p.with_suffix("").parts)
-        # drop common root segments like src/, backend/
-        while parts and parts[0] in {".", "src", "backend", "app"}:
+        while parts and parts[0] in {".", "src", "backend", "app", "cache", "repos"}:
             parts.pop(0)
         return ".".join(parts) if parts else p.stem
 
-    def parse_file(self, file_path: str) -> list[ParsedEntity]:
+    def parse_file(self, file_path: str, repo_path: str = "") -> list[ParsedEntity]:
         """Extract all functions, classes, and methods from a Python file."""
         try:
             source = Path(file_path).read_text(encoding="utf-8", errors="replace")
@@ -117,7 +130,7 @@ class PythonParser(CodeParser):
             logger.warning("Syntax error in %s: %s", file_path, exc)
             return []
 
-        module_name = self._module_name(file_path)
+        module_name = self._module_name(file_path, repo_path)
         entities: list[ParsedEntity] = []
 
         # module-level docstring
@@ -219,7 +232,7 @@ class PythonParser(CodeParser):
                     imports.append(f"{module}.{alias.name}" if module else alias.name)
         return imports
 
-    def resolve_imports(self, file_path: str) -> list[Dependency]:
+    def resolve_imports(self, file_path: str, repo_path: str = "") -> list[Dependency]:
         """Resolve import statements using Jedi for cross-file resolution."""
         deps: list[Dependency] = []
 
@@ -255,7 +268,7 @@ class PythonParser(CodeParser):
 
         return deps
 
-    def get_call_graph(self, file_path: str) -> list[CallEdge]:
+    def get_call_graph(self, file_path: str, repo_path: str = "") -> list[CallEdge]:
         """Extract caller→callee pairs from a Python file."""
         try:
             source = Path(file_path).read_text(encoding="utf-8", errors="replace")
@@ -263,7 +276,7 @@ class PythonParser(CodeParser):
         except (OSError, SyntaxError):
             return []
 
-        module_name = self._module_name(file_path)
+        module_name = self._module_name(file_path, repo_path)
         edges: list[CallEdge] = []
 
         for node in ast.walk(tree):

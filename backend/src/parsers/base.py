@@ -50,37 +50,30 @@ class CodeParser(ABC):
     """
 
     @abstractmethod
-    def parse_file(self, file_path: str) -> list[ParsedEntity]:
+    def parse_file(self, file_path: str, repo_path: str = "") -> list[ParsedEntity]:
         """Parse a single source file and return all extracted entities.
 
         Args:
             file_path: Absolute path to the source file.
-
-        Returns:
-            List of ParsedEntity objects found in the file.
+            repo_path: Absolute path to the repository root.
         """
 
     @abstractmethod
-    def resolve_imports(self, file_path: str) -> list[Dependency]:
+    def resolve_imports(self, file_path: str, repo_path: str = "") -> list[Dependency]:
         """Resolve all import statements in a file to their targets.
 
         Args:
             file_path: Absolute path to the source file.
-
-        Returns:
-            List of Dependency objects. resolved_path may be None for
-            third-party or unresolvable imports.
+            repo_path: Absolute path to the repository root.
         """
 
     @abstractmethod
-    def get_call_graph(self, file_path: str) -> list[CallEdge]:
+    def get_call_graph(self, file_path: str, repo_path: str = "") -> list[CallEdge]:
         """Extract caller→callee pairs from a single file.
 
         Args:
             file_path: Absolute path to the source file.
-
-        Returns:
-            List of CallEdge objects representing static call relationships.
+            repo_path: Absolute path to the repository root.
         """
 
 

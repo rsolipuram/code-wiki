@@ -64,7 +64,7 @@ def extract_entities(
 
         try:
             logger.debug("Parsing: %s", file_path)
-            entities = parser.parse_file(str(file_path))
+            entities = parser.parse_file(str(file_path), str(root))
             all_entities.extend(entities)
             parsed_files += 1
             lang_stats[ext] = lang_stats.get(ext, 0) + 1

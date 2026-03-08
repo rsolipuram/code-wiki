@@ -21,15 +21,19 @@ _EXTRACTOR_JS = Path(__file__).parent / "ts_extractor" / "extractor.js"
 SUPPORTED_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
 
 
-def _run_extractor(file_path: str) -> Optional[dict]:
+def _run_extractor(file_path: str, repo_path: str = "") -> Optional[dict]:
     """Run the Node.js TS extractor and return parsed JSON, or None on failure."""
     if not _EXTRACTOR_JS.exists():
         logger.error("TypeScript extractor not found at %s", _EXTRACTOR_JS)
         return None
 
+    args = ["node", str(_EXTRACTOR_JS), file_path]
+    if repo_path:
+        args.append(repo_path)
+
     try:
         result = subprocess.run(
-            ["node", str(_EXTRACTOR_JS), file_path],
+            args,
             capture_output=True,
             text=True,
             timeout=30,
@@ -52,9 +56,9 @@ def _run_extractor(file_path: str) -> Optional[dict]:
 class TypeScriptParser(CodeParser):
     """Parser for TypeScript/JavaScript source files using the TS Compiler API."""
 
-    def parse_file(self, file_path: str) -> list[ParsedEntity]:
+    def parse_file(self, file_path: str, repo_path: str = "") -> list[ParsedEntity]:
         """Extract all code entities from a TS/JS file."""
-        data = _run_extractor(file_path)
+        data = _run_extractor(file_path, repo_path)
         if not data:
             return []
 
@@ -78,9 +82,9 @@ class TypeScriptParser(CodeParser):
             )
         return entities
 
-    def resolve_imports(self, file_path: str) -> list[Dependency]:
+    def resolve_imports(self, file_path: str, repo_path: str = "") -> list[Dependency]:
         """Resolve import statements from a TS/JS file."""
-        data = _run_extractor(file_path)
+        data = _run_extractor(file_path, repo_path)
         if not data:
             return []
 
@@ -93,9 +97,9 @@ class TypeScriptParser(CodeParser):
             for imp in data.get("imports", [])
         ]
 
-    def get_call_graph(self, file_path: str) -> list[CallEdge]:
+    def get_call_graph(self, file_path: str, repo_path: str = "") -> list[CallEdge]:
         """Extract call edges from a TS/JS file."""
-        data = _run_extractor(file_path)
+        data = _run_extractor(file_path, repo_path)
         if not data:
             return []
 
