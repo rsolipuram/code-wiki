@@ -78,6 +78,7 @@ open http://localhost:3000          # Frontend
 - **No local psql**: Use `docker exec -i code-wiki-postgres psql -U codewiki -d codewiki`
 - **Data store reset**: Clear PostgreSQL, Neo4j (`backend/scripts/reset_neo4j.py`), Redis (`docker exec code-wiki-redis redis-cli -p 6379 FLUSHALL`), repo cache (`backend/cache/repos/`)
 - **Neo4j optional**: Backend degrades gracefully without it (graph queries disabled)
+- **MermaidDiagram SVG cleaning**: The component replaces hardcoded pixel dimensions with `width="100%"` for inline layout. Pass the *original* (uncleaned) SVG to `DiagramExplorer` — the modal uses `position: absolute` with no intrinsic layout, so `width="100%"` resolves to nothing and the diagram becomes invisible.
 
 ## Key Specs & Docs
 
