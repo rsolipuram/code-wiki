@@ -322,6 +322,7 @@ function SectionContent({
   repo,
   activePage,
   activeModule,
+  allModules,
   base,
   name,
   readingOrder,
@@ -330,6 +331,7 @@ function SectionContent({
   repo: Repository | null;
   activePage: WikiPage | null;
   activeModule: Module | null;
+  allModules: Module[];
   base: string;
   name: string;
   readingOrder: string[];
@@ -388,7 +390,7 @@ function SectionContent({
       case 'function_index':
         return <FunctionIndexContent content={content} repoUrl={repoUrl} />;
       default:
-        return <V2SectionContent content={content} base={base} name={name} />;
+        return <V2SectionContent content={content} base={base} name={name} activeModule={activeModule} allModules={allModules} />;
     }
   };
 
@@ -825,6 +827,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
               repo={repo}
               activePage={activePage}
               activeModule={activeModule}
+              allModules={uniqueModules}
               base={base}
               name={name}
               readingOrder={readingOrder}

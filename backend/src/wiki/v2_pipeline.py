@@ -279,6 +279,12 @@ def generate_wiki_v2(
         session.flush()
         section_to_module[section_plan_item.id] = mod
 
+    # 3b. Wire dependency_module_ids from architect component graph
+    _wire_module_dependencies(
+        section_to_module,
+        final_state.get("architecture", {}),
+    )
+
     # 4. Create CodeEntity records associated with new Module records
     _persist_code_entities(session, entities, section_to_module, plan, resolved_root)
 
@@ -363,6 +369,55 @@ def _reconstruct_wiki_plan(plan_dict: dict) -> WikiPlan:
         total_files_covered=plan_dict.get("total_files_covered", 0),
         uncovered_files=plan_dict.get("uncovered_files", []),
     )
+
+
+def _wire_module_dependencies(
+    section_to_module: dict[str, "Module"],
+    architecture: dict,
+) -> None:
+    """Populate dependency_module_ids on each Module using architect component graph.
+
+    The architect produces components[].dependencies as a list of component *names*.
+    We resolve those names to module IDs via two strategies:
+      1. Slugify the dependency name and look it up in section_to_module (exact match).
+      2. Case-insensitive title match against module names (fallback).
+    """
+    if not architecture or not section_to_module:
+        return
+
+    components = architecture.get("components", []) or []
+    if not components:
+        return
+
+    # Build reverse lookups
+    slug_to_module = section_to_module  # already keyed by slug
+    title_to_module = {mod.name.lower().strip(): mod for mod in section_to_module.values()}
+
+    for comp in components:
+        comp_name = comp.get("name", "")
+        comp_slug = slugify(comp_name)
+        mod = slug_to_module.get(comp_slug) or title_to_module.get(comp_name.lower().strip())
+        if not mod:
+            continue
+
+        dep_names = comp.get("dependencies", []) or []
+        dep_ids: list[str] = []
+        for dep_name in dep_names:
+            dep_slug = slugify(dep_name)
+            dep_mod = (
+                slug_to_module.get(dep_slug)
+                or title_to_module.get(dep_name.lower().strip())
+            )
+            if dep_mod and dep_mod.id != mod.id:
+                dep_ids.append(dep_mod.id)
+
+        if dep_ids:
+            mod.dependency_module_ids = dep_ids
+            logger.debug(
+                "DEPS: %s → %d dependencies wired",
+                comp_name,
+                len(dep_ids),
+            )
 
 
 def _build_entity_index(

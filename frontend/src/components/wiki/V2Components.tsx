@@ -1043,14 +1043,26 @@ export function ProseRenderer({
 
 // ─── V2SectionContent ───────────────────────────────────────────────────────
 
+// Minimal module shape needed for related-pages linking
+type ModuleRef = {
+  id: string;
+  name: string;
+  slug: string;
+  dependencies_module_ids?: string[];
+};
+
 export function V2SectionContent({
   content,
   base,
   name,
+  activeModule,
+  allModules,
 }: {
   content: Record<string, unknown>;
   base: string;
   name: string;
+  activeModule?: ModuleRef | null;
+  allModules?: ModuleRef[];
 }) {
   const segments = (content.prose_segments as ProseSegment[]) || [];
   const tables = (content.tables as TableData[]) || [];
@@ -1059,6 +1071,13 @@ export function V2SectionContent({
     file_count?: number;
   } | null;
   const commitHash = content.commit_hash as string | null;
+
+  // Resolve related pages from the module dependency graph
+  const relatedPages: ModuleRef[] = React.useMemo(() => {
+    if (!activeModule?.dependencies_module_ids?.length || !allModules?.length) return [];
+    const idSet = new Set(activeModule.dependencies_module_ids);
+    return allModules.filter((m) => idSet.has(m.id));
+  }, [activeModule, allModules]);
 
   return (
     <>
@@ -1114,6 +1133,58 @@ export function V2SectionContent({
       {tables.map((t, i) => (
         <DataTable key={i} headers={t.headers} rows={t.rows} />
       ))}
+
+      {/* Related Pages (from dependency graph) */}
+      {relatedPages.length > 0 && (
+        <div style={{ marginTop: 48 }}>
+          <h3
+            style={{
+              fontSize: 16,
+              fontWeight: 700,
+              color: "var(--text-primary)",
+              marginBottom: 16,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span style={{ color: "var(--primary-light)" }}>🔗</span>
+            Related Pages
+          </h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            {relatedPages.map((rel) => (
+              <Link
+                key={rel.id}
+                href={`${base}/${rel.slug}`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "8px 14px",
+                  background: "rgba(139,92,246,0.08)",
+                  border: "1px solid rgba(139,92,246,0.25)",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: "var(--primary-light)",
+                  textDecoration: "none",
+                  transition: "all 0.15s",
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = "rgba(139,92,246,0.18)";
+                  e.currentTarget.style.borderColor = "rgba(139,92,246,0.5)";
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = "rgba(139,92,246,0.08)";
+                  e.currentTarget.style.borderColor = "rgba(139,92,246,0.25)";
+                }}
+              >
+                {rel.name}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </>
   );
 }
