@@ -308,9 +308,17 @@ def generate_wiki_v2(
     session.flush()
 
     # 6. Generate + persist special pages (unchanged builders)
+    # Collect prose text from enriched sections for glossary enrichment
+    module_prose_texts = [
+        seg.get("content", "") for s in enriched_sections
+        for seg in s.prose_segments
+        if isinstance(seg, dict) and seg.get("type") == "text"
+    ]
     pages_created += _generate_special_pages(
         session, wiki, entities, repo_name, repo_path,
         fingerprint, commit_hash, _report,
+        system_narrative=system_narrative,
+        module_prose=module_prose_texts,
     )
 
     session.commit()
@@ -555,6 +563,8 @@ def _generate_special_pages(
     fingerprint: RepoFingerprint,
     commit_hash: str,
     report_callback,
+    system_narrative: str = "",
+    module_prose: list[str] | None = None,
 ) -> int:
     """Generate special pages using existing V1 builders. Returns count."""
     pages = 0
@@ -584,7 +594,7 @@ def _generate_special_pages(
         logger.warning("Function index page failed: %s", exc)
 
     try:
-        glossary_content = build_glossary(entities, repo_path)
+        glossary_content = build_glossary(entities, repo_path, system_narrative=system_narrative, module_prose=module_prose)
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.glossary,
             title="Glossary", slug="glossary",

@@ -1138,6 +1138,14 @@ export function V2HomeContent({
       mermaid_source: string;
       caption: string;
     } | null) ?? null;
+  const overview = content.overview as Record<string, unknown> | null;
+  const systemContext = (() => {
+    const raw = (content.system_context as string | null) ||
+      (overview?.project_description as string | null) || null;
+    if (!raw) return null;
+    // Strip heading markers like [[heading:2:text]] and trim
+    return raw.replace(/\[\[heading:\d+:([^\]]*)\]\]/g, '$1').replace(/\s+/g, ' ').trim().slice(0, 500);
+  })();
 
   return (
     <>
@@ -1147,7 +1155,7 @@ export function V2HomeContent({
           fontSize: 32,
           fontWeight: 800,
           marginTop: 24,
-          marginBottom: 24,
+          marginBottom: 16,
           letterSpacing: "-0.02em",
           color: "var(--text-primary)",
         }}
@@ -1155,7 +1163,21 @@ export function V2HomeContent({
         {name}
       </h1>
 
-      {/* ── Architecture Overview (High Priority) ── */}
+      {/* ── C4 Level 1: System Context ── */}
+      {systemContext && (
+        <div style={{
+          background: "linear-gradient(135deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))",
+          border: "1px solid rgba(139,92,246,0.2)",
+          borderRadius: 16,
+          padding: "20px 24px",
+          marginBottom: 32,
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--primary-light)", marginBottom: 8 }}>What is this?</div>
+          <p style={{ fontSize: 15, lineHeight: 1.7, color: "var(--text-secondary)", margin: 0 }}>{systemContext}</p>
+        </div>
+      )}
+
+      {/* ── C4 Level 2: Architecture Overview ── */}
       {overview_diagram && (
         <div style={{ margin: "0 0 40px" }}>
           <h2
@@ -1334,4 +1356,309 @@ export function V2HomeContent({
       )}
     </>
   );
+}
+
+// ─── GettingStartedContent ───────────────────────────────────────────────────
+
+type SetupStep = { step: number; title: string; command?: string | null; description?: string };
+type Prerequisite = { name: string; version?: string; description?: string };
+type ConfigItem = { key: string; description?: string; required?: boolean };
+
+export function GettingStartedContent({
+  content,
+}: {
+  content: Record<string, unknown>;
+}) {
+  const prerequisites = (content.prerequisites as Prerequisite[]) || [];
+  const steps = (content.setup_steps as SetupStep[]) || [];
+  const config = (content.configuration as ConfigItem[]) || [];
+
+  const sectionStyle = { marginBottom: 40 };
+  const h2Style: React.CSSProperties = {
+    fontSize: 22,
+    fontWeight: 700,
+    marginBottom: 16,
+    color: "var(--text-primary)",
+  };
+  const cardStyle: React.CSSProperties = {
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid var(--glass-border)",
+    borderRadius: 12,
+    padding: "16px 20px",
+    marginBottom: 10,
+  };
+
+  return (
+    <>
+      {prerequisites.length > 0 && (
+        <div style={sectionStyle}>
+          <h2 id="prerequisites" style={h2Style}>Prerequisites</h2>
+          {prerequisites.map((p, i) => (
+            <div key={i} style={cardStyle}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: p.description ? 6 : 0 }}>
+                <span style={{ fontFamily: "'Fira Code', monospace", fontWeight: 700, color: "var(--primary-light)" }}>{p.name}</span>
+                {p.version && p.version !== "any" && (
+                  <span style={{ fontSize: 12, color: "var(--text-tertiary)", background: "rgba(255,255,255,0.07)", padding: "2px 8px", borderRadius: 6 }}>{p.version}</span>
+                )}
+              </div>
+              {p.description && <p style={{ fontSize: 14, color: "var(--text-secondary)", margin: 0 }}>{p.description}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {steps.length > 0 && (
+        <div style={sectionStyle}>
+          <h2 id="setup" style={h2Style}>Setup Steps</h2>
+          {steps.map((s, i) => (
+            <div key={i} style={{ ...cardStyle, display: "flex", gap: 16, alignItems: "flex-start" }}>
+              <div style={{
+                minWidth: 32, height: 32, borderRadius: "50%",
+                background: "linear-gradient(135deg, var(--primary), var(--secondary))",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 13, fontWeight: 800, color: "#fff", flexShrink: 0,
+              }}>{s.step}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, marginBottom: s.command || s.description ? 8 : 0, color: "var(--text-primary)" }}>{s.title}</div>
+                {s.command && (
+                  <pre style={{
+                    fontFamily: "'Fira Code', monospace", fontSize: 13,
+                    background: "rgba(0,0,0,0.4)", border: "1px solid var(--glass-border)",
+                    borderRadius: 8, padding: "10px 14px", margin: "0 0 8px",
+                    color: "var(--success)", overflowX: "auto",
+                  }}>{s.command}</pre>
+                )}
+                {s.description && <p style={{ fontSize: 14, color: "var(--text-secondary)", margin: 0 }}>{s.description}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {config.length > 0 && (
+        <div style={sectionStyle}>
+          <h2 id="configuration" style={h2Style}>Configuration</h2>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--glass-border)" }}>
+                  {["Variable", "Required", "Description"].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "8px 12px", color: "var(--text-tertiary)", fontWeight: 600 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {config.map((c, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <td style={{ padding: "10px 12px", fontFamily: "'Fira Code', monospace", color: "var(--primary-light)" }}>{c.key}</td>
+                    <td style={{ padding: "10px 12px", color: c.required ? "var(--danger)" : "var(--text-tertiary)" }}>{c.required ? "Yes" : "No"}</td>
+                    <td style={{ padding: "10px 12px", color: "var(--text-secondary)" }}>{c.description || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {steps.length === 0 && prerequisites.length === 0 && config.length === 0 && (
+        <p style={{ color: "var(--text-tertiary)" }}>Getting started information will be available after the wiki is regenerated.</p>
+      )}
+    </>
+  );
+}
+
+// ─── GlossaryContent ─────────────────────────────────────────────────────────
+
+type GlossaryTerm = { term: string; type?: string; definition?: string; related_terms?: string[] };
+
+export function GlossaryContent({ content }: { content: Record<string, unknown> }) {
+  const terms = (content.terms as GlossaryTerm[]) || [];
+  const [filter, setFilter] = useState("");
+
+  const filtered = filter
+    ? terms.filter((t) => t.term.toLowerCase().includes(filter.toLowerCase()))
+    : terms;
+
+  // Group by first letter
+  const grouped: Record<string, GlossaryTerm[]> = {};
+  for (const t of filtered) {
+    const letter = (t.term[0] || "#").toUpperCase();
+    grouped[letter] = grouped[letter] || [];
+    grouped[letter].push(t);
+  }
+
+  const typeColors: Record<string, string> = {
+    concept: "rgba(139,92,246,0.3)",
+    pattern: "rgba(6,182,212,0.3)",
+    acronym: "rgba(245,158,11,0.3)",
+    entity: "rgba(52,211,153,0.3)",
+  };
+
+  if (terms.length === 0) {
+    return <p style={{ color: "var(--text-tertiary)" }}>The glossary will be populated after the wiki is regenerated with enriched content.</p>;
+  }
+
+  return (
+    <>
+      <div style={{ marginBottom: 24 }}>
+        <input
+          type="text"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter terms…"
+          style={{
+            width: "100%", maxWidth: 360,
+            background: "rgba(255,255,255,0.05)", border: "1px solid var(--glass-border)",
+            borderRadius: 10, padding: "8px 14px", color: "var(--text-primary)",
+            fontFamily: "'Outfit', sans-serif", fontSize: 14, outline: "none",
+          }}
+        />
+      </div>
+      {Object.keys(grouped).sort().map((letter) => (
+        <div key={letter} style={{ marginBottom: 32 }}>
+          <h2 id={`letter-${letter}`} style={{ fontSize: 20, fontWeight: 800, color: "var(--primary-light)", marginBottom: 12 }}>{letter}</h2>
+          {grouped[letter].map((t, i) => (
+            <div key={i} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--glass-border)", borderRadius: 12, padding: "14px 18px", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                <span style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)" }}>{t.term}</span>
+                {t.type && (
+                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: typeColors[t.type] || "rgba(255,255,255,0.08)", color: "var(--text-secondary)", fontWeight: 600 }}>{t.type}</span>
+                )}
+              </div>
+              {t.definition && <p style={{ fontSize: 14, color: "var(--text-secondary)", margin: "0 0 8px" }}>{t.definition}</p>}
+              {t.related_terms && t.related_terms.length > 0 && (
+                <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+                  Related: {t.related_terms.join(", ")}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+// ─── ApiReferenceContent / FunctionIndexContent ───────────────────────────────
+
+type IndexEntry = {
+  name: string;
+  qualified_name: string;
+  type: string;
+  file: string;
+  line?: number;
+  signature?: string;
+  description?: string;
+  summary?: string;
+};
+
+function EntityIndexContent({
+  index,
+  totalCount,
+  repoUrl,
+  commitHash,
+}: {
+  index: Record<string, IndexEntry[]>;
+  totalCount: number;
+  repoUrl?: string;
+  commitHash?: string;
+}) {
+  const [filter, setFilter] = useState("");
+
+  const typeColor: Record<string, string> = {
+    function: "rgba(6,182,212,0.2)",
+    class: "rgba(139,92,246,0.2)",
+    method: "rgba(52,211,153,0.2)",
+  };
+
+  const buildUrl = (entry: IndexEntry) => {
+    if (!repoUrl) return null;
+    const base = repoUrl.replace(/\.git$/, "");
+    const ref = commitHash ? `/blob/${commitHash}` : "/blob/HEAD";
+    return `${base}${ref}/${entry.file}${entry.line ? `#L${entry.line}` : ""}`;
+  };
+
+  const filteredIndex: Record<string, IndexEntry[]> = {};
+  for (const [letter, entries] of Object.entries(index)) {
+    const filtered = filter
+      ? entries.filter((e) => e.name.toLowerCase().includes(filter.toLowerCase()) || e.qualified_name.toLowerCase().includes(filter.toLowerCase()))
+      : entries;
+    if (filtered.length > 0) filteredIndex[letter] = filtered;
+  }
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+        <input
+          type="text"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter by name…"
+          style={{
+            flex: 1, maxWidth: 400,
+            background: "rgba(255,255,255,0.05)", border: "1px solid var(--glass-border)",
+            borderRadius: 10, padding: "8px 14px", color: "var(--text-primary)",
+            fontFamily: "'Outfit', sans-serif", fontSize: 14, outline: "none",
+          }}
+        />
+        <span style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{totalCount} entries</span>
+      </div>
+
+      {Object.keys(filteredIndex).sort().map((letter) => (
+        <div key={letter} style={{ marginBottom: 28 }}>
+          <h2 id={`letter-${letter}`} style={{ fontSize: 18, fontWeight: 800, color: "var(--primary-light)", marginBottom: 10, borderBottom: "1px solid var(--glass-border)", paddingBottom: 6 }}>{letter}</h2>
+          {filteredIndex[letter].map((e, i) => {
+            const url = buildUrl(e);
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                <span style={{ minWidth: 64, fontSize: 11, padding: "2px 8px", borderRadius: 6, background: typeColor[e.type] || "rgba(255,255,255,0.07)", color: "var(--text-secondary)", fontWeight: 600, flexShrink: 0, marginTop: 2 }}>{e.type}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "'Fira Code', monospace", fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>{e.name}</span>
+                    {url && (
+                      <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "var(--text-tertiary)", textDecoration: "none" }}>
+                        {e.file}{e.line ? `:${e.line}` : ""}
+                      </a>
+                    )}
+                    {!url && (
+                      <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{e.file}{e.line ? `:${e.line}` : ""}</span>
+                    )}
+                  </div>
+                  {e.signature && <div style={{ fontFamily: "'Fira Code', monospace", fontSize: 12, color: "var(--text-tertiary)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.signature}</div>}
+                  {(e.description || e.summary) && <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4 }}>{e.description || e.summary}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </>
+  );
+}
+
+export function ApiReferenceContent({
+  content,
+  repoUrl,
+}: {
+  content: Record<string, unknown>;
+  repoUrl?: string;
+}) {
+  const index = (content.index as Record<string, IndexEntry[]>) || {};
+  const totalCount = (content.total_count as number) || 0;
+  const commitHash = content.commit_hash as string | undefined;
+  return <EntityIndexContent index={index} totalCount={totalCount} repoUrl={repoUrl} commitHash={commitHash} />;
+}
+
+export function FunctionIndexContent({
+  content,
+  repoUrl,
+}: {
+  content: Record<string, unknown>;
+  repoUrl?: string;
+}) {
+  const index = (content.index as Record<string, IndexEntry[]>) || {};
+  const totalCount = (content.total_count as number) || 0;
+  const commitHash = content.commit_hash as string | undefined;
+  return <EntityIndexContent index={index} totalCount={totalCount} repoUrl={repoUrl} commitHash={commitHash} />;
 }

@@ -1,5 +1,5 @@
 'use client';
-
+// v2-improvements
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -8,7 +8,7 @@ import { TableOfContents, type TocEntry } from '@/components/layout/TableOfConte
 import { WikiSidebar } from '@/components/layout/WikiSidebar';
 import { api } from '@/services/api';
 import type { Module, Repository, WikiPage } from '@/services/api';
-import { MermaidDiagram, V2SectionContent, V2HomeContent } from '@/components/wiki/V2Components';
+import { MermaidDiagram, V2SectionContent, V2HomeContent, GettingStartedContent, GlossaryContent, ApiReferenceContent, FunctionIndexContent } from '@/components/wiki/V2Components';
 
 interface WikiReaderProps {
   owner: string;
@@ -135,6 +135,8 @@ function HomeContent({
 }) {
   const content = homePage?.content as Record<string, unknown> | null;
   const isV2 = content?.version === 2;
+  const commitHash = (content?.commit_hash as string | null) || homePage?.commit_hash || null;
+  const repoUrl = repo?.url || (repo ? `https://github.com/${repo.owner}/${repo.name}` : null);
 
   // ─── V2 Layout (Illustrated Story Book) ──────────────────────────────────
   if (isV2 && content) {
@@ -146,7 +148,23 @@ function HomeContent({
             { label: `${name} wiki` },
           ]}
         />
-        <div style={{ marginTop: 24 }}>
+        {/* Commit reference bar */}
+        {commitHash && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8, marginBottom: 0 }}>
+            <span>Based on commit</span>
+            {repoUrl ? (
+              <a
+                href={`${repoUrl}/tree/${commitHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontFamily: "'Fira Code', monospace", color: 'var(--primary-light)', textDecoration: 'none' }}
+              >{commitHash.slice(0, 7)}</a>
+            ) : (
+              <span style={{ fontFamily: "'Fira Code', monospace", color: 'var(--primary-light)' }}>{commitHash.slice(0, 7)}</span>
+            )}
+          </div>
+        )}
+        <div style={{ marginTop: 16 }}>
           <V2HomeContent content={content} base={base} name={name} />
         </div>
       </>
@@ -306,6 +324,7 @@ function SectionContent({
   activeModule,
   base,
   name,
+  readingOrder,
 }: {
   slug: string;
   repo: Repository | null;
@@ -313,9 +332,65 @@ function SectionContent({
   activeModule: Module | null;
   base: string;
   name: string;
+  readingOrder: string[];
 }) {
   const content = activePage?.content as Record<string, unknown> | null;
-  const isV2 = content?.version === 2;
+  const pageType = activePage?.page_type as string | undefined;
+  const isV2 = content?.version === 2 || (pageType && ['getting_started', 'api_reference', 'function_index', 'glossary'].includes(pageType));
+
+  // Compute read time from word count
+  const wordCount = (() => {
+    if (!content) return 0;
+    const ss = content.section_summaries as Array<{ word_count: number }> | null;
+    if (ss?.length) return ss.reduce((acc, s) => acc + (s.word_count || 0), 0);
+    const segs = content.prose_segments as Array<{ type: string; content?: string }> | null;
+    if (segs) {
+      const text = segs.filter(s => s.type === 'text').map(s => s.content || '').join(' ');
+      return text.split(/\s+/).filter(Boolean).length;
+    }
+    return 0;
+  })();
+  const readTime = wordCount > 0 ? Math.max(1, Math.ceil(wordCount / 200)) : null;
+
+  // Prev / Next based on reading order
+  const currentIdx = readingOrder.indexOf(slug);
+  const prevSlug = currentIdx > 0 ? readingOrder[currentIdx - 1] : null;
+  const nextSlug = currentIdx >= 0 && currentIdx < readingOrder.length - 1 ? readingOrder[currentIdx + 1] : null;
+
+  // Share button
+  const [copied, setCopied] = React.useState(false);
+  const handleShare = () => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard.writeText(window.location.href).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }).catch(() => {});
+    }
+  };
+
+  const repoUrl = repo?.url || (repo ? `https://github.com/${repo.owner}/${repo.name}` : undefined);
+
+  const renderContent = () => {
+    if (!isV2 || !content) {
+      return (
+        <div style={{ color: 'var(--text-secondary)', lineHeight: 1.8 }}>
+          <p>Content unavailable for this page.</p>
+        </div>
+      );
+    }
+    switch (pageType) {
+      case 'getting_started':
+        return <GettingStartedContent content={content} />;
+      case 'glossary':
+        return <GlossaryContent content={content} />;
+      case 'api_reference':
+        return <ApiReferenceContent content={content} repoUrl={repoUrl} />;
+      case 'function_index':
+        return <FunctionIndexContent content={content} repoUrl={repoUrl} />;
+      default:
+        return <V2SectionContent content={content} base={base} name={name} />;
+    }
+  };
 
   return (
     <>
@@ -327,24 +402,89 @@ function SectionContent({
         ]}
       />
 
-      <h1
-        style={{
-          fontSize: 32,
-          fontWeight: 800,
-          marginTop: 24,
-          marginBottom: 24,
-          letterSpacing: '-0.02em',
-        }}
-      >
-        {activePage?.title || activeModule?.name || slug}
-      </h1>
+      {/* Title + meta row */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginTop: 24, marginBottom: 8, flexWrap: 'wrap' }}>
+        <h1
+          style={{
+            fontSize: 32,
+            fontWeight: 800,
+            margin: 0,
+            letterSpacing: '-0.02em',
+            flex: 1,
+          }}
+        >
+          {activePage?.title || activeModule?.name || slug}
+        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, paddingTop: 6 }}>
+          {readTime && (
+            <span style={{ fontSize: 12, color: 'var(--text-tertiary)', background: 'rgba(255,255,255,0.06)', padding: '4px 10px', borderRadius: 20 }}>
+              ~{readTime} min read
+            </span>
+          )}
+          <button
+            onClick={handleShare}
+            title="Copy link"
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: 8,
+              padding: '5px 12px',
+              fontSize: 12,
+              color: copied ? 'var(--success)' : 'var(--text-tertiary)',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              fontFamily: "'Outfit', sans-serif",
+            }}
+          >
+            {copied ? '✓ Copied' : '🔗 Share'}
+          </button>
+        </div>
+      </div>
 
-      {isV2 && content ? (
-        <V2SectionContent content={content} base={base} name={name} />
-      ) : (
-        <div style={{ color: 'var(--text-secondary)', lineHeight: 1.8 }}>
-          {/* Legacy V1 rendering logic omitted for brevity, focusing on V2 */}
-          <p>Rendering content for {slug}...</p>
+      <div style={{ marginBottom: 24 }}>
+        {renderContent()}
+      </div>
+
+      {/* Prev / Next */}
+      {(prevSlug || nextSlug) && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 12,
+          marginTop: 48,
+          paddingTop: 24,
+          borderTop: '1px solid var(--glass-border)',
+        }}>
+          {prevSlug ? (
+            <Link href={`${base}/${prevSlug}`} style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '12px 20px', background: 'rgba(255,255,255,0.03)',
+              border: '1px solid var(--glass-border)', borderRadius: 12,
+              textDecoration: 'none', color: 'var(--text-secondary)', fontSize: 14, fontWeight: 500,
+              transition: 'all 0.2s', maxWidth: '48%',
+            }}
+              onMouseOver={e => { e.currentTarget.style.borderColor = 'rgba(139,92,246,0.3)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+              onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--glass-border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+            >
+              <span>←</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prevSlug}</span>
+            </Link>
+          ) : <div />}
+          {nextSlug ? (
+            <Link href={`${base}/${nextSlug}`} style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '12px 20px', background: 'rgba(255,255,255,0.03)',
+              border: '1px solid var(--glass-border)', borderRadius: 12,
+              textDecoration: 'none', color: 'var(--text-secondary)', fontSize: 14, fontWeight: 500,
+              transition: 'all 0.2s', maxWidth: '48%', justifyContent: 'flex-end',
+            }}
+              onMouseOver={e => { e.currentTarget.style.borderColor = 'rgba(139,92,246,0.3)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+              onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--glass-border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nextSlug}</span>
+              <span>→</span>
+            </Link>
+          ) : <div />}
         </div>
       )}
     </>
@@ -363,6 +503,19 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
   const [activeModule, setActiveModule] = useState<Module | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('wiki-theme') as 'dark' | 'light' | null : null;
+    if (saved) setTheme(saved);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', theme);
+      localStorage.setItem('wiki-theme', theme);
+    }
+  }, [theme]);
 
   useEffect(() => {
     const load = async () => {
@@ -416,23 +569,45 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
     (m, i, arr) => arr.findIndex((x) => x.slug === m.slug) === i
   );
 
+  // Derive reading order from home page section_summaries (pipeline order)
+  const readingOrder: string[] = React.useMemo(() => {
+    const homeContent = homePage?.content as Record<string, unknown> | null;
+    const ss = homeContent?.section_summaries as Array<{ id: string }> | null;
+    if (ss && ss.length > 0) return ss.map(s => s.id);
+    const ro = homeContent?.suggested_reading_order as string[] | null;
+    if (ro && ro.length > 0) return ro;
+    return uniqueModules.map(m => m.slug);
+  }, [homePage, uniqueModules]);
+
+  // Sort modules by reading order
+  const orderedModules = React.useMemo(() => {
+    if (readingOrder.length === 0) return uniqueModules;
+    const orderMap = new Map(readingOrder.map((slug, i) => [slug, i]));
+    return [...uniqueModules].sort((a, b) => {
+      const ai = orderMap.has(a.slug) ? orderMap.get(a.slug)! : 9999;
+      const bi = orderMap.has(b.slug) ? orderMap.get(b.slug)! : 9999;
+      return ai - bi;
+    });
+  }, [uniqueModules, readingOrder]);
+
   // Build sidebar sections
   const sidebarSections = [
     {
       label: 'Overview',
       items: [
-        { label: 'Home', href: '', active: isHome },
-        { label: 'Getting Started', href: 'getting-started', active: slug === 'getting-started' },
+        { label: 'Home', href: '', active: isHome, badge: undefined as string | undefined },
+        { label: 'Getting Started', href: 'getting-started', active: slug === 'getting-started', badge: undefined },
       ],
     },
-    ...(uniqueModules.length > 0
+    ...(orderedModules.length > 0
       ? [
           {
             label: 'Modules',
-            items: uniqueModules.map((m) => ({
+            items: orderedModules.map((m, i) => ({
               label: m.name || m.slug || '/',
               href: m.slug,
               active: slug === m.slug,
+              badge: readingOrder.length > 0 ? String(i + 1) : undefined,
             })),
           },
         ]
@@ -440,9 +615,9 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
     {
       label: 'Reference',
       items: [
-        { label: 'API Reference', href: 'api-reference', active: slug === 'api-reference' },
-        { label: 'Function Index', href: 'function-index', active: slug === 'function-index' },
-        { label: 'Glossary', href: 'glossary', active: slug === 'glossary' },
+        { label: 'API Reference', href: 'api-reference', active: slug === 'api-reference', badge: undefined as string | undefined },
+        { label: 'Function Index', href: 'function-index', active: slug === 'function-index', badge: undefined },
+        { label: 'Glossary', href: 'glossary', active: slug === 'glossary', badge: undefined },
       ],
     },
   ];
@@ -546,6 +721,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
                     style={{
                       display: 'flex',
                       alignItems: 'center',
+                      gap: 8,
                       padding: '8px 20px',
                       fontSize: 14,
                       fontWeight: 500,
@@ -560,7 +736,17 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
                       transition: 'all 0.2s',
                     }}
                   >
-                    {item.label}
+                    {item.badge && (
+                      <span style={{
+                        minWidth: 20, height: 20, borderRadius: '50%',
+                        background: item.active ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
+                        color: item.active ? '#fff' : 'var(--text-tertiary)',
+                        fontSize: 10, fontWeight: 700,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0,
+                      }}>{item.badge}</span>
+                    )}
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
                   </Link>
                 ))}
               </div>
@@ -591,6 +777,23 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
                 {link.label}
               </Link>
             ))}
+            {/* Theme toggle */}
+            <button
+              onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                width: '100%', padding: '8px 20px',
+                background: 'none', border: 'none',
+                cursor: 'pointer', fontSize: 14, fontWeight: 500,
+                color: 'var(--text-secondary)', textAlign: 'left',
+                fontFamily: "'Outfit', sans-serif",
+                transition: 'color 0.2s',
+              }}
+              onMouseOver={e => e.currentTarget.style.color = 'var(--text-primary)'}
+              onMouseOut={e => e.currentTarget.style.color = 'var(--text-secondary)'}
+            >
+              {theme === 'dark' ? '☀️ Light mode' : '🌙 Dark mode'}
+            </button>
           </div>
         </WikiSidebar>
 
@@ -624,6 +827,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
               activeModule={activeModule}
               base={base}
               name={name}
+              readingOrder={readingOrder}
             />
           )}
         </main>

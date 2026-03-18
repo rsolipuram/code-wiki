@@ -18,31 +18,58 @@ def build_getting_started(
     fingerprint_dict: dict,
 ) -> dict[str, Any]:
     """Extract prerequisites and setup steps from README and config files (FR-007)."""
-    # Try reading README first
+    repo_dir = Path(repo_path)
+
+    # Read README
     readme_content = ""
     for readme in ["README.md", "README.rst", "README.txt", "README"]:
-        readme_path = Path(repo_path) / readme
+        readme_path = repo_dir / readme
         if readme_path.exists():
             try:
-                readme_content = readme_path.read_text(errors="replace")[:4000]
+                readme_content = readme_path.read_text(errors="replace")[:3000]
                 break
             except OSError:
                 pass
 
-    if not readme_content:
-        readme_content = f"Repository: {repo_name}\nLanguage: {fingerprint_dict.get('primary_language', 'unknown')}"
+    # Read additional config files that reveal setup requirements
+    extra_files: list[str] = []
+    for candidate in [
+        "docker-compose.yml", "docker-compose.yaml",
+        "Makefile", "makefile",
+        "package.json", "pyproject.toml", "requirements.txt",
+        ".env.example", ".env.sample", ".env.template",
+    ]:
+        p = repo_dir / candidate
+        if p.exists():
+            try:
+                snippet = p.read_text(errors="replace")[:800]
+                extra_files.append(f"--- {candidate} ---\n{snippet}")
+            except OSError:
+                pass
 
-    prompt = f"""Extract structured getting-started information from this README.
+    context_parts = []
+    if readme_content:
+        context_parts.append(f"## README\n{readme_content}")
+    if extra_files:
+        context_parts.append("## Config files\n" + "\n\n".join(extra_files[:4]))
+    if not context_parts:
+        context_parts.append(f"Repository: {repo_name}\nLanguage: {fingerprint_dict.get('primary_language', 'unknown')}")
 
-{readme_content}
+    full_context = "\n\n".join(context_parts)
+
+    prompt = f"""Extract structured getting-started information from this repository.
+
+{full_context}
 
 Return JSON only:
 {{
   "prerequisites": [{{"name": "<tool>", "version": "<version or any>", "description": "<why needed>"}}],
   "setup_steps": [{{"step": <number>, "title": "<title>", "command": "<command or null>", "description": "<desc>"}}],
-  "configuration": [{{"key": "<env var>", "description": "<what it does>", "required": <bool>}}],
+  "configuration": [{{"key": "<env var or config key>", "description": "<what it does>", "required": <bool>}}],
   "quick_links": [{{"label": "<label>", "url": "<url or path>"}}]
-}}"""
+}}
+
+Use docker-compose.yml for service setup steps, Makefile for build/run commands, .env.example for configuration keys."""
 
     try:
         response = chat(messages=[{"role": "user", "content": prompt}])
@@ -57,6 +84,7 @@ Return JSON only:
         }
 
     content["page_type"] = "getting_started"
+    content["version"] = 2
     return content
 
 
@@ -111,21 +139,31 @@ def build_function_index(entities: list[ParsedEntity], repo_path: str = "", max_
 
     return {
         "page_type": "function_index",
+        "version": 2,
         "total_count": total_count,
         "shown_count": len(public),
         "index": index,
     }
 
 
-def build_glossary(entities: list[ParsedEntity], repo_path: str) -> dict[str, Any]:
-    """Extract domain terms from docstrings and comments (FR-009)."""
+def build_glossary(entities: list[ParsedEntity], repo_path: str, system_narrative: str = "", module_prose: list[str] | None = None) -> dict[str, Any]:
+    """Extract domain terms from docstrings, narrative prose, and wiki content (FR-009)."""
     # Collect all docstrings
-    all_docs = " ".join(
+    docstring_text = " ".join(
         e.docstring for e in entities if e.docstring
-    )[:6000]
+    )[:3000]
+
+    # Use module prose segments if provided (much richer than docstrings alone)
+    prose_text = ""
+    if module_prose:
+        prose_text = " ".join(module_prose)[:3000]
+
+    narrative_snippet = system_narrative[:2000] if system_narrative else ""
+
+    all_docs = "\n\n".join(filter(None, [narrative_snippet, prose_text, docstring_text]))[:6000]
 
     if not all_docs.strip():
-        return {"page_type": "glossary", "terms": [], "total_count": 0}
+        return {"page_type": "glossary", "version": 2, "terms": [], "total_count": 0}
 
     prompt = f"""Extract a glossary of domain-specific terms from these code docstrings.
 
@@ -160,6 +198,7 @@ Exclude: generic programming terms (function, class, method, etc.)."""
 
     return {
         "page_type": "glossary",
+        "version": 2,
         "terms": terms,
         "total_count": len(terms),
     }
@@ -199,6 +238,7 @@ def build_api_reference(entities: list[ParsedEntity], repo_path: str = "") -> di
 
     return {
         "page_type": "api_reference",
+        "version": 2,
         "total_count": len(api_entities),
         "index": index,
     }

@@ -230,6 +230,7 @@ def _render_home_page(
             for s in enriched_sections
         ],
         "commit_hash": commit_hash,
+        "suggested_reading_order": [s.section_id for s in enriched_sections],
     }
 
     if overview_diagram:
