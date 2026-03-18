@@ -1,0 +1,127 @@
+"""LangGraph StateGraph orchestrator for the wiki agent pipeline.
+
+Execution flow:
+  architect → planner → writer → [annotator, diagrammer, tabulator] → assembler
+
+Each node function creates agents, invokes them with relevant state slices,
+and returns state updates.
+"""
+
+import logging
+import time
+from typing import Callable, Optional
+
+from langgraph.graph import StateGraph, END
+
+from src.wiki.agents.state import WikiState
+
+logger = logging.getLogger(__name__)
+
+# Module-level repo_id used by agent nodes for progress reporting.
+# Set by run_wiki_pipeline() before graph execution.
+_current_repo_id: Optional[str] = None
+
+
+def report_agent_progress(agent_name: str, status: str, detail: str = "") -> None:
+    """Publish an agent-level progress event to Redis.
+
+    Called by agent nodes at start and end of execution.
+
+    Args:
+        agent_name: e.g. "architect", "planner", "writer"
+        status: "running" or "complete"
+        detail: optional human-readable detail string
+    """
+    if not _current_repo_id:
+        return
+    try:
+        from src.api.progress_events import publish_progress
+        publish_progress(_current_repo_id, {
+            "type": "agent_progress",
+            "agent": agent_name,
+            "status": status,
+            "detail": detail,
+            "timestamp": time.time(),
+        })
+    except Exception:
+        logger.debug("Failed to publish agent progress for %s", agent_name, exc_info=True)
+
+
+def build_wiki_graph() -> StateGraph:
+    """Build the wiki generation agent graph.
+
+    Returns a compiled LangGraph StateGraph.
+    """
+    from src.wiki.agents.architect_agent import architect_node
+    from src.wiki.agents.planner_agent import planner_node
+    from src.wiki.agents.writer_agent import writer_node
+    from src.wiki.agents.annotator_agent import annotator_node
+    from src.wiki.agents.diagrammer_agent import diagrammer_node
+    from src.wiki.agents.tabulator_agent import tabulator_node
+    from src.wiki.agents.assembler_agent import assembler_node
+
+    graph = StateGraph(WikiState)
+
+    graph.add_node("architect", architect_node)
+    graph.add_node("planner", planner_node)
+    graph.add_node("writer", writer_node)
+    graph.add_node("annotator", annotator_node)
+    graph.add_node("diagrammer", diagrammer_node)
+    graph.add_node("tabulator", tabulator_node)
+    graph.add_node("assembler", assembler_node)
+
+    graph.set_entry_point("architect")
+    graph.add_edge("architect", "planner")
+    graph.add_edge("planner", "writer")
+    # After writer: annotator, diagrammer, tabulator run in parallel
+    graph.add_edge("writer", "annotator")
+    graph.add_edge("writer", "diagrammer")
+    graph.add_edge("writer", "tabulator")
+    # All three must complete before assembler
+    graph.add_edge("annotator", "assembler")
+    graph.add_edge("diagrammer", "assembler")
+    graph.add_edge("tabulator", "assembler")
+    graph.add_edge("assembler", END)
+
+    return graph.compile()
+
+
+def run_wiki_pipeline(
+    initial_state: WikiState,
+    progress_callback: Optional[Callable[[str], None]] = None,
+    repo_id: Optional[str] = None,
+) -> dict:
+    """Compile and invoke the wiki agent graph.
+
+    Args:
+        initial_state: WikiState with all inputs populated and outputs empty.
+        progress_callback: Optional callback for progress reporting.
+        repo_id: Repository ID for Redis pub/sub progress events.
+
+    Returns:
+        Final state dict with all agent outputs populated.
+    """
+    global _current_repo_id
+    _current_repo_id = repo_id
+
+    t0 = time.monotonic()
+
+    if progress_callback:
+        progress_callback("Compiling agent graph")
+
+    compiled = build_wiki_graph()
+
+    if progress_callback:
+        progress_callback("Orchestrating agents...")
+
+    logger.info("Wiki agent pipeline starting")
+
+    try:
+        final_state = compiled.invoke(initial_state)
+    finally:
+        _current_repo_id = None
+
+    elapsed = time.monotonic() - t0
+    logger.info("Wiki agent pipeline complete (%.1fs)", elapsed)
+
+    return final_state

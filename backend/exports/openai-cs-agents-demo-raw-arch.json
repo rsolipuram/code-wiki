@@ -1,0 +1,426 @@
+{
+  "layers": [
+    {
+      "name": "Presentation Layer",
+      "purpose": "Provides the user interface for the airline customer service demo, built with React/Next.js and OpenAI ChatKit components",
+      "key_files": [
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/app/page.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/chatkit-panel.tsx"
+      ],
+      "key_entities": [
+        "ui.app.page.Home",
+        "ui.components.chatkit-panel.ChatKitPanel"
+      ]
+    },
+    {
+      "name": "API Layer",
+      "purpose": "Handles HTTP requests and serves as the bridge between the frontend and backend systems, implementing FastAPI endpoints",
+      "key_files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/main.py"
+      ],
+      "key_entities": [
+        "main.chatkit_endpoint",
+        "main.chatkit_state_stream"
+      ]
+    },
+    {
+      "name": "Business Logic Layer",
+      "purpose": "Contains the core airline customer service logic including agents, tools, and guardrails that implement the demo functionality",
+      "key_files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/agents.py",
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/tools.py",
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/guardrails.py"
+      ],
+      "key_entities": [
+        "airline.tools.flight_status_tool",
+        "airline.guardrails.relevance_guardrail"
+      ]
+    },
+    {
+      "name": "Data Layer",
+      "purpose": "Manages data persistence and provides access to demo data, mock itineraries, and in-memory storage",
+      "key_files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/demo_data.py",
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/memory_store.py"
+      ],
+      "key_entities": [
+        "airline.demo_data.apply_itinerary_defaults",
+        "memory_store.MemoryStore"
+      ]
+    }
+  ],
+  "components": [
+    {
+      "name": "Frontend UI",
+      "purpose": "Provides the React-based user interface for the airline customer service demo, including chat interface, agent panels, and visualization components. It enables users to interact with the AI agents and view conversation context.",
+      "public_interfaces": [
+        "ui.app.page.Home",
+        "ui.components.chatkit-panel.ChatKitPanel",
+        "ui.components.seat-map.SeatMap"
+      ],
+      "dependencies": [
+        "API Client",
+        "UI Components"
+      ],
+      "files": [
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/app/layout.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/app/page.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/agent-panel.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/agents-list.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/chatkit-panel.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/conversation-context.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/guardrails.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/panel-section.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/runner-output.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/seat-map.tsx"
+      ]
+    },
+    {
+      "name": "UI Components",
+      "purpose": "Provides reusable UI components and styling utilities for the frontend, including cards, badges, and scroll areas. These are building blocks for the main interface.",
+      "public_interfaces": [
+        "ui.components.ui.card.Card",
+        "ui.components.ui.badge.Badge"
+      ],
+      "dependencies": [],
+      "files": [
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/ui/badge.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/ui/card.tsx",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/ui/scroll-area.tsx"
+      ]
+    },
+    {
+      "name": "API Client",
+      "purpose": "Handles communication between the frontend and backend API, providing functions to fetch thread state and bootstrap data. It abstracts HTTP requests for the UI components.",
+      "public_interfaces": [
+        "ui.lib.api.fetchThreadState",
+        "ui.lib.api.fetchBootstrapState"
+      ],
+      "dependencies": [],
+      "files": [
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/lib/api.ts",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/lib/types.ts",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/lib/utils.ts"
+      ]
+    },
+    {
+      "name": "Web Server",
+      "purpose": "Implements the FastAPI web server that handles HTTP requests from the frontend, routes them to appropriate handlers, and manages WebSocket connections for real-time updates.",
+      "public_interfaces": [
+        "main.chatkit_endpoint",
+        "main.chatkit_state_stream"
+      ],
+      "dependencies": [
+        "ChatKit Server",
+        "Configuration"
+      ],
+      "files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/main.py"
+      ]
+    },
+    {
+      "name": "ChatKit Server",
+      "purpose": "Implements the core server logic that manages conversations, agents, and real-time state updates. It handles the OpenAI ChatKit protocol and coordinates between agents, tools, and the UI.",
+      "public_interfaces": [
+        "server.AirlineServer.respond",
+        "server.AirlineServer.snapshot"
+      ],
+      "dependencies": [
+        "Memory Store",
+        "Agent Orchestration",
+        "Context Management"
+      ],
+      "files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/server.py"
+      ]
+    },
+    {
+      "name": "Memory Store",
+      "purpose": "Provides in-memory storage for conversation threads, messages, and attachments. It implements the ChatKit store interface for persistence without requiring a database.",
+      "public_interfaces": [
+        "memory_store.MemoryStore.load_thread_items",
+        "memory_store.MemoryStore.save_item"
+      ],
+      "dependencies": [],
+      "files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/memory_store.py"
+      ]
+    },
+    {
+      "name": "Agent Orchestration",
+      "purpose": "Defines and manages the AI agents that handle different aspects of airline customer service, including flight status, booking, and compensation agents. It coordinates agent execution and tool calling.",
+      "public_interfaces": [
+        "airline.agents.flight_status_agent",
+        "airline.agents.booking_agent"
+      ],
+      "dependencies": [
+        "Tools",
+        "Guardrails",
+        "Demo Data"
+      ],
+      "files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/agents.py"
+      ]
+    },
+    {
+      "name": "Tools",
+      "purpose": "Implements the functional tools that agents can call to perform specific airline operations like checking flight status, booking flights, and issuing compensation. These are the actionable capabilities of the system.",
+      "public_interfaces": [
+        "airline.tools.flight_status_tool",
+        "airline.tools.book_new_flight",
+        "airline.tools.issue_compensation"
+      ],
+      "dependencies": [
+        "Demo Data",
+        "Context Management"
+      ],
+      "files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/tools.py"
+      ]
+    },
+    {
+      "name": "Guardrails",
+      "purpose": "Implements safety and relevance checks to ensure agent responses stay on-topic and appropriate. These guardrails prevent off-topic or harmful responses in the airline customer service context.",
+      "public_interfaces": [
+        "airline.guardrails.relevance_guardrail",
+        "airline.guardrails.jailbreak_guardrail"
+      ],
+      "dependencies": [],
+      "files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/guardrails.py"
+      ]
+    },
+    {
+      "name": "Context Management",
+      "purpose": "Manages the conversation context and provides filtered views for UI display. It handles the airline-specific context data structure and ensures sensitive information is hidden from the UI.",
+      "public_interfaces": [
+        "airline.context.public_context",
+        "airline.context.AirlineAgentChatContext"
+      ],
+      "dependencies": [],
+      "files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/context.py"
+      ]
+    },
+    {
+      "name": "Demo Data",
+      "purpose": "Provides mock airline data including itineraries, flights, and scenarios for the demo. This allows the system to function without real airline APIs by using realistic simulated data.",
+      "public_interfaces": [
+        "airline.demo_data.apply_itinerary_defaults",
+        "airline.demo_data.get_itinerary_for_flight"
+      ],
+      "dependencies": [],
+      "files": [
+        "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/demo_data.py"
+      ]
+    },
+    {
+      "name": "Configuration",
+      "purpose": "Contains build and styling configuration files for the Next.js frontend, including Tailwind CSS, PostCSS, and Next.js configuration.",
+      "public_interfaces": [],
+      "dependencies": [],
+      "files": [
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/next.config.mjs",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/postcss.config.mjs",
+        "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/tailwind.config.ts"
+      ]
+    }
+  ],
+  "data_flows": [
+    {
+      "source": "Frontend UI",
+      "destination": "API Client",
+      "description": "User messages and thread state requests flow from UI components to API client functions for communication with backend"
+    },
+    {
+      "source": "API Client",
+      "destination": "Web Server",
+      "description": "HTTP requests for chat interactions and state streaming flow to FastAPI endpoints"
+    },
+    {
+      "source": "Web Server",
+      "destination": "ChatKit Server",
+      "description": "Incoming requests are routed to the ChatKit server for processing and agent orchestration"
+    },
+    {
+      "source": "ChatKit Server",
+      "destination": "Agent Orchestration",
+      "description": "User messages are dispatched to appropriate agents based on context and agent capabilities"
+    },
+    {
+      "source": "Agent Orchestration",
+      "destination": "Tools",
+      "description": "Agents call tools to perform specific airline operations like flight status checks and bookings"
+    },
+    {
+      "source": "Tools",
+      "destination": "Demo Data",
+      "description": "Tools access mock airline data to simulate real-world operations without external APIs"
+    },
+    {
+      "source": "Agent Orchestration",
+      "destination": "Guardrails",
+      "description": "Agent inputs and outputs are checked by guardrails for relevance and safety before processing"
+    },
+    {
+      "source": "ChatKit Server",
+      "destination": "Memory Store",
+      "description": "Conversation threads, messages, and state are persisted to and retrieved from the in-memory store"
+    },
+    {
+      "source": "ChatKit Server",
+      "destination": "Context Management",
+      "description": "Context data is managed and filtered for UI display, hiding sensitive information"
+    },
+    {
+      "source": "ChatKit Server",
+      "destination": "Frontend UI",
+      "description": "Real-time state updates, agent responses, and events are streamed back to the UI via WebSocket"
+    }
+  ],
+  "key_abstractions": [
+    "Agent Execution Pipeline",
+    "Conversation State Management",
+    "Tool Integration Framework",
+    "Mock Data Generation",
+    "Event Streaming",
+    "Thread Metadata Management",
+    "Guardrail Enforcement",
+    "UI State Synchronization"
+  ],
+  "diagram_spec": {
+    "overview": {
+      "nodes": [
+        {
+          "id": "frontend_ui",
+          "label": "Frontend UI"
+        },
+        {
+          "id": "ui_components",
+          "label": "UI Components"
+        },
+        {
+          "id": "api_client",
+          "label": "API Client"
+        },
+        {
+          "id": "web_server",
+          "label": "Web Server"
+        },
+        {
+          "id": "chatkit_server",
+          "label": "ChatKit Server"
+        },
+        {
+          "id": "memory_store",
+          "label": "Memory Store"
+        },
+        {
+          "id": "agent_orchestration",
+          "label": "Agent Orchestration"
+        },
+        {
+          "id": "tools",
+          "label": "Tools"
+        },
+        {
+          "id": "guardrails",
+          "label": "Guardrails"
+        },
+        {
+          "id": "context_management",
+          "label": "Context Management"
+        },
+        {
+          "id": "demo_data",
+          "label": "Demo Data"
+        },
+        {
+          "id": "configuration",
+          "label": "Configuration"
+        }
+      ],
+      "edges": [
+        {
+          "from": "frontend_ui",
+          "to": "api_client",
+          "label": "user requests"
+        },
+        {
+          "from": "api_client",
+          "to": "web_server",
+          "label": "HTTP requests"
+        },
+        {
+          "from": "web_server",
+          "to": "chatkit_server",
+          "label": "request routing"
+        },
+        {
+          "from": "chatkit_server",
+          "to": "agent_orchestration",
+          "label": "message dispatch"
+        },
+        {
+          "from": "agent_orchestration",
+          "to": "tools",
+          "label": "tool calls"
+        },
+        {
+          "from": "tools",
+          "to": "demo_data",
+          "label": "data access"
+        },
+        {
+          "from": "agent_orchestration",
+          "to": "guardrails",
+          "label": "safety checks"
+        },
+        {
+          "from": "chatkit_server",
+          "to": "memory_store",
+          "label": "data persistence"
+        },
+        {
+          "from": "chatkit_server",
+          "to": "context_management",
+          "label": "context filtering"
+        },
+        {
+          "from": "chatkit_server",
+          "to": "frontend_ui",
+          "label": "real-time updates"
+        }
+      ]
+    }
+  },
+  "component_map": {
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/app/layout.tsx": "Frontend UI",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/app/page.tsx": "Frontend UI",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/agent-panel.tsx": "Frontend UI",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/agents-list.tsx": "Frontend UI",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/chatkit-panel.tsx": "Frontend UI",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/conversation-context.tsx": "Frontend UI",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/guardrails.tsx": "Frontend UI",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/panel-section.tsx": "Frontend UI",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/runner-output.tsx": "Frontend UI",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/seat-map.tsx": "Frontend UI",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/ui/badge.tsx": "UI Components",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/ui/card.tsx": "UI Components",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/components/ui/scroll-area.tsx": "UI Components",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/lib/api.ts": "API Client",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/lib/types.ts": "API Client",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/lib/utils.ts": "API Client",
+    "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/main.py": "Web Server",
+    "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/server.py": "ChatKit Server",
+    "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/memory_store.py": "Memory Store",
+    "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/agents.py": "Agent Orchestration",
+    "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/tools.py": "Tools",
+    "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/guardrails.py": "Guardrails",
+    "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/context.py": "Context Management",
+    "cache/repos/https___github_com_openai_openai-cs-agents-demo/python-backend/airline/demo_data.py": "Demo Data",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/next.config.mjs": "Configuration",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/postcss.config.mjs": "Configuration",
+    "/Users/ranjit/Documents/Projects/code-wiki/backend/cache/repos/https___github_com_openai_openai-cs-agents-demo/ui/tailwind.config.ts": "Configuration"
+  }
+}
