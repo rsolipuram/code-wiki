@@ -1251,6 +1251,9 @@ export function V2HomeContent({
       {/* ── C4 Level 2: Architecture Overview ── */}
       {overview_diagram && (
         <div style={{ margin: "0 0 40px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--primary-light)", marginBottom: 8 }}>
+            C4 Level 2 · Containers
+          </div>
           <h2
             id="architecture-overview"
             style={{ fontSize: 22, fontWeight: 700, margin: "0 0 16px" }}

@@ -359,6 +359,17 @@ function SectionContent({
   const prevSlug = currentIdx > 0 ? readingOrder[currentIdx - 1] : null;
   const nextSlug = currentIdx >= 0 && currentIdx < readingOrder.length - 1 ? readingOrder[currentIdx + 1] : null;
 
+  const SPECIAL_PAGE_TITLES: Record<string, string> = {
+    'getting-started': 'Getting Started',
+    'glossary': 'Glossary',
+    'api-reference': 'API Reference',
+    'function-index': 'Function Index',
+  };
+  const getPageTitle = (s: string) =>
+    allModules.find(m => m.slug === s)?.name ??
+    SPECIAL_PAGE_TITLES[s] ??
+    s.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
   // Share button
   const [copied, setCopied] = React.useState(false);
   const handleShare = () => {
@@ -469,7 +480,7 @@ function SectionContent({
               onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--glass-border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
             >
               <span>←</span>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prevSlug}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getPageTitle(prevSlug)}</span>
             </Link>
           ) : <div />}
           {nextSlug ? (
@@ -483,7 +494,7 @@ function SectionContent({
               onMouseOver={e => { e.currentTarget.style.borderColor = 'rgba(139,92,246,0.3)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
               onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--glass-border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
             >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nextSlug}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getPageTitle(nextSlug)}</span>
               <span>→</span>
             </Link>
           ) : <div />}
@@ -543,9 +554,10 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
 
         // Load active page if slug is set
         if (slug && slug !== 'home') {
+          const SPECIAL_PAGE_SLUGS = new Set(['getting-started', 'glossary', 'api-reference', 'function-index']);
           const [page, mod] = await Promise.all([
             api.wikis.getPage(found.id, slug).catch(() => null),
-            api.wikis.getModule(found.id, slug).catch(() => null),
+            SPECIAL_PAGE_SLUGS.has(slug) ? Promise.resolve(null) : api.wikis.getModule(found.id, slug).catch(() => null),
           ]);
           setActivePage(page);
           setActiveModule(mod);
