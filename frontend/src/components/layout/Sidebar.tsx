@@ -64,6 +64,7 @@ export function Sidebar({ sections, repoName, repoOwner, repoHref = '/' }: Sideb
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-current={isActive ? 'page' : undefined}
                   className={`${styles.navItem} ${isActive ? styles.navItemActive : ''}`}
                 >
                   <span>{item.label}</span>

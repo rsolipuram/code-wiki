@@ -57,9 +57,10 @@ def generate_wiki_v2(
     dossier: Dossier,
     commit_hash: str,
     page_progress_callback: Optional[Callable[[int, str], None]] = None,
-) -> int:
-    """Generate V2 wiki. Returns page count."""
+) -> dict[str, Any]:
+    """Generate V2 wiki. Returns page count + generation warnings."""
     pages_created = 0
+    generation_warnings: list[dict[str, str]] = []
 
     def _report(name: str) -> None:
         nonlocal pages_created
@@ -283,6 +284,9 @@ def generate_wiki_v2(
     _wire_module_dependencies(
         section_to_module,
         final_state.get("architecture", {}),
+        plan=plan,
+        entity_index=entity_index,
+        call_graph=call_graph,
     )
 
     # 4. Create CodeEntity records associated with new Module records
@@ -320,23 +324,54 @@ def generate_wiki_v2(
         for seg in s.prose_segments
         if isinstance(seg, dict) and seg.get("type") == "text"
     ]
-    pages_created += _generate_special_pages(
+    special_pages_created, special_page_warnings = _generate_special_pages(
         session, wiki, entities, repo_name, repo_path,
-        fingerprint, commit_hash, _report,
+        repo_url, fingerprint, commit_hash, _report,
         system_narrative=system_narrative,
         module_prose=module_prose_texts,
     )
+    pages_created += special_pages_created
+    generation_warnings.extend(special_page_warnings)
+
+    # Explicit degradation signal for sections expected to have diagrams but ending with none.
+    for section_plan in plan.sections:
+        if getattr(section_plan, "diagram_type", "none") == "none":
+            continue
+        enriched = next((s for s in enriched_sections if s.section_id == section_plan.id), None)
+        if not enriched:
+            continue
+        if not enriched.diagrams:
+            generation_warnings.append({
+                "page": section_plan.id,
+                "reason": "diagram_generation_empty",
+                "detail": "No valid diagrams generated; content rendered without diagrams.",
+            })
+
+    if generation_warnings:
+        home_db = (
+            session.query(WikiPage)
+            .filter(WikiPage.wiki_id == wiki.id, WikiPage.slug == "home")
+            .first()
+        )
+        if home_db and isinstance(home_db.content, dict):
+            updated_home_content = dict(home_db.content)
+            updated_home_content["generation_status"] = "degraded"
+            updated_home_content["generation_warnings"] = generation_warnings
+            home_db.content = updated_home_content
 
     session.commit()
 
     total_elapsed = time.monotonic() - t_total
     logger.info(
         "V2 pipeline complete: %d pages, %d words, %d diagrams, "
-        "%d source links (%.1fs total)",
-        pages_created, total_words, total_diagrams, total_links, total_elapsed,
+        "%d source links, %d warnings (%.1fs total)",
+        pages_created, total_words, total_diagrams, total_links, len(generation_warnings), total_elapsed,
     )
 
-    return pages_created
+    return {
+        "pages_created": pages_created,
+        "generation_warnings": generation_warnings,
+    }
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
@@ -374,6 +409,9 @@ def _reconstruct_wiki_plan(plan_dict: dict) -> WikiPlan:
 def _wire_module_dependencies(
     section_to_module: dict[str, "Module"],
     architecture: dict,
+    plan: "WikiPlan | None" = None,
+    entity_index: dict[str, dict] | None = None,
+    call_graph: dict[str, list[str]] | None = None,
 ) -> None:
     """Populate dependency_module_ids on each Module using architect component graph.
 
@@ -382,42 +420,98 @@ def _wire_module_dependencies(
       1. Slugify the dependency name and look it up in section_to_module (exact match).
       2. Case-insensitive title match against module names (fallback).
     """
-    if not architecture or not section_to_module:
-        return
-
-    components = architecture.get("components", []) or []
-    if not components:
+    if not section_to_module:
         return
 
     # Build reverse lookups
     slug_to_module = section_to_module  # already keyed by slug
     title_to_module = {mod.name.lower().strip(): mod for mod in section_to_module.values()}
+    if architecture:
+        components = architecture.get("components", []) or []
+        for comp in components:
+            comp_name = comp.get("name", "")
+            comp_slug = slugify(comp_name)
+            mod = slug_to_module.get(comp_slug) or title_to_module.get(comp_name.lower().strip())
+            if not mod:
+                continue
 
-    for comp in components:
-        comp_name = comp.get("name", "")
-        comp_slug = slugify(comp_name)
-        mod = slug_to_module.get(comp_slug) or title_to_module.get(comp_name.lower().strip())
-        if not mod:
+            dep_names = comp.get("dependencies", []) or []
+            dep_ids: list[str] = []
+            for dep_name in dep_names:
+                dep_slug = slugify(dep_name)
+                dep_mod = (
+                    slug_to_module.get(dep_slug)
+                    or title_to_module.get(dep_name.lower().strip())
+                )
+                if dep_mod and dep_mod.id != mod.id:
+                    dep_ids.append(dep_mod.id)
+
+            if dep_ids:
+                mod.dependency_module_ids = dep_ids
+                logger.debug(
+                    "DEPS: %s → %d dependencies wired",
+                    comp_name,
+                    len(dep_ids),
+                )
+
+    # Fallback heuristic: infer related modules from cross-section call graph.
+    has_any_dependencies = any((m.dependency_module_ids or []) for m in section_to_module.values())
+    if has_any_dependencies or not (plan and entity_index and call_graph):
+        return
+
+    section_files = {
+        section.id: set(getattr(section, "all_relevant_files", []) or [])
+        for section in plan.sections
+    }
+    qname_to_section: dict[str, str] = {}
+    for qname, info in entity_index.items():
+        file_path = info.get("file_path")
+        if not file_path:
+            continue
+        for section_id, files in section_files.items():
+            if file_path in files:
+                qname_to_section[qname] = section_id
+                break
+
+    edge_weights: dict[tuple[str, str], int] = {}
+    for caller, callees in call_graph.items():
+        src = qname_to_section.get(caller)
+        if not src:
+            continue
+        for callee in callees:
+            dst = qname_to_section.get(callee)
+            if dst and dst != src:
+                edge_weights[(src, dst)] = edge_weights.get((src, dst), 0) + 1
+
+    for section_id, mod in section_to_module.items():
+        if mod.dependency_module_ids:
             continue
 
-        dep_names = comp.get("dependencies", []) or []
-        dep_ids: list[str] = []
-        for dep_name in dep_names:
-            dep_slug = slugify(dep_name)
-            dep_mod = (
-                slug_to_module.get(dep_slug)
-                or title_to_module.get(dep_name.lower().strip())
-            )
-            if dep_mod and dep_mod.id != mod.id:
-                dep_ids.append(dep_mod.id)
+        ranked = sorted(
+            (
+                (dst, weight)
+                for (src, dst), weight in edge_weights.items()
+                if src == section_id and dst in section_to_module
+            ),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+
+        dep_ids = [section_to_module[dst].id for dst, _ in ranked[:3]]
+
+        # If graph inference yields nothing, fall back to adjacent reading-path modules.
+        if not dep_ids and plan.sections:
+            ordered_ids = [s.id for s in plan.sections if s.id in section_to_module]
+            try:
+                idx = ordered_ids.index(section_id)
+                neighbors = [ordered_ids[i] for i in (idx - 1, idx + 1) if 0 <= i < len(ordered_ids)]
+                dep_ids = [section_to_module[n].id for n in neighbors if n != section_id]
+            except ValueError:
+                dep_ids = []
 
         if dep_ids:
             mod.dependency_module_ids = dep_ids
-            logger.debug(
-                "DEPS: %s → %d dependencies wired",
-                comp_name,
-                len(dep_ids),
-            )
+            logger.debug("DEPS fallback: %s → %d inferred dependencies", section_id, len(dep_ids))
 
 
 def _build_entity_index(
@@ -615,17 +709,33 @@ def _generate_special_pages(
     entities: list[ParsedEntity],
     repo_name: str,
     repo_path: str,
+    repo_url: str,
     fingerprint: RepoFingerprint,
     commit_hash: str,
     report_callback,
     system_narrative: str = "",
     module_prose: list[str] | None = None,
-) -> int:
-    """Generate special pages using existing V1 builders. Returns count."""
+) -> tuple[int, list[dict[str, str]]]:
+    """Generate special pages using V1 builders. Returns (count, warnings)."""
     pages = 0
+    warnings: list[dict[str, str]] = []
 
     try:
-        gs_content = build_getting_started(repo_name, repo_path, fingerprint.to_dict())
+        gs_content = build_getting_started(
+            repo_name,
+            repo_path,
+            fingerprint.to_dict(),
+            repo_url=repo_url,
+            analysis_id=wiki.repository_id,
+        )
+        gs_content["commit_hash"] = commit_hash
+        gs_meta = gs_content.get("_meta", {}) if isinstance(gs_content, dict) else {}
+        if gs_meta.get("fallback_used"):
+            warnings.append({
+                "page": "getting-started",
+                "reason": gs_meta.get("error_type", "generation_fallback"),
+                "detail": str(gs_meta.get("error", ""))[:250],
+            })
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.getting_started,
             title="Getting Started", slug="getting-started",
@@ -635,9 +745,15 @@ def _generate_special_pages(
         report_callback("Getting Started")
     except Exception as exc:
         logger.warning("Getting started page failed: %s", exc)
+        warnings.append({
+            "page": "getting-started",
+            "reason": type(exc).__name__,
+            "detail": str(exc)[:250],
+        })
 
     try:
         fi_content = build_function_index(entities, repo_path)
+        fi_content["commit_hash"] = commit_hash
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.function_index,
             title="Function Index", slug="function-index",
@@ -647,9 +763,28 @@ def _generate_special_pages(
         report_callback("Function Index")
     except Exception as exc:
         logger.warning("Function index page failed: %s", exc)
+        warnings.append({
+            "page": "function-index",
+            "reason": type(exc).__name__,
+            "detail": str(exc)[:250],
+        })
 
     try:
-        glossary_content = build_glossary(entities, repo_path, system_narrative=system_narrative, module_prose=module_prose)
+        glossary_content = build_glossary(
+            entities,
+            repo_path,
+            system_narrative=system_narrative,
+            module_prose=module_prose,
+            analysis_id=wiki.repository_id,
+        )
+        glossary_content["commit_hash"] = commit_hash
+        glossary_meta = glossary_content.get("_meta", {}) if isinstance(glossary_content, dict) else {}
+        if glossary_meta.get("fallback_used"):
+            warnings.append({
+                "page": "glossary",
+                "reason": glossary_meta.get("error_type", "generation_fallback"),
+                "detail": str(glossary_meta.get("error", ""))[:250],
+            })
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.glossary,
             title="Glossary", slug="glossary",
@@ -659,9 +794,15 @@ def _generate_special_pages(
         report_callback("Glossary")
     except Exception as exc:
         logger.warning("Glossary page failed: %s", exc)
+        warnings.append({
+            "page": "glossary",
+            "reason": type(exc).__name__,
+            "detail": str(exc)[:250],
+        })
 
     try:
         api_content = build_api_reference(entities, repo_path)
+        api_content["commit_hash"] = commit_hash
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.api_reference,
             title="API Reference", slug="api-reference",
@@ -671,9 +812,14 @@ def _generate_special_pages(
         report_callback("API Reference")
     except Exception as exc:
         logger.warning("API reference page failed: %s", exc)
+        warnings.append({
+            "page": "api-reference",
+            "reason": type(exc).__name__,
+            "detail": str(exc)[:250],
+        })
 
     session.flush()
-    return pages
+    return pages, warnings
 
 
 def _build_overview_diagram(

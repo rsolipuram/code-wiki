@@ -318,9 +318,37 @@ def _parse_diagrams_response(response: str) -> list[dict]:
 
 
 def _validate_mermaid(source: str) -> bool:
-    """Basic validation that mermaid source is well-formed."""
+    """Validation that Mermaid source is minimally well-formed."""
     if not source or len(source) < 10:
         return False
-    first_line = source.strip().splitlines()[0].strip()
+    lines = [ln.rstrip() for ln in source.strip().splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return False
+
+    first_line = lines[0].strip()
     valid_starts = ("graph ", "sequenceDiagram", "classDiagram", "flowchart ")
-    return any(first_line.startswith(s) for s in valid_starts)
+    if not any(first_line.startswith(s) for s in valid_starts):
+        return False
+
+    if first_line.startswith("graph ") or first_line.startswith("flowchart "):
+        has_edge = any("-->" in ln or "---" in ln for ln in lines[1:])
+        if not has_edge:
+            return False
+
+    if first_line.startswith("sequenceDiagram"):
+        has_participant_or_message = any(
+            ln.lstrip().startswith("participant ") or "->" in ln
+            for ln in lines[1:]
+        )
+        if not has_participant_or_message:
+            return False
+
+    if first_line.startswith("classDiagram"):
+        has_class_or_relation = any(
+            ln.lstrip().startswith("class ") or "--" in ln
+            for ln in lines[1:]
+        )
+        if not has_class_or_relation:
+            return False
+
+    return True

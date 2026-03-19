@@ -515,7 +515,8 @@ export function MermaidDiagram({
         }
       } catch (err) {
         if (!cancelled) {
-          setError(`Diagram rendering failed: ${err}`);
+          const reason = err instanceof Error ? err.message : String(err);
+          setError(`Diagram rendering failed. ${reason}`);
         }
       }
     }
@@ -591,8 +592,26 @@ export function MermaidDiagram({
         )}
 
         {error ? (
-          <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
-            {error}
+          <div
+            style={{
+              border: "1px solid rgba(245,158,11,0.35)",
+              background: "rgba(245,158,11,0.08)",
+              color: "var(--text-secondary)",
+              borderRadius: 10,
+              padding: "12px 14px",
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 6, color: "var(--text-primary)" }}>
+              Diagram unavailable
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              This diagram could not be rendered. The page content is still available.
+            </div>
+            <div style={{ opacity: 0.8, fontFamily: "'Fira Code', monospace" }}>
+              {error}
+            </div>
           </div>
         ) : !loaded ? (
           <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
@@ -1209,6 +1228,11 @@ export function V2HomeContent({
       mermaid_source: string;
       caption: string;
     } | null) ?? null;
+  const system_context_diagram =
+    (content.system_context_diagram as {
+      mermaid_source: string;
+      caption: string;
+    } | null) ?? null;
   const overview = content.overview as Record<string, unknown> | null;
   const systemContext = (() => {
     const raw = (content.system_context as string | null) ||
@@ -1235,6 +1259,23 @@ export function V2HomeContent({
       </h1>
 
       {/* ── C4 Level 1: System Context ── */}
+      {system_context_diagram && (
+        <div style={{ margin: "0 0 20px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--primary-light)", marginBottom: 8 }}>
+            C4 Level 1 · System Context
+          </div>
+          <h2
+            id="system-context"
+            style={{ fontSize: 22, fontWeight: 700, margin: "0 0 16px" }}
+          >
+            System Context
+          </h2>
+          <MermaidDiagram
+            source={system_context_diagram.mermaid_source}
+            caption={system_context_diagram.caption}
+          />
+        </div>
+      )}
       {systemContext && (
         <div style={{
           background: "linear-gradient(135deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))",
@@ -1358,7 +1399,7 @@ export function V2HomeContent({
             id="sections"
             style={{ fontSize: 22, fontWeight: 700, margin: "36px 0 16px" }}
           >
-            System Modules
+            Learning Path
           </h2>
           <div
             style={{
@@ -1446,6 +1487,7 @@ export function GettingStartedContent({
   const prerequisites = (content.prerequisites as Prerequisite[]) || [];
   const steps = (content.setup_steps as SetupStep[]) || [];
   const config = (content.configuration as ConfigItem[]) || [];
+  const quickLinks = (content.quick_links as Array<{ label?: string; url?: string }>) || [];
 
   const sectionStyle = { marginBottom: 40 };
   const h2Style: React.CSSProperties = {
@@ -1531,6 +1573,54 @@ export function GettingStartedContent({
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {quickLinks.length > 0 && (
+        <div style={sectionStyle}>
+          <h2 id="quick-links" style={h2Style}>Quick Links</h2>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {quickLinks.map((link, i) => {
+              const label = link.label || "Link";
+              const url = link.url || "";
+              const isExternal = /^https?:\/\//i.test(url);
+              return isExternal ? (
+                <a
+                  key={`${label}-${i}`}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: "1px solid var(--glass-border)",
+                    background: "rgba(139,92,246,0.1)",
+                    color: "var(--primary-light)",
+                    textDecoration: "none",
+                    fontSize: 13,
+                    fontWeight: 500,
+                  }}
+                >
+                  {label}
+                </a>
+              ) : (
+                <span
+                  key={`${label}-${i}`}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: "1px solid var(--glass-border)",
+                    background: "rgba(255,255,255,0.03)",
+                    color: "var(--text-secondary)",
+                    fontSize: 13,
+                    fontFamily: "'Fira Code', monospace",
+                  }}
+                >
+                  {label}: {url}
+                </span>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1647,10 +1737,9 @@ function EntityIndexContent({
   };
 
   const buildUrl = (entry: IndexEntry) => {
-    if (!repoUrl) return null;
+    if (!repoUrl || !commitHash) return null;
     const base = repoUrl.replace(/\.git$/, "");
-    const ref = commitHash ? `/blob/${commitHash}` : "/blob/HEAD";
-    return `${base}${ref}/${entry.file}${entry.line ? `#L${entry.line}` : ""}`;
+    return `${base}/blob/${commitHash}/${entry.file}${entry.line ? `#L${entry.line}` : ""}`;
   };
 
   const filteredIndex: Record<string, IndexEntry[]> = {};
@@ -1714,25 +1803,29 @@ function EntityIndexContent({
 export function ApiReferenceContent({
   content,
   repoUrl,
+  pageCommitHash,
 }: {
   content: Record<string, unknown>;
   repoUrl?: string;
+  pageCommitHash?: string;
 }) {
   const index = (content.index as Record<string, IndexEntry[]>) || {};
   const totalCount = (content.total_count as number) || 0;
-  const commitHash = content.commit_hash as string | undefined;
+  const commitHash = (content.commit_hash as string | undefined) || pageCommitHash;
   return <EntityIndexContent index={index} totalCount={totalCount} repoUrl={repoUrl} commitHash={commitHash} />;
 }
 
 export function FunctionIndexContent({
   content,
   repoUrl,
+  pageCommitHash,
 }: {
   content: Record<string, unknown>;
   repoUrl?: string;
+  pageCommitHash?: string;
 }) {
   const index = (content.index as Record<string, IndexEntry[]>) || {};
   const totalCount = (content.total_count as number) || 0;
-  const commitHash = content.commit_hash as string | undefined;
+  const commitHash = (content.commit_hash as string | undefined) || pageCommitHash;
   return <EntityIndexContent index={index} totalCount={totalCount} repoUrl={repoUrl} commitHash={commitHash} />;
 }

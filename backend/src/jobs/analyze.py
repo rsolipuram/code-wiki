@@ -222,7 +222,7 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
 
             if settings.wiki_v2_enabled:
                 logger.info("[%s] Step 8: Using V2 wiki pipeline", repository_id)
-                pages_created = generate_wiki_v2(
+                v2_result = generate_wiki_v2(
                     session=session,
                     wiki=wiki,
                     entities=entities,
@@ -236,6 +236,12 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                     commit_hash=commit_hash,
                     page_progress_callback=_page_progress_callback,
                 )
+                if isinstance(v2_result, dict):
+                    pages_created = int(v2_result.get("pages_created", 0))
+                    generation_warnings = v2_result.get("generation_warnings", []) or []
+                else:
+                    pages_created = int(v2_result)
+                    generation_warnings = []
             else:
                 # V1 fallback: persist modules then generate pages
                 _persist_modules_and_entities(session, wiki.id, modules_data, local_path)
@@ -253,11 +259,15 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                     commit_hash=commit_hash,
                     page_progress_callback=_page_progress_callback,
                 )
+                generation_warnings = []
 
             wiki.page_count = pages_created
             wiki.module_count = len(modules_data)
             stats["pages_generated"] = pages_created
             stats["pages_total"] = pages_created
+            if generation_warnings:
+                stats["warnings_count"] = len(generation_warnings)
+                stats["generation_warnings"] = generation_warnings
             logger.info("[%s] Step 8 done (%.1fs): %d pages", repository_id, time.monotonic() - t0, pages_created)
 
             # ── Step 9: Finalizing ──────────────────────────────────────────
@@ -268,7 +278,16 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             repo.primary_languages = fingerprint.languages[:5]
             repo.size_files = fingerprint.file_count
             repo.size_lines = fingerprint.loc
-            _progress(9, "Finalizing", "Complete")
+            if generation_warnings:
+                repo.progress = {
+                    **(repo.progress or {}),
+                    "degraded": True,
+                    "warning_count": len(generation_warnings),
+                    "warnings": generation_warnings,
+                }
+                _progress(9, "Finalizing", f"Complete with {len(generation_warnings)} warning(s)")
+            else:
+                _progress(9, "Finalizing", "Complete")
             session.commit()
 
             total_elapsed = time.monotonic() - pipeline_start
@@ -280,7 +299,11 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             # Publish terminal SSE event
             try:
                 from src.api.progress_events import publish_progress
-                publish_progress(repository_id, {"type": "done", "status": "ready"})
+                payload = {"type": "done", "status": "ready"}
+                if generation_warnings:
+                    payload["degraded"] = True
+                    payload["warning_count"] = len(generation_warnings)
+                publish_progress(repository_id, payload)
             except Exception:
                 pass
 
@@ -290,6 +313,7 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                 "modules": len(modules_data),
                 "entities": len(entities),
                 "commit_hash": commit_hash,
+                "warning_count": len(generation_warnings) if generation_warnings else 0,
             }
 
         except Exception as exc:
@@ -707,7 +731,13 @@ def _generate_all_pages_v1(
     _report_page("Home")
 
     try:
-        gs_content = build_getting_started(repo_name, repo_path, fingerprint.to_dict())
+        gs_content = build_getting_started(
+            repo_name,
+            repo_path,
+            fingerprint.to_dict(),
+            repo_url=repo_url,
+        )
+        gs_content["commit_hash"] = commit_hash
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.getting_started, title="Getting Started",
             slug="getting-started", content=gs_content, commit_hash=commit_hash,
@@ -719,6 +749,7 @@ def _generate_all_pages_v1(
 
     try:
         fi_content = build_function_index(entities, repo_path)
+        fi_content["commit_hash"] = commit_hash
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.function_index, title="Function Index",
             slug="function-index", content=fi_content, commit_hash=commit_hash,
@@ -730,6 +761,7 @@ def _generate_all_pages_v1(
 
     try:
         glossary_content = build_glossary(entities, repo_path)
+        glossary_content["commit_hash"] = commit_hash
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.glossary, title="Glossary",
             slug="glossary", content=glossary_content, commit_hash=commit_hash,
@@ -741,6 +773,7 @@ def _generate_all_pages_v1(
 
     try:
         api_content = build_api_reference(entities, repo_path)
+        api_content["commit_hash"] = commit_hash
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.api_reference, title="API Reference",
             slug="api-reference", content=api_content, commit_hash=commit_hash,

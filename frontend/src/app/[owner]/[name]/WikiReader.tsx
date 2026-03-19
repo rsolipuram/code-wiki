@@ -1,14 +1,13 @@
 'use client';
 // v2-improvements
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { TypeBadge } from '@/components/ui/TypeBadge';
 import { TableOfContents, type TocEntry } from '@/components/layout/TableOfContents';
 import { WikiSidebar } from '@/components/layout/WikiSidebar';
 import { api } from '@/services/api';
 import type { Module, Repository, WikiPage } from '@/services/api';
-import { MermaidDiagram, V2SectionContent, V2HomeContent, GettingStartedContent, GlossaryContent, ApiReferenceContent, FunctionIndexContent } from '@/components/wiki/V2Components';
+import { V2SectionContent, V2HomeContent, GettingStartedContent, GlossaryContent, ApiReferenceContent, FunctionIndexContent } from '@/components/wiki/V2Components';
 
 interface WikiReaderProps {
   owner: string;
@@ -123,14 +122,12 @@ function HomeContent({
   homePage,
   modules,
   base,
-  owner,
   name,
 }: {
   repo: Repository | null;
   homePage: WikiPage | null;
   modules: Module[];
   base: string;
-  owner: string;
   name: string;
 }) {
   const content = homePage?.content as Record<string, unknown> | null;
@@ -354,10 +351,16 @@ function SectionContent({
   })();
   const readTime = wordCount > 0 ? Math.max(1, Math.ceil(wordCount / 200)) : null;
 
-  // Prev / Next based on reading order
-  const currentIdx = readingOrder.indexOf(slug);
-  const prevSlug = currentIdx > 0 ? readingOrder[currentIdx - 1] : null;
-  const nextSlug = currentIdx >= 0 && currentIdx < readingOrder.length - 1 ? readingOrder[currentIdx + 1] : null;
+  // Prev / Next split by IA stream (learning vs reference)
+  const learningOrder = React.useMemo(() => {
+    const ordered = ['getting-started', ...readingOrder];
+    return ordered.filter((value, index, arr) => arr.indexOf(value) === index);
+  }, [readingOrder]);
+  const referenceOrder = ['api-reference', 'function-index', 'glossary'];
+  const activeStreamOrder = referenceOrder.includes(slug) ? referenceOrder : learningOrder;
+  const currentIdx = activeStreamOrder.indexOf(slug);
+  const prevSlug = currentIdx > 0 ? activeStreamOrder[currentIdx - 1] : null;
+  const nextSlug = currentIdx >= 0 && currentIdx < activeStreamOrder.length - 1 ? activeStreamOrder[currentIdx + 1] : null;
 
   const SPECIAL_PAGE_TITLES: Record<string, string> = {
     'getting-started': 'Getting Started',
@@ -397,9 +400,9 @@ function SectionContent({
       case 'glossary':
         return <GlossaryContent content={content} />;
       case 'api_reference':
-        return <ApiReferenceContent content={content} repoUrl={repoUrl} />;
+        return <ApiReferenceContent content={content} repoUrl={repoUrl} pageCommitHash={activePage?.commit_hash} />;
       case 'function_index':
-        return <FunctionIndexContent content={content} repoUrl={repoUrl} />;
+        return <FunctionIndexContent content={content} repoUrl={repoUrl} pageCommitHash={activePage?.commit_hash} />;
       default:
         return <V2SectionContent content={content} base={base} name={name} activeModule={activeModule} allModules={allModules} />;
     }
@@ -517,6 +520,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const pageType = activePage?.page_type as string | undefined;
 
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('wiki-theme') as 'dark' | 'light' | null : null;
@@ -616,12 +620,13 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
     ...(orderedModules.length > 0
       ? [
           {
-            label: 'Modules',
+            label: 'Learning Path',
             items: orderedModules.map((m, i) => ({
               label: m.name || m.slug || '/',
               href: m.slug,
               active: slug === m.slug,
               badge: readingOrder.length > 0 ? String(i + 1) : undefined,
+              hint: i === 0 ? 'Start here' : undefined,
             })),
           },
         ]
@@ -641,23 +646,75 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
     if (isHome) {
       return [
         { id: 'overview', label: 'Overview', level: 2 },
+        ...(homePage?.content && (homePage.content as Record<string, unknown>).system_context_diagram
+          ? [{ id: 'system-context', label: 'System Context', level: 2 as const }]
+          : []),
         { id: 'architecture-overview', label: 'Architecture', level: 2 },
         { id: 'stats', label: 'Stats', level: 2 },
-        { id: 'sections', label: 'Modules', level: 2 },
+        { id: 'sections', label: 'Learning Path', level: 2 },
       ];
     }
-    const content = activePage?.content as Record<string, any>;
-    if (!content || !content.prose_segments) return [];
-    
+    const content = activePage?.content as Record<string, unknown> | null;
+    if (!content) return [];
+
+    if (pageType === 'getting_started') {
+      const items: TocEntry[] = [];
+      if (Array.isArray(content.prerequisites) && content.prerequisites.length > 0) {
+        items.push({ id: 'prerequisites', label: 'Prerequisites', level: 2 });
+      }
+      if (Array.isArray(content.setup_steps) && content.setup_steps.length > 0) {
+        items.push({ id: 'setup', label: 'Setup Steps', level: 2 });
+      }
+      if (Array.isArray(content.configuration) && content.configuration.length > 0) {
+        items.push({ id: 'configuration', label: 'Configuration', level: 2 });
+      }
+      if (Array.isArray(content.quick_links) && content.quick_links.length > 0) {
+        items.push({ id: 'quick-links', label: 'Quick Links', level: 2 });
+      }
+      return items;
+    }
+
+    if (pageType === 'api_reference' || pageType === 'function_index') {
+      const index = content.index as Record<string, unknown[]> | undefined;
+      if (!index || typeof index !== 'object') return [];
+      const letters = Object.keys(index).sort().slice(0, 60);
+      return letters.map((letter) => ({
+        id: `letter-${letter}`,
+        label: letter,
+        level: 2,
+      }));
+    }
+
+    if (pageType === 'glossary') {
+      const terms = Array.isArray(content.terms)
+        ? (content.terms as Array<{ term?: string }>)
+        : [];
+      const letters = Array.from(
+        new Set(
+          terms
+            .map((t) => (t.term || '').trim().charAt(0).toUpperCase())
+            .filter((v) => /^[A-Z0-9]$/.test(v))
+        )
+      )
+        .sort()
+        .slice(0, 60);
+      return letters.map((letter) => ({
+        id: `letter-${letter}`,
+        label: letter,
+        level: 2,
+      }));
+    }
+
+    if (!Array.isArray(content.prose_segments)) return [];
     const items: TocEntry[] = [];
-    const segments = content.prose_segments as any[];
+    const segments = content.prose_segments as Array<{ type?: string; text?: string; level?: number }>;
     for (const seg of segments) {
       if (seg.type === 'heading') {
         const anchorId = (seg.text || '')
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
           .replace(/^-|-$/g, '');
-        items.push({ id: anchorId, label: seg.text, level: seg.level || 2 });
+        items.push({ id: anchorId, label: seg.text || anchorId, level: seg.level || 2 });
       }
     }
     return items;
@@ -732,6 +789,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
                   <Link
                     key={item.href}
                     href={item.href ? `${base}/${item.href}` : base}
+                    aria-current={item.active ? 'page' : undefined}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -760,7 +818,38 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
                         flexShrink: 0,
                       }}>{item.badge}</span>
                     )}
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+                    <span
+                      title={item.label}
+                      style={{
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        lineHeight: 1.2,
+                        flex: 1,
+                        minWidth: 0,
+                      }}
+                    >
+                      {item.label}
+                    </span>
+                    {(item as { hint?: string }).hint && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.4px',
+                          color: 'var(--primary-light)',
+                          background: 'rgba(139,92,246,0.15)',
+                          border: '1px solid rgba(139,92,246,0.25)',
+                          borderRadius: 999,
+                          padding: '2px 6px',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {(item as { hint?: string }).hint}
+                      </span>
+                    )}
                   </Link>
                 ))}
               </div>
@@ -830,7 +919,6 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
               homePage={homePage}
               modules={uniqueModules}
               base={base}
-              owner={owner}
               name={name}
             />
           ) : (
