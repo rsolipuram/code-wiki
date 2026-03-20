@@ -79,6 +79,9 @@ class WikiState(TypedDict, total=False):
     all_files: list
     name_to_qname: dict
 
+    # ── Derived inputs (set before agent pipeline) ──
+    domain_entities: dict         # DomainEntitySummary: {agents, tools, guardrails, all_names}
+
     # ── Progressive agent outputs ──
     architecture: dict            # ArchitectureModel (set by ARCHITECT)
     plan: dict                    # WikiPlan as dict (set by PLANNER)

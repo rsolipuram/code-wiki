@@ -30,6 +30,7 @@ Output ONLY valid JSON with this structure:
       "id": "url-slug",
       "title": "Architecture-First Title (e.g., The Handoff Flow)",
       "maps_to_components": ["Exact Component Name from the architecture"],
+      "primary_concepts": ["agent-definitions", "tool-implementations"],
       "subsections": [
         {
           "id": "sub-slug",
@@ -48,6 +49,14 @@ Guidelines:
 - Create 5-10 sections that represent the "Chapters" of a developer's mental model
 - CRITICAL: Group related files by their logical role (e.g., group the Frontend Agent Panel with the Backend Agent Logic in a "User Interaction & Agent State" chapter)
 - Section IDs must be valid URL slugs (lowercase, hyphens, no spaces)
+
+CONCEPT OWNERSHIP (CRITICAL — prevents duplication):
+- Each domain concept (agent-definitions, tool-implementations, guardrails, data-flow, frontend-rendering,
+  api-contracts, configuration, testing) MUST be PRIMARY to exactly ONE section.
+- Assign `primary_concepts` per section — a list of concept keys this section OWNS.
+- No two sections should own the same concept.
+- If another section needs to mention an owned concept, it must CROSS-REFERENCE (one sentence + link).
+- This eliminates duplicate explanations across pages.
 
 SECTION QUALITY:
 - You MUST include a diagram_type for EVERY section.

@@ -206,9 +206,16 @@ def _rel_path(file_path: str, repo_path: str) -> str:
         return file_path
 
 
-def build_function_index(entities: list[ParsedEntity], repo_path: str = "", max_entities: int = 500) -> dict[str, Any]:
-    """Build an alphabetical index of all public code entities (FR-008).
+def build_function_index(
+    entities: list[ParsedEntity],
+    repo_path: str = "",
+    max_entities: int = 500,
+    domain_entities: dict | None = None,
+) -> dict[str, Any]:
+    """Build a domain-grouped index of all public code entities (FR-008).
 
+    Groups by domain concept (agents, tools, guardrails, utilities) when
+    domain_entities is provided; falls back to alphabetical grouping.
     Caps at max_entities to prevent oversized pages on large repos.
     """
     public = [
@@ -230,14 +237,11 @@ def build_function_index(entities: list[ParsedEntity], repo_path: str = "", max_
         logger.info("Function index: capping from %d to %d entities", len(public), max_entities)
         public = public[:max_entities]
 
-    # Group by first letter
-    index: dict[str, list[dict]] = {}
-    for entity in public:
-        letter = entity.name[0].upper() if entity.name else "#"
+    def _entity_row(entity: ParsedEntity) -> dict:
         summary = (entity.docstring or "").split("\n")[0][:100] if entity.docstring else ""
         if not summary:
             summary = f"{entity.entity_type.title()} `{entity.name}` in `{_rel_path(entity.file_path, repo_path)}`."
-        index.setdefault(letter, []).append({
+        return {
             "name": entity.name,
             "qualified_name": entity.qualified_name,
             "type": entity.entity_type,
@@ -245,13 +249,60 @@ def build_function_index(entities: list[ParsedEntity], repo_path: str = "", max_
             "line": entity.line_start,
             "signature": entity.signature,
             "summary": summary,
-        })
+        }
+
+    # Domain-grouped indexing when domain_entities is available
+    if domain_entities:
+        agent_names = {ag.get("name", "").lower() for ag in domain_entities.get("agents", [])}
+        tool_names = {t.get("name", "").lower() for t in domain_entities.get("tools", [])}
+        guardrail_names = {g.get("name", "").lower() for g in domain_entities.get("guardrails", [])}
+
+        groups: dict[str, list[dict]] = {
+            "Agents": [],
+            "Tools": [],
+            "Guardrails": [],
+            "Utilities": [],
+        }
+        for entity in public:
+            name_lower = entity.name.lower()
+            row = _entity_row(entity)
+            if name_lower in agent_names or name_lower.endswith("agent"):
+                groups["Agents"].append(row)
+            elif name_lower in tool_names or "tool" in _rel_path(entity.file_path, repo_path).lower():
+                groups["Tools"].append(row)
+            elif name_lower in guardrail_names or any(
+                kw in name_lower for kw in ("guard", "guardrail", "validator", "filter", "middleware")
+            ):
+                groups["Guardrails"].append(row)
+            else:
+                groups["Utilities"].append(row)
+
+        # Remove empty groups
+        groups = {k: v for k, v in groups.items() if v}
+
+        return {
+            "page_type": "function_index",
+            "version": 2,
+            "total_count": total_count,
+            "shown_count": len(public),
+            "grouped": True,
+            # `index` uses domain group names as keys (Agents, Tools, Guardrails, Utilities)
+            # so the existing frontend EntityIndexContent renders domain sections instead of letters
+            "index": groups,
+        }
+
+    # Fallback: alphabetical grouping
+    index: dict[str, list[dict]] = {}
+    for entity in public:
+        letter = entity.name[0].upper() if entity.name else "#"
+        index.setdefault(letter, []).append(_entity_row(entity))
 
     return {
         "page_type": "function_index",
         "version": 2,
         "total_count": total_count,
         "shown_count": len(public),
+        "grouped": False,
         "index": index,
     }
 
@@ -262,8 +313,12 @@ def build_glossary(
     system_narrative: str = "",
     module_prose: list[str] | None = None,
     analysis_id: str | None = None,
+    domain_entities: dict | None = None,
 ) -> dict[str, Any]:
-    """Extract domain terms from docstrings, narrative prose, and wiki content (FR-009)."""
+    """Extract domain terms from docstrings, narrative prose, and wiki content (FR-009).
+
+    Injects domain agent/tool names as seed terms when domain_entities is provided.
+    """
     # Collect all docstrings
     docstring_text = " ".join(
         e.docstring for e in entities if e.docstring
@@ -281,9 +336,29 @@ def build_glossary(
     if not all_docs.strip():
         return {"page_type": "glossary", "version": 2, "terms": [], "total_count": 0}
 
+    # Build seed terms from domain entities to ensure they appear in the glossary
+    seed_terms_block = ""
+    if domain_entities:
+        seeds = []
+        for ag in domain_entities.get("agents", []):
+            name = ag.get("name", "")
+            doc = (ag.get("docstring") or "").split("\n")[0].strip()
+            if name:
+                seeds.append(f"{name} (agent): {doc[:80]}" if doc else name)
+        for t in domain_entities.get("tools", []):
+            name = t.get("name", "")
+            if name:
+                seeds.append(f"{name} (tool)")
+        if seeds:
+            seed_terms_block = (
+                "\nIMPORTANT: Ensure these domain-specific terms are included in the glossary:\n"
+                + "\n".join(f"  - {s}" for s in seeds[:15])
+            )
+
     prompt = f"""Extract a glossary of domain-specific terms from these code docstrings.
 
 {all_docs}
+{seed_terms_block}
 
 Return JSON only:
 {{
@@ -298,7 +373,7 @@ Return JSON only:
   ]
 }}
 
-Include: domain concepts, business terms, technical patterns, acronyms.
+Include: domain concepts, business terms, technical patterns, acronyms, and all agent/tool names listed above.
 Exclude: generic programming terms (function, class, method, etc.)."""
 
     try:

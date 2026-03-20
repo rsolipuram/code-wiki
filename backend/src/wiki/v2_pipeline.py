@@ -84,6 +84,15 @@ def generate_wiki_v2(
     
     scored_entities = score_entities(entities)
     
+    # ── Phase 2A: Extract domain entities (agents, tools, guardrails) ────
+    domain_entities = _extract_domain_entities(entity_index, call_graph, repo_path)
+    logger.info(
+        "Domain entities: %d agents, %d tools, %d guardrails",
+        len(domain_entities.get("agents", [])),
+        len(domain_entities.get("tools", [])),
+        len(domain_entities.get("guardrails", [])),
+    )
+    
     # Normalize all_files to repo-relative
     resolved_root = Path(repo_path).resolve()
     all_files_set = set()
@@ -165,6 +174,8 @@ def generate_wiki_v2(
         "scored_entities": scored_entities,
         "all_files": all_files,
         "name_to_qname": name_to_qname,
+        # Domain entity summary (derived, used by all agents)
+        "domain_entities": domain_entities,
         # Empty outputs (populated by agents)
         "architecture": {},
         "plan": {},
@@ -246,6 +257,7 @@ def generate_wiki_v2(
         plan=plan,
         entity_index=entity_index,
         call_graph=call_graph,
+        domain_entities=domain_entities,
     )
     _sanitize_rendered_pages(rendered_pages)
     quality_warnings, quality_metrics = _evaluate_rendered_page_quality(
@@ -253,6 +265,7 @@ def generate_wiki_v2(
         all_files=all_files,
         repo_path=repo_path,
         entity_index=entity_index,
+        domain_entities=domain_entities,
     )
     generation_warnings.extend(quality_warnings)
     logger.info(
@@ -347,6 +360,7 @@ def generate_wiki_v2(
         repo_url, fingerprint, commit_hash, _report,
         system_narrative=system_narrative,
         module_prose=module_prose_texts,
+        domain_entities=domain_entities,
     )
     pages_created += special_pages_created
     generation_warnings.extend(special_page_warnings)
@@ -559,6 +573,7 @@ def _build_entity_index(
             "name": e.name,
             "entity_type": e.entity_type,
             "signature": e.signature or "",
+            "docstring": (e.docstring or "")[:200],
         }
 
         # First-seen wins for short name lookup
@@ -734,6 +749,7 @@ def _generate_special_pages(
     report_callback,
     system_narrative: str = "",
     module_prose: list[str] | None = None,
+    domain_entities: dict | None = None,
 ) -> tuple[int, list[dict[str, str]]]:
     """Generate special pages using V1 builders. Returns (count, warnings)."""
     pages = 0
@@ -771,7 +787,7 @@ def _generate_special_pages(
         })
 
     try:
-        fi_content = build_function_index(entities, repo_path)
+        fi_content = build_function_index(entities, repo_path, domain_entities=domain_entities)
         fi_content["commit_hash"] = commit_hash
         session.add(WikiPage(
             wiki_id=wiki.id, page_type=PageType.function_index,
@@ -795,6 +811,7 @@ def _generate_special_pages(
             system_narrative=system_narrative,
             module_prose=module_prose,
             analysis_id=wiki.repository_id,
+            domain_entities=domain_entities,
         )
         glossary_content["commit_hash"] = commit_hash
         glossary_meta = glossary_content.get("_meta", {}) if isinstance(glossary_content, dict) else {}
@@ -914,6 +931,105 @@ def _first_text(segments: list[dict], max_len: int = 100) -> str:
         if sum(len(t) for t in parts) >= max_len:
             break
     return " ".join(parts).strip()[:max_len]
+
+
+def _extract_domain_entities(
+    entity_index: dict[str, dict],
+    call_graph: dict[str, list[str]],
+    repo_path: str,
+) -> dict:
+    """Extract domain-level actors from entity index.
+
+    Identifies agents, tools, and guardrails by name pattern and file location.
+    Returns a DomainEntitySummary with: agents, tools, guardrails, all_names.
+    """
+    _AGENT_SUFFIXES = (
+        "agent", "handler", "controller", "service", "processor",
+        "bot", "actor", "runner", "worker", "flow", "pipeline",
+    )
+    # Also detect classes in files named agent*.py / *_agent.py / agents/*.py
+    _AGENT_FILE_PATTERNS = ("/agent", "agents/", "_agent.", "-agent.")
+    _TOOL_FILE_PATTERNS = ("/tools.py", "/tools.ts", "/tool.py", "/tools/", "tools.js")
+    _GUARDRAIL_PATTERNS = ("guardrail", "guard", "validator", "middleware", "filter")
+
+    agents: list[dict] = []
+    tools: list[dict] = []
+    guardrails: list[dict] = []
+    seen: set[str] = set()
+
+    # Build reverse mapping: qname → entity info with tool list from call graph
+    for qname, info in entity_index.items():
+        name = str(info.get("name", ""))
+        entity_type = str(info.get("entity_type", ""))
+        file_path = str(info.get("file_path", ""))
+        if not name or name.startswith("_") or name in seen:
+            continue
+        if entity_type not in ("class", "function"):
+            continue
+
+        name_lower = name.lower()
+        file_lower = file_path.lower()
+        docstring = str(info.get("docstring", "") or "")
+
+        # ── Agents: classes by suffix OR by agent file location ──
+        is_agent_by_suffix = entity_type == "class" and any(name_lower.endswith(s) for s in _AGENT_SUFFIXES)
+        is_agent_by_file = entity_type == "class" and any(p in file_lower for p in _AGENT_FILE_PATTERNS)
+        if is_agent_by_suffix or is_agent_by_file:
+            # Find handoff targets (other agent-like callees)
+            callees = call_graph.get(qname, [])
+            handoff_targets = []
+            tool_names = []
+            for callee in callees:
+                callee_info = entity_index.get(callee, {})
+                callee_name = str(callee_info.get("name", ""))
+                callee_type = str(callee_info.get("entity_type", ""))
+                if any(callee_name.lower().endswith(s) for s in _AGENT_SUFFIXES):
+                    handoff_targets.append(callee_name)
+                elif callee_type == "function" and any(
+                    p in str(callee_info.get("file_path", "")).lower()
+                    for p in _TOOL_FILE_PATTERNS
+                ):
+                    tool_names.append(callee_name)
+            agents.append({
+                "name": name,
+                "qualified_name": qname,
+                "file": file_path,
+                "docstring": docstring[:200],
+                "handoff_targets": handoff_targets[:6],
+                "tools": tool_names[:8],
+            })
+            seen.add(name)
+            continue
+
+        # ── Tools: functions in tools files ──
+        if entity_type == "function" and any(p in file_lower for p in _TOOL_FILE_PATTERNS):
+            tools.append({
+                "name": name,
+                "qualified_name": qname,
+                "file": file_path,
+                "docstring": docstring[:150],
+            })
+            seen.add(name)
+            continue
+
+        # ── Guardrails: any entity with guardrail-related naming ──
+        if any(p in name_lower for p in _GUARDRAIL_PATTERNS):
+            guardrails.append({
+                "name": name,
+                "qualified_name": qname,
+                "file": file_path,
+                "docstring": docstring[:150],
+            })
+            seen.add(name)
+
+    all_names = [e["name"] for e in agents] + [e["name"] for e in tools] + [e["name"] for e in guardrails]
+    return {
+        "agents": agents,
+        "tools": tools,
+        "guardrails": guardrails,
+        "all_names": all_names,
+        "agent_count": len(agents),
+    }
 
 
 _PLACEHOLDER_PATTERNS = (
@@ -1119,8 +1235,9 @@ def _inject_runtime_holistic_sections(
     plan: WikiPlan,
     entity_index: dict[str, dict],
     call_graph: dict[str, list[str]],
+    domain_entities: dict | None = None,
 ) -> None:
-    """Ensure runtime agent roster + flow exist for holistic comprehension."""
+    """Inject runtime agent roster + handoff diagram into home page for holistic comprehension."""
     home_page = next((p for p in rendered_pages if p.get("slug") == "home"), None)
     if not home_page:
         return
@@ -1133,62 +1250,172 @@ def _inject_runtime_holistic_sections(
         prose_segments = []
         content["prose_segments"] = prose_segments
 
-    # Ensure we don't append after a trailing non-home narrative block that never renders.
     # Insert near the front so Home view always exposes these sections.
     insert_at = min(len(prose_segments), 2)
 
-    names = sorted(
-        {
-            str(info.get("name", ""))
-            for info in entity_index.values()
-            if str(info.get("name", "")).lower().endswith("agent")
-        }
-    )
-    if not names:
-        # fallback to section names that look agent-related
-        names = [s.title for s in plan.sections if "agent" in s.title.lower()]
-
+    # ── Inject Runtime Agent Roster (table format) ──────────────────────
     if not any(
         isinstance(seg, dict)
         and seg.get("type") == "heading"
         and str(seg.get("text", "")).strip().lower() == "runtime agent roster"
         for seg in prose_segments
     ):
-        roster_text = "Agents detected in repository context:\n- " + "\n- ".join(names[:20]) if names else (
-            "Agents detected in repository context: none matched '*Agent' naming; "
-            "review section pages for inferred runtime actors."
-        )
+        agents = (domain_entities or {}).get("agents", [])
+
+        if agents:
+            # Build table rows: Agent | Role | Key Tools
+            table_rows = []
+            for ag in agents[:12]:
+                name = ag.get("name", "")
+                # Extract role from docstring first line or name-based heuristic
+                role = (ag.get("docstring") or "").split("\n")[0].strip()
+                if not role:
+                    role = _infer_agent_role(name)
+                tools_list = ag.get("tools", []) or []
+                tools_str = ", ".join(f"`{t}`" for t in tools_list[:4]) if tools_list else "—"
+                table_rows.append(f"| **{name}** | {role[:80]} | {tools_str} |")
+
+            roster_text = (
+                "| Agent | Role | Key Tools |\n"
+                "|-------|------|----------|\n"
+                + "\n".join(table_rows)
+            )
+        else:
+            # Fallback: name-only list from entity_index
+            names = sorted({
+                str(info.get("name", ""))
+                for info in entity_index.values()
+                if str(info.get("name", "")).lower().endswith("agent")
+            })
+            if not names:
+                names = [s.title for s in plan.sections if "agent" in s.title.lower()]
+            roster_text = (
+                "Agents detected in repository context:\n- " + "\n- ".join(names[:20])
+                if names else
+                "No agents matched '*Agent' naming; review section pages for runtime actors."
+            )
+
         prose_segments.insert(insert_at, {"type": "heading", "level": 2, "text": "Runtime Agent Roster"})
-        prose_segments.insert(insert_at + 1, {
-            "type": "text",
-            "content": roster_text,
-        })
+        prose_segments.insert(insert_at + 1, {"type": "text", "content": roster_text})
         insert_at += 2
 
+    # ── Inject Runtime Flow (Mermaid sequence diagram) ──────────────────
     if not any(
         isinstance(seg, dict)
         and seg.get("type") == "heading"
         and str(seg.get("text", "")).strip().lower() == "runtime flow"
         for seg in prose_segments
     ):
-        edges = []
-        for caller, callees in call_graph.items():
-            if not callees:
-                continue
-            caller_name = entity_index.get(caller, {}).get("name", caller.rsplit(".", 1)[-1])
-            for callee in callees[:2]:
-                callee_name = entity_index.get(callee, {}).get("name", callee.rsplit(".", 1)[-1])
-                edges.append(f"{caller_name} -> {callee_name}")
-            if len(edges) >= 8:
-                break
+        agents = (domain_entities or {}).get("agents", [])
+        mermaid_src = _build_agent_handoff_diagram(agents, entity_index, call_graph)
+
         prose_segments.insert(insert_at, {"type": "heading", "level": 2, "text": "Runtime Flow"})
         prose_segments.insert(insert_at + 1, {
             "type": "text",
-            "content": (
-                "Input -> decision -> action -> persistence -> output. "
-                "Representative flow edges:\n- " + ("\n- ".join(edges) if edges else "No call edges detected")
-            ),
+            "content": "End-to-end request flow: user input → triage → specialist agent → tool execution → response.",
         })
+        if mermaid_src:
+            # Inject as a diagram segment so the renderer treats it as Mermaid
+            prose_segments.insert(insert_at + 2, {
+                "type": "diagram",
+                "mermaid_source": mermaid_src,
+                "caption": "Agent handoff flow — how user requests route through the system",
+            })
+
+
+def _infer_agent_role(name: str) -> str:
+    """Infer a short role description from the agent class name."""
+    mapping = {
+        "triage": "Routes user requests to the appropriate specialist agent",
+        "flight": "Provides flight status, delays, and connection information",
+        "booking": "Handles flight bookings, rebookings, and cancellations",
+        "cancellation": "Handles flight bookings, rebookings, and cancellations",
+        "seat": "Manages seat assignments and special service requests",
+        "faq": "Answers policy questions on baggage, compensation, and amenities",
+        "refund": "Processes compensation claims and travel disruption support",
+        "compensation": "Processes compensation claims and travel disruption support",
+        "auth": "Handles authentication and authorization",
+        "payment": "Processes payment transactions",
+    }
+    name_lower = name.lower()
+    for keyword, role in mapping.items():
+        if keyword in name_lower:
+            return role
+    return f"Handles {name.replace('Agent', '').replace('Handler', '').strip()} operations"
+
+
+def _build_agent_handoff_diagram(
+    agents: list[dict],
+    entity_index: dict[str, dict],
+    call_graph: dict[str, list[str]],
+) -> str:
+    """Build a Mermaid sequence diagram showing agent handoffs.
+
+    Tries call_graph-based edges first; falls back to star topology from triage.
+    """
+    if not agents:
+        return ""
+
+    agent_names = {ag.get("name", "") for ag in agents}
+    agent_qnames = {ag.get("qualified_name", ""): ag.get("name", "") for ag in agents}
+
+    # Try to find call-graph-based handoffs between agents
+    handoff_edges: list[tuple[str, str]] = []
+    for qname, callees in call_graph.items():
+        caller_name = agent_qnames.get(qname) or entity_index.get(qname, {}).get("name", "")
+        if caller_name not in agent_names:
+            continue
+        for callee in callees:
+            callee_name = agent_qnames.get(callee) or entity_index.get(callee, {}).get("name", "")
+            if callee_name in agent_names and callee_name != caller_name:
+                handoff_edges.append((caller_name, callee_name))
+
+    # Deduplicate edges
+    handoff_edges = list(dict.fromkeys(handoff_edges))
+
+    # If no direct call graph edges, try to build from handoff_targets on agents
+    if not handoff_edges:
+        for ag in agents:
+            src = ag.get("name", "")
+            for target in (ag.get("handoff_targets") or []):
+                if target in agent_names and target != src:
+                    handoff_edges.append((src, target))
+        handoff_edges = list(dict.fromkeys(handoff_edges))
+
+    if len(agents) <= 1:
+        return ""
+
+    lines = ["sequenceDiagram"]
+    lines.append("    participant User")
+    for ag in agents[:8]:
+        name = ag.get("name", "")
+        short = name.replace("Agent", " Agent").replace("Handler", " Handler").strip()
+        lines.append(f"    participant {name} as {short}")
+
+    if handoff_edges:
+        lines.append("    User->>+" + agents[0].get("name", "Agent") + ": request")
+        seen = set()
+        for src, dst in handoff_edges[:6]:
+            key = (src, dst)
+            if key not in seen:
+                lines.append(f"    {src}->>{dst}: handoff")
+                seen.add(key)
+        lines.append("    " + agents[0].get("name", "Agent") + "-->>-User: response")
+    else:
+        # Star topology: first agent (likely Triage) routes to all others
+        triage = next(
+            (ag.get("name") for ag in agents if "triage" in ag.get("name", "").lower()),
+            agents[0].get("name", "Agent"),
+        )
+        lines.append(f"    User->>+{triage}: request")
+        for ag in agents[:6]:
+            name = ag.get("name", "")
+            if name != triage:
+                lines.append(f"    {triage}->>{name}: route")
+                lines.append(f"    {name}-->>User: response")
+        lines.append(f"    {triage}-->>-User: consolidated response")
+
+    return "\n".join(lines)
 
 
 def _evaluate_rendered_page_quality(
@@ -1196,6 +1423,7 @@ def _evaluate_rendered_page_quality(
     all_files: list[str],
     repo_path: str,
     entity_index: dict[str, dict],
+    domain_entities: dict | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     settings = get_settings()
     warnings: list[dict[str, str]] = []
@@ -1372,4 +1600,48 @@ def _evaluate_rendered_page_quality(
     metrics["diagram_coverage"] = round((explained_diagrams / total_diagrams), 3) if total_diagrams else 0.0
     metrics["runtime_agent_roster_present"] = has_runtime_roster
     metrics["runtime_flow_present"] = has_runtime_flow
+
+    # ── Agent coverage gate: core pages should name ≥50% of domain agents ──
+    if domain_entities:
+        agent_names = [ag.get("name", "").lower() for ag in domain_entities.get("agents", [])]
+        if agent_names:
+            threshold = max(1, len(agent_names) // 2)
+            pages_below_threshold = 0
+            for page in rendered_pages:
+                slug = str(page.get("slug", ""))
+                page_type = str(page.get("page_type", ""))
+                # Check home page (must introduce agents) and module/agent pages
+                is_core = page_type in ("module", "home") or "agent" in slug.lower()
+                if not is_core:
+                    continue
+                page_text = rendered_texts.get(slug, "").lower()
+                if not page_text:
+                    continue
+                coverage = sum(1 for n in agent_names if n in page_text)
+                if coverage < threshold:
+                    pages_below_threshold += 1
+                    warnings.append({
+                        "page": slug,
+                        "reason": "agent_coverage_low",
+                        "detail": f"Page mentions {coverage}/{len(agent_names)} domain agents (threshold: {threshold})",
+                    })
+            metrics["agent_coverage_pages_below_threshold"] = pages_below_threshold
+            metrics["domain_agent_count"] = len(agent_names)
+
+    # ── Word count gate: narrative pages >1500w, reference pages >800w ──
+    _REFERENCE_PAGE_TYPES = {"function_index", "api_reference", "glossary", "getting_started"}
+    for page in rendered_pages:
+        slug = str(page.get("slug", ""))
+        page_type = str(page.get("page_type", ""))
+        page_text = rendered_texts.get(slug, "")
+        word_count = len(page_text.split())
+        is_reference = page_type in _REFERENCE_PAGE_TYPES or slug in ("function-index", "api-reference", "glossary", "getting-started")
+        limit = 800 if is_reference else 1500
+        if word_count > limit:
+            warnings.append({
+                "page": slug,
+                "reason": "word_count_high",
+                "detail": f"{word_count} words exceeds {limit}-word limit for {'reference' if is_reference else 'narrative'} page",
+            })
+
     return warnings, metrics

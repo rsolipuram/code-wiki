@@ -61,13 +61,14 @@ def writer_node(state: WikiState) -> dict:
     entities = state.get("entities", [])
     dossier = state.get("dossier", {})
     entity_index = state.get("entity_index", {})
+    domain_entities = state.get("domain_entities") or {}
 
     arch = ArchitectureModel.from_dict(architecture)
     sections = plan.get("sections", [])
 
     # 1. Generate system narrative
     system_narrative = _generate_system_narrative(
-        plan, arch, compressed, dossier,
+        plan, arch, compressed, dossier, domain_entities,
     )
 
     # 2. Generate section content in parallel
@@ -79,7 +80,7 @@ def writer_node(state: WikiState) -> dict:
             future = pool.submit(
                 _write_section,
                 section, system_narrative, arch, compressed,
-                repo_path, entities, entity_index, dossier, plan,
+                repo_path, entities, entity_index, dossier, plan, domain_entities,
             )
             futures[future] = section
 
@@ -126,12 +127,13 @@ def _generate_system_narrative(
     arch: ArchitectureModel,
     compressed: dict,
     dossier: dict,
+    domain_entities: dict | None = None,
 ) -> str:
-    """Generate 500-1000 word cross-cutting overview."""
+    """Generate 600-800 word cross-cutting overview with named domain entities."""
     section_titles = [s.get("title", "") for s in plan.get("sections", [])]
     repo_summary = compressed.get("repo_summary", "")
 
-    # Build architecture context
+    # Build architecture context from architect model (not fingerprint heuristic)
     arch_context = ""
     if arch.components:
         comp_summary = ", ".join(c["name"] for c in arch.components[:8])
@@ -142,36 +144,70 @@ def _generate_system_narrative(
         flows = [f"{f['source']} → {f['destination']}" for f in arch.data_flows[:5]]
         arch_context += f"\nData flows: {'; '.join(flows)}"
 
-    prompt = f"""Write a comprehensive technical overview of this codebase (1000-2000 words).
-This will be the introduction to the wiki documentation.
+    # Build domain entities context for agent enumeration
+    domain_context = ""
+    if domain_entities:
+        agents = domain_entities.get("agents", [])
+        tools = domain_entities.get("tools", [])
+        guardrails = domain_entities.get("guardrails", [])
+        if agents:
+            agent_lines = []
+            for ag in agents[:10]:
+                name = ag.get("name", "")
+                doc = (ag.get("docstring") or "").split("\n")[0].strip()
+                role = doc[:80] if doc else name
+                agent_lines.append(f"  - {name}: {role}")
+            domain_context += "\nDomain agents (from source code):\n" + "\n".join(agent_lines)
+        if tools:
+            tool_names = ", ".join(t.get("name", "") for t in tools[:8])
+            domain_context += f"\nKey tools: {tool_names}"
+        if guardrails:
+            guard_names = ", ".join(g.get("name", "") for g in guardrails[:5])
+            domain_context += f"\nGuardrails: {guard_names}"
+
+    # Build agent-naming requirement based on available domain data
+    if domain_entities and domain_entities.get("agents"):
+        agent_req = "3. A named list of ALL domain agents/services with their specific roles (1 sentence each). Use the exact names from the domain context above."
+        agent_coord_req = "4. How agents coordinate (handoff flow, guardrails, communication mechanism)."
+    else:
+        agent_req = "3. The key runtime components or services and their roles."
+        agent_coord_req = "4. How the main components communicate and coordinate."
+
+    prompt = f"""Write a concise technical overview of this codebase (600-800 words maximum).
+This is the introduction to the wiki documentation. Be precise — name actual components, agents, and tools.
 
 {repo_summary}
 {arch_context}
+{domain_context}
 
-The documentation is organized into these sections:
+The wiki has these sections:
 {chr(10).join(f'  - {t}' for t in section_titles)}
 
-Write in a professional, informative tone. Use these formatting rules:
-1. Divide the content into clear sections using "## Section Title" (Markdown style).
-2. Use bullet points and numbered lists liberally.
-3. Explain:
-   - What the project does and its core purpose.
-   - The high-level architecture and how components interact.
-   - The key design decisions and patterns used.
-   - A "Codebase Navigation" guide for newcomers.
-4. Reference sections by name where relevant.
-5. Aim for 3-5 sentences per paragraph maximum.
+REQUIREMENTS — your overview MUST include:
+1. What the project does and its core purpose (1 paragraph).
+2. The accurate tech stack (e.g., "Python FastAPI backend + Next.js frontend" — use the architect model, not assumptions).
+{agent_req}
+{agent_coord_req}
+5. A brief Codebase Navigation guide pointing to wiki sections.
+
+FORMATTING RULES:
+1. Use [[heading:2:Title]] for section headings (NOT markdown # or ##)
+2. Use bullet points for agent lists
+3. Max 4 sentences per paragraph
+4. Average sentence length under 18 words — be direct and precise
+5. Total length: 600-800 words. Do NOT exceed 800 words.
+6. Do NOT use vague terms when concrete names exist (say "Triage Agent" not "the routing component")
 
 Write the overview now."""
 
     try:
         narrative = chat(
             [{"role": "user", "content": prompt}],
-            max_tokens=6000,
-            temperature=0.4,
+            max_tokens=3000,
+            temperature=0.3,
             cache_ttl=3600,
         ).strip()
-        
+
         # Convert ## / ### / #### headings to [[heading:level:Title]] markers
         def _heading_replacer(m: re.Match) -> str:
             level = len(m.group(1))
@@ -195,6 +231,7 @@ def _write_section(
     entity_index: dict,
     dossier: dict,
     plan: dict,
+    domain_entities: dict | None = None,
 ) -> dict:
     """Write prose for a single section."""
     section_id = section.get("id", "unknown")
@@ -234,12 +271,42 @@ def _write_section(
         if s.get("id") != section_id
     ]
 
-    prompt = f"""Write comprehensive, in-depth technical documentation for the "{section_title}" section.
-Be precise and concise while covering design decisions, error handling, integration points, and configuration.
-Target 400-900 words unless source context is very small.
+    # Primary concepts owned by this section (from planner concept-ownership)
+    primary_concepts = section.get("primary_concepts", [])
+    primary_concepts_block = ""
+    if primary_concepts:
+        primary_concepts_block = (
+            f"This section OWNS these concepts: {', '.join(primary_concepts)}.\n"
+            "For all other concepts, write a 1-sentence cross-reference ('See Section X') instead of restating."
+        )
 
-System overview (for context, don't repeat):
-{system_narrative[:1500]}
+    # Domain entities context (all-sections awareness)
+    domain_context_block = ""
+    if domain_entities:
+        agents = domain_entities.get("agents", [])
+        tools = domain_entities.get("tools", [])
+        if agents:
+            agent_names = [ag.get("name", "") for ag in agents[:12]]
+            domain_context_block += f"Domain agents in this repo: {', '.join(agent_names)}\n"
+        if tools:
+            tool_names = [t.get("name", "") for t in tools[:8]]
+            domain_context_block += f"Key tools: {', '.join(tool_names)}\n"
+        if domain_context_block:
+            domain_context_block = (
+                "REPO DOMAIN CONTEXT (name these explicitly when relevant):\n"
+                + domain_context_block
+            )
+
+    prompt = f"""Write precise, concise technical documentation for the "{section_title}" section.
+Cover design decisions, error handling, integration points, and configuration. Name specific agents, tools, and classes.
+Target 300-600 words. Do NOT exceed 800 words.
+
+{domain_context_block}
+
+{primary_concepts_block}
+
+System overview (do not restate — cross-reference only):
+{system_narrative[:1000]}
 
 {component_context}
 
@@ -251,21 +318,19 @@ Source code context:
 FORMATTING RULES:
 1. Use [[heading:2:Title]] for section headings and [[heading:3:Title]] for sub-headings
 2. Use [[code:filepath:start_line:end_line]] to embed source code snippets
-3. Do NOT use [[entity:...]] markers — those will be added by a separate agent
+3. Do NOT use [[entity:...]] markers — added by a separate agent
 4. Do NOT use markdown headings (# / ##) or code fences (```)
 5. Write professional prose explaining WHY, not just WHAT
 6. Reference specific functions, classes, and patterns from the source code
-7. Use [[code:filepath:start_line:end_line]] LIBERALLY to embed important source code inline
+7. Use [[code:filepath:start_line:end_line]] LIBERALLY for important source code
 8. Cover error handling, edge cases, configuration, and integration points
 9. Mention related sections by name: {', '.join(other_sections[:5])}
 10. Do NOT invent files, endpoints, classes, or functions not present in source context.
-11. Do NOT include placeholders or meta commentary (e.g., "[code:...]", "representative line range", "would be here").
-12. Keep prose precise and concise: avoid filler and repetitive restatements.
-13. Keep average sentence length under ~24 words and use short paragraphs.
-14. Explicitly include one Runtime Flow subsection describing input -> decision -> action -> persistence/output where applicable.
-15. Where agents/personas are discussed, enumerate all roles visible in context and describe handoff logic.
+11. Do NOT include placeholders or meta commentary.
+12. Average sentence length under 18 words — be direct and precise.
+13. Where agents are discussed, name them explicitly from the domain context above.
 
-Write comprehensive section content now. Be thorough and detailed."""
+Write section content now."""
 
     try:
         prose = chat(
@@ -273,13 +338,36 @@ Write comprehensive section content now. Be thorough and detailed."""
                 {"role": "system", "content": WRITER_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=8192,
-            temperature=0.4,
+            max_tokens=4096,
+            temperature=0.3,
             cache_ttl=3600,
         ).strip()
     except Exception as exc:
         logger.error("WRITER: section '%s' failed: %s", section_title, exc)
         prose = f"Documentation for {section_title} is being generated."
+
+    # Condensation pass: if > 1200 words, ask LLM to condense to ≤800 words
+    word_count = len(prose.split())
+    if word_count > 1200:
+        logger.info("WRITER: section '%s' is %d words — condensing", section_title, word_count)
+        try:
+            prose = chat(
+                [
+                    {"role": "system", "content": WRITER_SYSTEM_PROMPT},
+                    {"role": "user", "content": (
+                        f"The following documentation section is too long ({word_count} words). "
+                        "Condense it to ≤800 words. Keep all named agents, tools, classes, and code references. "
+                        "Cut filler, redundant explanations, and obvious statements. "
+                        "Preserve all [[heading:...]] and [[code:...]] markers exactly.\n\n"
+                        + prose
+                    )},
+                ],
+                max_tokens=3000,
+                temperature=0.2,
+                cache_ttl=3600,
+            ).strip()
+        except Exception as exc:
+            logger.warning("WRITER: condensation pass failed for '%s': %s", section_title, exc)
 
     # Strip leading title if it matches section title
     prose = _strip_leading_title(prose, section_title)

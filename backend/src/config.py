@@ -66,11 +66,11 @@ class Settings(BaseSettings):
         alias="WIKI_AUTO_ENTITY_LINKING_ENABLED",
     )
     wiki_quality_max_avg_sentence_words: int = Field(
-        default=24,
+        default=20,
         alias="WIKI_QUALITY_MAX_AVG_SENTENCE_WORDS",
     )
     wiki_quality_cross_page_similarity_threshold: float = Field(
-        default=0.78,
+        default=0.45,
         alias="WIKI_QUALITY_CROSS_PAGE_SIMILARITY_THRESHOLD",
     )
 
