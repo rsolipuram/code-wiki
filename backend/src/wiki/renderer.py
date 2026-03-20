@@ -64,6 +64,7 @@ def _render_single_page(
     overview_diagram: dict | None = None,
 ) -> dict[str, Any]:
     """Render everything into a single home page with inline sections."""
+    system_context_diagram = _build_system_context_diagram(repo_name, repo_url, fingerprint)
     # Concatenate all prose_segments with heading separators
     all_segments: list[dict] = []
     all_diagrams: list[dict] = []
@@ -72,7 +73,9 @@ def _render_single_page(
     all_code_blocks: list[dict] = []
     all_subsections: list[dict] = []
 
-    # Include overview diagram if available
+    # Include C4 context/overview diagrams if available
+    if system_context_diagram:
+        all_diagrams.append(system_context_diagram)
     if overview_diagram:
         all_diagrams.append(overview_diagram)
 
@@ -130,6 +133,7 @@ def _render_single_page(
                 for s in enriched_sections
             ],
             "prose_segments": all_segments,
+            "system_context_diagram": system_context_diagram,
             "overview_diagram": overview_diagram,
             "diagrams": all_diagrams,
             "tables": all_tables,
@@ -186,6 +190,7 @@ def _render_home_page(
     """Render V2 home page — superset of V1 build_home_page() output."""
     from src.wiki.enricher import resolve_heading_markers
     total_words = sum(s.word_count for s in enriched_sections)
+    system_context_diagram = _build_system_context_diagram(repo_name, repo_url, fingerprint)
 
     # Resolve headings in system narrative
     # We treat the system narrative as a single text segment initially
@@ -231,11 +236,14 @@ def _render_home_page(
         ],
         "commit_hash": commit_hash,
         "suggested_reading_order": [s.section_id for s in enriched_sections],
+        "system_context_diagram": system_context_diagram,
     }
 
     if overview_diagram:
         content["overview_diagram"] = overview_diagram
-        content["diagrams"] = [overview_diagram]
+        content["diagrams"] = [d for d in [system_context_diagram, overview_diagram] if d]
+    elif system_context_diagram:
+        content["diagrams"] = [system_context_diagram]
 
     return {
         "slug": "home",
@@ -320,3 +328,35 @@ def _first_text(segments: list[dict], max_len: int = 100) -> str:
             break
     full = " ".join(text_parts).strip()
     return full[:max_len]
+
+
+def _build_system_context_diagram(repo_name: str, repo_url: str, fingerprint) -> dict[str, str]:
+    """Build a deterministic C4 Level 1 system-context diagram for the home page."""
+    # Keep this stable and simple so every wiki has a reliable L1 context view.
+    system_type = getattr(fingerprint, "system_type", "software system") or "software system"
+    tools = [str(t).lower() for t in (getattr(fingerprint, "tools_present", []) or [])]
+
+    externals = ["Git hosting"]
+    if any(t in {"openai", "lm studio", "anthropic", "gemini", "llm"} for t in tools):
+        externals.append("LLM provider")
+    if any(t in {"postgresql", "mysql", "sqlite", "mongodb", "redis", "qdrant", "neo4j"} for t in tools):
+        externals.append("Data stores")
+    if any(t in {"docker", "kubernetes", "terraform", "ansible", "github actions"} for t in tools):
+        externals.append("Infrastructure services")
+
+    external_nodes = externals[:3]
+    lines = [
+        "graph LR",
+        "  user([Developers / Operators])",
+        f"  system[{repo_name}]",
+        "  user -->|Uses| system",
+    ]
+    for idx, label in enumerate(external_nodes, start=1):
+        node_id = f"ext{idx}"
+        lines.append(f"  {node_id}[{label}]")
+        lines.append(f"  system -->|Integrates with| {node_id}")
+
+    return {
+        "mermaid_source": "\n".join(lines),
+        "caption": f"C4 Level 1 system context for {repo_name} ({system_type}) sourced from {repo_url}",
+    }

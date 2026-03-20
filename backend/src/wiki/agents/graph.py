@@ -8,12 +8,15 @@ and returns state updates.
 """
 
 import logging
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Callable, Optional
 
 from langgraph.graph import StateGraph, END
 
 from src.wiki.agents.state import WikiState
+from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +119,33 @@ def run_wiki_pipeline(
 
     logger.info("Wiki agent pipeline starting")
 
+    settings = get_settings()
+    invoke_timeout = max(60, settings.wiki_agent_invoke_timeout_seconds)
+    heartbeat_interval = max(5, settings.wiki_agent_heartbeat_seconds)
+
+    stop_heartbeat = threading.Event()
+
+    def _heartbeat_loop() -> None:
+        # Keep UI alive while long-running graph execution is active.
+        while not stop_heartbeat.wait(timeout=heartbeat_interval):
+            if progress_callback:
+                progress_callback("Orchestrating agents...")
+            report_agent_progress("orchestrator", "running", "Orchestrating agents...")
+
+    heartbeat_thread = threading.Thread(target=_heartbeat_loop, name="wiki-agent-heartbeat", daemon=True)
+    heartbeat_thread.start()
+
     try:
-        final_state = compiled.invoke(initial_state)
+        # Guard against indefinite hangs in graph orchestration.
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(compiled.invoke, initial_state)
+            final_state = future.result(timeout=invoke_timeout)
+    except FuturesTimeoutError as exc:
+        logger.error("Wiki agent pipeline timed out after %ds", invoke_timeout)
+        raise RuntimeError(f"Wiki agent pipeline timed out after {invoke_timeout}s") from exc
     finally:
+        stop_heartbeat.set()
+        heartbeat_thread.join(timeout=2.0)
         _current_repo_id = None
 
     elapsed = time.monotonic() - t0

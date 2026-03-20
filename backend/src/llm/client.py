@@ -1,13 +1,14 @@
 """LM Studio client using raw OpenAI SDK with retry logic and Redis response caching."""
 
 import hashlib
+import inspect
 import json
 import logging
+import time
+from uuid import uuid4
 from typing import Any, Optional
 
-import httpx
 from openai import OpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.config import get_settings
 from src.storage import cache as cache_store
@@ -34,27 +35,38 @@ def _cache_key(messages: list[dict[str, str]], **kwargs: Any) -> str:
     return "llm:" + hashlib.sha256(payload.encode()).hexdigest()[:32]
 
 
-@retry(
-    retry=retry_if_exception_type((httpx.TimeoutException, Exception)),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    reraise=True,
-)
 def _call_llm(
     messages: list[dict[str, str]],
     model: Optional[str] = None,
     temperature: float = 0.2,
     max_tokens: int = 4096,
-) -> str:
-    """Raw LLM call with retry. Raises on final failure."""
+) -> tuple[str, int]:
+    """Raw LLM call with bounded retry. Returns content and retry count."""
     settings = get_settings()
-    response = get_client().chat.completions.create(
-        model=model or settings.llm_model,
-        messages=messages,  # type: ignore[arg-type]
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    return response.choices[0].message.content or ""
+    last_exc: Exception | None = None
+    delay_seconds = 2
+
+    for attempt in range(1, 4):
+        try:
+            response = get_client().chat.completions.create(
+                model=model or settings.llm_model,
+                messages=messages,  # type: ignore[arg-type]
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            content = response.choices[0].message.content or ""
+            if not content.strip():
+                raise ValueError("empty_response")
+            return content, attempt - 1
+        except Exception as exc:  # noqa: BLE001 - upstream client throws mixed exception types
+            last_exc = exc
+            if attempt >= 3:
+                raise
+            logger.warning("LLM call attempt %d/3 failed: %s", attempt, exc)
+            time.sleep(delay_seconds)
+            delay_seconds = min(delay_seconds * 2, 10)
+
+    raise RuntimeError("LLM call failed after retries") from last_exc
 
 
 def chat(
@@ -63,6 +75,7 @@ def chat(
     temperature: float = 0.2,
     max_tokens: int = 4096,
     cache_ttl: Optional[int] = 3600,
+    trace_context: Optional[dict[str, Any]] = None,
 ) -> str:
     """Send a chat completion request with optional Redis caching.
 
@@ -77,20 +90,86 @@ def chat(
         Response content string.
     """
     key = _cache_key(messages, model=model, temperature=temperature, max_tokens=max_tokens)
+    settings = get_settings()
+    caller = inspect.stack()[1]
+    context = {
+        "call_id": (trace_context or {}).get("call_id", uuid4().hex[:12]),
+        "stage": (trace_context or {}).get("stage", "unknown"),
+        "component": (trace_context or {}).get("component", "unknown"),
+        "analysis_id": (trace_context or {}).get("analysis_id"),
+        "caller_file": caller.filename,
+        "caller_line": caller.lineno,
+        "model": model or settings.llm_model,
+    }
 
     if cache_ttl is not None:
         cached = cache_store.get(key)
         if cached is not None:
             logger.debug("LLM cache hit: %s", key[:16])
+            logger.info(
+                "LLM_TELEMETRY %s",
+                json.dumps(
+                    {
+                        **context,
+                        "event": "llm_call",
+                        "status": "success",
+                        "cache_hit": True,
+                        "retry_count": 0,
+                        "duration_ms": 0,
+                        "response_chars": len(str(cached)),
+                    },
+                    sort_keys=True,
+                ),
+            )
             return str(cached)
 
+    started = time.perf_counter()
     try:
-        content = _call_llm(messages, model=model, temperature=temperature, max_tokens=max_tokens)
-    except Exception:
-        logger.error("LM Studio unavailable after retries")
+        content, retry_count = _call_llm(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except Exception as exc:  # noqa: BLE001
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        logger.error("LM Studio unavailable after retries: %s", exc)
+        logger.error(
+            "LLM_TELEMETRY %s",
+            json.dumps(
+                {
+                    **context,
+                    "event": "llm_call",
+                    "status": "failure",
+                    "cache_hit": False,
+                    "duration_ms": duration_ms,
+                    "retry_count": 2,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:300],
+                },
+                sort_keys=True,
+            ),
+        )
         raise
 
-    if cache_ttl is not None:
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    if cache_ttl is not None and content.strip():
         cache_store.set(key, content, ttl=cache_ttl)
+
+    logger.info(
+        "LLM_TELEMETRY %s",
+        json.dumps(
+            {
+                **context,
+                "event": "llm_call",
+                "status": "success",
+                "cache_hit": False,
+                "duration_ms": duration_ms,
+                "retry_count": retry_count,
+                "response_chars": len(content),
+            },
+            sort_keys=True,
+        ),
+    )
 
     return content

@@ -10,6 +10,7 @@ import logging
 import time
 from pathlib import Path
 
+from src.config import get_settings
 from src.llm.client import chat
 from src.wiki.agents.graph import report_agent_progress
 from src.wiki.agents.state import ArchitectureModel, WikiState
@@ -184,6 +185,14 @@ def architect_node(state: WikiState) -> dict:
             )
 
     full_context = "\n\n".join(context_parts)
+    max_context_chars = max(8000, get_settings().architect_context_max_chars)
+    if len(full_context) > max_context_chars:
+        logger.info(
+            "ARCHITECT context capped from %d to %d chars",
+            len(full_context),
+            max_context_chars,
+        )
+        full_context = full_context[:max_context_chars]
 
     prompt = f"""Analyze this codebase and produce a JSON ArchitectureModel.
 

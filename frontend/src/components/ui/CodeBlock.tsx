@@ -15,7 +15,14 @@ interface CodeBlockProps {
 
 export function CodeBlock({ code, children, language }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
-  const content = children ?? code ?? '';
+  const [expanded, setExpanded] = useState(false);
+  const content = String(children ?? code ?? '');
+  const lines = content.split('\n');
+  const MAX_VISIBLE_LINES = 16;
+  const isLong = lines.length > MAX_VISIBLE_LINES;
+  const visibleContent = !isLong || expanded
+    ? content
+    : `${lines.slice(0, MAX_VISIBLE_LINES).join('\n')}\n…`;
 
   const copy = async () => {
     await navigator.clipboard.writeText(String(code ?? children ?? ''));
@@ -64,6 +71,28 @@ export function CodeBlock({ code, children, language }: CodeBlockProps) {
       >
         {copied ? '✓ Copied' : 'Copy'}
       </button>
+      {isLong && (
+        <button
+          onClick={() => setExpanded((prev) => !prev)}
+          style={{
+            position: 'absolute',
+            top: 12,
+            right: 84,
+            background: 'rgba(255,255,255,0.08)',
+            border: '1px solid var(--glass-border)',
+            borderRadius: 8,
+            color: 'var(--text-secondary)',
+            fontFamily: "'Outfit', sans-serif",
+            fontSize: 12,
+            fontWeight: 600,
+            padding: '4px 12px',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+        >
+          {expanded ? 'Collapse' : `Expand (${lines.length} lines)`}
+        </button>
+      )}
 
       <pre
         style={{
@@ -80,7 +109,7 @@ export function CodeBlock({ code, children, language }: CodeBlockProps) {
         }}
       >
         <code style={{ color: '#E5E7EB', background: 'none', border: 'none', padding: 0 }}>
-          {content}
+          {visibleContent}
         </code>
       </pre>
     </div>

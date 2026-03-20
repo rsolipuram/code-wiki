@@ -399,6 +399,45 @@ docker-compose logs postgres
 docker-compose logs neo4j
 ```
 
+### Reset analysis data for rerun
+
+Use this when you want to rerun analysis from a clean state.
+
+```bash
+# 1) Find repository id
+docker exec -i code-wiki-postgres psql -U codewiki -d codewiki -At -c \
+  "SELECT id || '|' || url || '|' || status FROM repositories ORDER BY updated_at DESC;"
+
+# 2) Repo-scoped reset (keeps repository row, clears generated artifacts)
+docker exec -i code-wiki-postgres psql -U codewiki -d codewiki -v ON_ERROR_STOP=1 -c "
+BEGIN;
+DELETE FROM update_events WHERE repository_id='<repo_id>';
+DELETE FROM chat_conversations WHERE repository_id='<repo_id>';
+DELETE FROM code_entities WHERE module_id IN (
+  SELECT m.id FROM modules m JOIN wikis w ON m.wiki_id=w.id WHERE w.repository_id='<repo_id>'
+);
+DELETE FROM modules WHERE wiki_id IN (SELECT id FROM wikis WHERE repository_id='<repo_id>');
+DELETE FROM wiki_pages WHERE wiki_id IN (SELECT id FROM wikis WHERE repository_id='<repo_id>');
+DELETE FROM wikis WHERE repository_id='<repo_id>';
+UPDATE repositories
+SET status='pending', error_message=NULL, progress='{}'::jsonb,
+    last_analyzed_commit=NULL, last_analyzed_at=NULL, updated_at=NOW()
+WHERE id='<repo_id>';
+COMMIT;"
+
+# 3) Optional: remove repository row completely (dashboard becomes empty)
+docker exec -i code-wiki-postgres psql -U codewiki -d codewiki -c \
+  "DELETE FROM repositories WHERE id='<repo_id>';"
+
+# 4) Clear repo cache clone
+rm -rf backend/cache/repos/https___github_com_<owner>_<repo>
+
+# 5) Optional global store cleanup
+docker exec code-wiki-redis redis-cli -p 6379 FLUSHALL
+docker exec code-wiki-neo4j cypher-shell -u neo4j -p codewiki \
+  "MATCH (n) DETACH DELETE n;"
+```
+
 ### Parser errors
 
 ```bash

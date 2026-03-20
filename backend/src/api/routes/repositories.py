@@ -38,6 +38,11 @@ def _parse_owner_name(url: str) -> tuple[str, str]:
     return owner, name
 
 
+def _status_str(value: object) -> str:
+    """Return enum/string status as a plain string."""
+    return str(getattr(value, "value", value))
+
+
 def _repo_to_response(repo: Repository) -> RepositoryResponse:
     return RepositoryResponse(
         id=UUID(repo.id),
@@ -50,7 +55,7 @@ def _repo_to_response(repo: Repository) -> RepositoryResponse:
         last_analyzed_commit=repo.last_analyzed_commit,
         last_analyzed_at=repo.last_analyzed_at,
         branch=repo.branch,
-        status=repo.status.value,
+        status=_status_str(repo.status),
         error_message=repo.error_message,
         progress=repo.progress,
         access_level="public",
@@ -151,14 +156,14 @@ async def get_repository_status(
 
     return {
         "id": str(repo.id),
-        "status": repo.status.value,
+        "status": _status_str(repo.status),
         "error_message": repo.error_message,
         "progress": repo.progress,
         "last_analyzed_commit": repo.last_analyzed_commit,
         "last_analyzed_at": repo.last_analyzed_at.isoformat() if repo.last_analyzed_at else None,
         "latest_event": {
             "id": latest_event.id,
-            "status": latest_event.status.value,
+            "status": _status_str(latest_event.status),
             "commit_hash": latest_event.commit_hash,
             "changed_files_count": len(latest_event.changed_files or []),
             "affected_modules_count": len(latest_event.affected_module_ids or []),
@@ -184,7 +189,7 @@ async def stream_progress(
 
         # If already complete/error, send terminal event and close
         if repo.status in (RepositoryStatus.ready, RepositoryStatus.error):
-            yield f"data: {json.dumps({'type': 'done', 'status': repo.status.value})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'status': _status_str(repo.status)})}\n\n"
             return
 
         # Subscribe to Redis pub/sub for live events
@@ -260,7 +265,7 @@ async def refresh_repository(
         commit_hash=event.commit_hash,
         changed_files=event.changed_files or [],
         affected_module_ids=[],
-        status=event.status.value,
+        status=_status_str(event.status),
         started_at=None,
         completed_at=None,
         error_message=None,

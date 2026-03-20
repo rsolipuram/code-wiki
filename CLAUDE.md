@@ -76,7 +76,21 @@ open http://localhost:3000          # Frontend
 - **Restart RQ worker** after any backend code change — it caches imported modules
 - **Port remapping**: PostgreSQL=5434, Redis=6380 (avoid local conflicts)
 - **No local psql**: Use `docker exec -i code-wiki-postgres psql -U codewiki -d codewiki`
-- **Data store reset**: Clear PostgreSQL, Neo4j (`backend/scripts/reset_neo4j.py`), Redis (`docker exec code-wiki-redis redis-cli -p 6379 FLUSHALL`), repo cache (`backend/cache/repos/`)
+- **Data store reset**:
+  - **Repo-scoped reset (recommended for reruns)**:
+    1. Find repository id:
+       `docker exec -i code-wiki-postgres psql -U codewiki -d codewiki -At -c "SELECT id,url,status FROM repositories ORDER BY updated_at DESC;"`
+    2. Delete repo analysis data and reset repository row to `pending`:
+       `docker exec -i code-wiki-postgres psql -U codewiki -d codewiki -v ON_ERROR_STOP=1 -c "BEGIN; DELETE FROM update_events WHERE repository_id='<repo_id>'; DELETE FROM chat_conversations WHERE repository_id='<repo_id>'; DELETE FROM code_entities WHERE module_id IN (SELECT m.id FROM modules m JOIN wikis w ON m.wiki_id=w.id WHERE w.repository_id='<repo_id>'); DELETE FROM modules WHERE wiki_id IN (SELECT id FROM wikis WHERE repository_id='<repo_id>'); DELETE FROM wiki_pages WHERE wiki_id IN (SELECT id FROM wikis WHERE repository_id='<repo_id>'); DELETE FROM wikis WHERE repository_id='<repo_id>'; UPDATE repositories SET status='pending', error_message=NULL, progress='{}'::jsonb, last_analyzed_commit=NULL, last_analyzed_at=NULL, updated_at=NOW() WHERE id='<repo_id>'; COMMIT;"`
+    3. Optional: remove the repository row entirely (empty dashboard):
+       `docker exec -i code-wiki-postgres psql -U codewiki -d codewiki -c "DELETE FROM repositories WHERE id='<repo_id>';"`
+    4. Clear cache clone for that repo:
+       `rm -rf backend/cache/repos/https___github_com_<owner>_<repo>`
+  - **Global reset**:
+    - Redis: `docker exec code-wiki-redis redis-cli -p 6379 FLUSHALL`
+    - Neo4j via container (works even without local python deps):
+      `docker exec code-wiki-neo4j cypher-shell -u neo4j -p codewiki "MATCH (n) DETACH DELETE n;"`
+    - Repo cache: `rm -rf backend/cache/repos/*`
 - **Neo4j optional**: Backend degrades gracefully without it (graph queries disabled)
 - **MermaidDiagram SVG cleaning**: The component replaces hardcoded pixel dimensions with `width="100%"` for inline layout. Pass the *original* (uncleaned) SVG to `DiagramExplorer` — the modal uses `position: absolute` with no intrinsic layout, so `width="100%"` resolves to nothing and the diagram becomes invisible.
 - **Mermaid dark theme**: LLM-generated diagrams inject inline `fill`/`stroke` with `!important` that override CSS theme variables. Strip these post-render. Also set all 12 `cScale0`–`cScale11` variables explicitly — otherwise mermaid's auto palette assigns light colors to subgraphs/clusters, breaking the dark theme.
