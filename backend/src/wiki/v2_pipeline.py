@@ -972,8 +972,20 @@ def _extract_domain_entities(
         docstring = str(info.get("docstring", "") or "")
 
         # ── Agents: classes by suffix OR by agent file location ──
-        is_agent_by_suffix = entity_type == "class" and any(name_lower.endswith(s) for s in _AGENT_SUFFIXES)
-        is_agent_by_file = entity_type == "class" and any(p in file_lower for p in _AGENT_FILE_PATTERNS)
+        is_agent_by_suffix = (
+            entity_type == "class"
+            and any(name_lower.endswith(s) for s in _AGENT_SUFFIXES)
+            and not file_lower.endswith((".tsx", ".ts"))
+            and not name_lower.endswith("props")
+            and name_lower not in ("agent", "baseagent", "abstractagent")
+        )
+        is_agent_by_file = (
+            entity_type == "class"
+            and any(p in file_lower for p in _AGENT_FILE_PATTERNS)
+            and not file_lower.endswith((".tsx", ".ts"))
+            and not name_lower.endswith("props")
+            and name_lower not in ("agent", "baseagent", "abstractagent")
+        )
         if is_agent_by_suffix or is_agent_by_file:
             # Find handoff targets (other agent-like callees)
             callees = call_graph.get(qname, [])
@@ -1021,6 +1033,59 @@ def _extract_domain_entities(
                 "docstring": docstring[:150],
             })
             seen.add(name)
+
+    # ── SDK Instantiation Pattern: var = Agent[...](name="...", ...) ───────────
+    # Catches repos using OpenAI Agents SDK, LangChain, AutoGen, CrewAI etc.
+    # where agents are instances not subclasses.
+    _SDK_AGENT_RE = re.compile(
+        r'^(?P<var>[a-z_][a-z0-9_]*)\s*=\s*\bAgent(?:\[[^\]]*\])?\s*\(',
+        re.MULTILINE,
+    )
+    _AGENT_NAME_RE = re.compile(r'\bname\s*=\s*["\'](?P<name>[^"\']+)["\']')
+    _AGENT_FILE_RE = re.compile(r'(?:^|/)agents?(?:\.py|/\w+\.py)$', re.IGNORECASE)
+
+    seen_sdk: set[str] = set()
+    if repo_path:
+        agent_files = [
+            info.get("file_path", "")
+            for info in entity_index.values()
+            if _AGENT_FILE_RE.search(str(info.get("file_path", "")))
+        ]
+        for rel_path in set(agent_files):
+            abs_path = Path(repo_path) / rel_path
+            try:
+                source = abs_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for m in _SDK_AGENT_RE.finditer(source):
+                var_name = m.group("var")
+                if var_name in seen_sdk or var_name in seen:
+                    continue
+                # Extract `name="..."` from the same Agent(...) call block
+                call_start = m.end()
+                # Grab up to 500 chars after the `Agent(` to find the name= arg
+                snippet = source[call_start : call_start + 500]
+                name_m = _AGENT_NAME_RE.search(snippet)
+                display_name = name_m.group("name") if name_m else var_name.replace("_", " ").title()
+                # Extract tools list from snippet
+                tool_match = re.search(r'tools\s*=\s*\[([^\]]*)\]', snippet)
+                tool_list = []
+                if tool_match:
+                    tool_list = [t.strip() for t in tool_match.group(1).split(",") if t.strip()][:8]
+                # Extract handoff_description
+                hdesc_m = re.search(r'handoff_description\s*=\s*["\']([^"\']+)["\']', snippet)
+                hdesc = hdesc_m.group(1)[:200] if hdesc_m else ""
+                agents.append({
+                    "name": display_name,
+                    "qualified_name": f"{rel_path}::{var_name}",
+                    "file": rel_path,
+                    "docstring": hdesc,
+                    "handoff_targets": [],
+                    "tools": tool_list,
+                    "var_name": var_name,
+                })
+                seen_sdk.add(var_name)
+                seen.add(display_name)
 
     all_names = [e["name"] for e in agents] + [e["name"] for e in tools] + [e["name"] for e in guardrails]
     return {
