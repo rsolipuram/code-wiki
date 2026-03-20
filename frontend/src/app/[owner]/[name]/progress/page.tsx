@@ -109,6 +109,7 @@ export default function ProgressPage() {
   const [done, setDone] = useState(false);
   const [repoStatus, setRepoStatus] = useState<Repository['status'] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [warningCount, setWarningCount] = useState<number>(0);
   const [agentEvents, setAgentEvents] = useState<AgentProgressEvent[]>([]);
 
   // Smooth elapsed timer — ticks locally between SSE events
@@ -123,12 +124,16 @@ export default function ProgressPage() {
   // SSE-based progress streaming (replaces polling)
   useEffect(() => {
     if (!repoId) return;
+    setWarningCount(0);
 
     // Initial fetch for catch-up state
     api.repositories.get(repoId).then((r) => {
       setRepo(r);
       setRepoStatus(r.status);
       setProgress(r.progress ?? null);
+      const progressSnapshot = r.progress as Record<string, unknown> | null;
+      const warnings = Number(progressSnapshot?.warning_count ?? 0);
+      if (warnings > 0) setWarningCount(warnings);
       if (r.status === 'ready') { setDone(true); return; }
       if (r.status === 'error') {
         setErrorMessage(r.error_message || 'An unexpected error occurred during analysis.');
@@ -145,6 +150,11 @@ export default function ProgressPage() {
 
         if (data.type === 'done') {
           setRepoStatus(data.status);
+          if (data.has_warnings || data.degraded) {
+            setWarningCount(Number(data.warning_count ?? 0));
+          } else {
+            setWarningCount(0);
+          }
           if (data.status === 'ready') setDone(true);
           if (data.status === 'error') setErrorMessage(data.error || 'Analysis failed');
           es.close();
@@ -178,6 +188,9 @@ export default function ProgressPage() {
         setRepo(r);
         setRepoStatus(r.status);
         setProgress(r.progress ?? null);
+        const progressSnapshot = r.progress as Record<string, unknown> | null;
+        const warnings = Number(progressSnapshot?.warning_count ?? 0);
+        if (warnings > 0) setWarningCount(warnings);
         if (r.status === 'ready') setDone(true);
         if (r.status === 'error') setErrorMessage(r.error_message || 'Analysis failed');
       }).catch(() => {});
@@ -539,6 +552,12 @@ export default function ProgressPage() {
             <p style={{ fontSize: 16, color: 'var(--text-secondary)', marginBottom: 16 }}>
               Your documentation has been generated successfully.
             </p>
+            {warningCount > 0 && (
+              <p style={{ fontSize: 13, color: '#fbbf24', marginBottom: 12 }}>
+                Generated with {warningCount} warning{warningCount === 1 ? '' : 's'}.
+                Some pages may use fallback content.
+              </p>
+            )}
             {progress?.elapsed_seconds != null && (
               <p style={{ fontSize: 14, color: 'var(--text-tertiary)', marginBottom: 24 }}>
                 Completed in {formatElapsed(progress.elapsed_seconds)}

@@ -339,6 +339,7 @@ def build_api_reference(entities: list[ParsedEntity], repo_path: str = "") -> di
     ]
 
     def _is_api_like(entity: ParsedEntity) -> bool:
+        rel_path = _rel_path(entity.file_path, repo_path).lower()
         metadata = getattr(entity, "entity_metadata", {}) or {}
         decorators = metadata.get("decorators", [])
         route_decorator_re = re.compile(r"\b(?:router|app)\.(?:get|post|put|delete|patch|options|head)\s*\(")
@@ -347,10 +348,22 @@ def build_api_reference(entities: list[ParsedEntity], repo_path: str = "") -> di
                 dec_str = str(dec).lower()
                 if route_decorator_re.search(dec_str):
                     return True
+
+        # Prefer strong path-based API heuristics over broad keyword fallback.
+        api_path_hint = bool(
+            re.search(r"(?:^|/)(api|routes?|controllers?|handlers?|endpoints?)(?:/|$)", rel_path)
+            or rel_path.endswith(("/server.py", "/server.ts", "/server.js"))
+        )
+        if not api_path_hint:
+            return False
+
         name = (entity.name or "").lower()
         qname = (entity.qualified_name or "").lower()
         signature = (entity.signature or "").lower()
-        api_keywords = ("route", "endpoint", "request", "response", "handler", "api")
+        api_keywords = ("route", "endpoint", "request", "response", "handler", "api", "http")
+        http_verbs = ("get", "post", "put", "delete", "patch", "options", "head")
+        if any(v in name or v in signature for v in http_verbs):
+            return True
         return any(k in name or k in qname or k in signature for k in api_keywords)
 
     api_entities = [e for e in api_entities if _is_api_like(e)]

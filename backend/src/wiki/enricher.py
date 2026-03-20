@@ -363,10 +363,12 @@ def inject_code_blocks(
                     "start_line": start_line,
                 })
             else:
-                # Failed to read — just show reference as text
+                # Failed to read — keep prose readable without leaking marker syntax
                 sub_segments.append({
                     "type": "text",
-                    "content": f"[code: {file_path}:{start_line}-{end_line}]",
+                    "content": (
+                        f"(code snippet unavailable from {file_path}:{start_line}-{end_line})"
+                    ),
                 })
 
             last_end = match.end()

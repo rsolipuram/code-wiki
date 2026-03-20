@@ -925,6 +925,11 @@ _PLACEHOLDER_PATTERNS = (
 _PATH_PATTERN = re.compile(r"\b[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+){1,}\.(?:py|ts|tsx|js|jsx|json|md|yaml|yml)\b")
 _ENDPOINT_PATTERN = re.compile(r"(?<![a-zA-Z0-9_])/[-a-zA-Z0-9_/{}/:]+")
 _URL_PATTERN = re.compile(r"https?://[^\s)\]>]+", re.IGNORECASE)
+_LEAKED_CODE_MARKER_RE = re.compile(r"\[code:\s*.*?\]", re.IGNORECASE | re.DOTALL)
+_ENDPOINT_CONTEXT_HINT_RE = re.compile(
+    r"\b(endpoint|route|routes|api|http|get|post|put|delete|patch)\b",
+    re.IGNORECASE,
+)
 _ROUTER_DEF_RE = re.compile(r"(?P<name>\w+)\s*=\s*APIRouter\((?P<args>.*?)\)", re.DOTALL)
 _ROUTE_DECORATOR_RE = re.compile(
     r"@(?P<router>\w+)\.(?:get|post|put|delete|patch|options|head)\(\s*"
@@ -962,6 +967,23 @@ def _normalize_endpoint_path(path: str) -> str:
     if len(normalized) > 1 and normalized.endswith("/"):
         normalized = normalized[:-1]
     return normalized
+
+
+def _is_likely_endpoint_reference(text: str, start: int, end: int, endpoint: str) -> bool:
+    """Filter path-like tokens that are not API endpoint references."""
+    # Strong endpoint signals
+    if endpoint.startswith("/v") or "{" in endpoint or ":" in endpoint:
+        return True
+    if endpoint.startswith("/api/") or endpoint.startswith("/v1/") or endpoint.startswith("/v2/"):
+        return True
+
+    # Contextual hint nearby in prose
+    window = text[max(0, start - 48):min(len(text), end + 24)]
+    if _ENDPOINT_CONTEXT_HINT_RE.search(window):
+        return True
+
+    # Plain filesystem-like paths (e.g., /src, /src/agent, /core/orchestrator) are not endpoints.
+    return False
 
 
 def _collect_route_paths(repo_path: str) -> set[str]:
@@ -1013,7 +1035,7 @@ def _collect_route_paths(repo_path: str) -> set[str]:
     return {path for path in expanded if path}
 
 
-def _extract_page_text(content: dict[str, Any]) -> str:
+def _extract_page_text(content: dict[str, Any], *, include_diagram_captions: bool = True) -> str:
     chunks: list[str] = []
     if isinstance(content.get("system_narrative"), str):
         chunks.append(content["system_narrative"])
@@ -1032,6 +1054,10 @@ def _extract_page_text(content: dict[str, Any]) -> str:
             for row in table.get("rows", []) or []:
                 if isinstance(row, list):
                     chunks.append(" ".join(str(c) for c in row))
+    if include_diagram_captions:
+        for diagram in content.get("diagrams", []) or []:
+            if isinstance(diagram, dict) and isinstance(diagram.get("caption"), str):
+                chunks.append(diagram["caption"])
     return "\n".join(chunks)
 
 
@@ -1076,6 +1102,17 @@ def _sanitize_rendered_pages(rendered_pages: list[dict[str, Any]]) -> None:
                 deduped_tables.append(table)
             content["tables"] = deduped_tables
 
+        prose_segments = content.get("prose_segments")
+        if isinstance(prose_segments, list):
+            for seg in prose_segments:
+                if not isinstance(seg, dict) or seg.get("type") != "text":
+                    continue
+                raw = str(seg.get("content", ""))
+                cleaned = _LEAKED_CODE_MARKER_RE.sub("(code snippet unavailable)", raw)
+                if "[code:" in cleaned.lower():
+                    cleaned = re.sub(r"\[code:\s*", "(code snippet reference: ", cleaned, flags=re.IGNORECASE)
+                seg["content"] = cleaned
+
 
 def _inject_runtime_holistic_sections(
     rendered_pages: list[dict[str, Any]],
@@ -1096,6 +1133,10 @@ def _inject_runtime_holistic_sections(
         prose_segments = []
         content["prose_segments"] = prose_segments
 
+    # Ensure we don't append after a trailing non-home narrative block that never renders.
+    # Insert near the front so Home view always exposes these sections.
+    insert_at = min(len(prose_segments), 2)
+
     names = sorted(
         {
             str(info.get("name", ""))
@@ -1107,17 +1148,22 @@ def _inject_runtime_holistic_sections(
         # fallback to section names that look agent-related
         names = [s.title for s in plan.sections if "agent" in s.title.lower()]
 
-    if names and not any(
+    if not any(
         isinstance(seg, dict)
         and seg.get("type") == "heading"
         and str(seg.get("text", "")).strip().lower() == "runtime agent roster"
         for seg in prose_segments
     ):
-        prose_segments.append({"type": "heading", "level": 2, "text": "Runtime Agent Roster"})
-        prose_segments.append({
+        roster_text = "Agents detected in repository context:\n- " + "\n- ".join(names[:20]) if names else (
+            "Agents detected in repository context: none matched '*Agent' naming; "
+            "review section pages for inferred runtime actors."
+        )
+        prose_segments.insert(insert_at, {"type": "heading", "level": 2, "text": "Runtime Agent Roster"})
+        prose_segments.insert(insert_at + 1, {
             "type": "text",
-            "content": "Agents detected in repository context:\n- " + "\n- ".join(names[:20]),
+            "content": roster_text,
         })
+        insert_at += 2
 
     if not any(
         isinstance(seg, dict)
@@ -1135,8 +1181,8 @@ def _inject_runtime_holistic_sections(
                 edges.append(f"{caller_name} -> {callee_name}")
             if len(edges) >= 8:
                 break
-        prose_segments.append({"type": "heading", "level": 2, "text": "Runtime Flow"})
-        prose_segments.append({
+        prose_segments.insert(insert_at, {"type": "heading", "level": 2, "text": "Runtime Flow"})
+        prose_segments.insert(insert_at + 1, {
             "type": "text",
             "content": (
                 "Input -> decision -> action -> persistence -> output. "
@@ -1180,8 +1226,10 @@ def _evaluate_rendered_page_quality(
         if not isinstance(content, dict):
             continue
         text = _extract_page_text(content)
+        prose_reference_text = _extract_page_text(content, include_diagram_captions=False)
         rendered_texts[slug] = text
         lower_text = text.lower()
+        prose_reference_lower = prose_reference_text.lower()
 
         if "runtime agent roster" in lower_text:
             has_runtime_roster = True
@@ -1199,7 +1247,7 @@ def _evaluate_rendered_page_quality(
 
         for path_match in _PATH_PATTERN.finditer(text):
             path_candidate = path_match.group(0)
-            if path_candidate not in known_files and not str(Path(repo_path) / path_candidate).exists():
+            if path_candidate not in known_files and not (Path(repo_path) / path_candidate).exists():
                 bad_paths += 1
                 warnings.append({
                     "page": slug,
@@ -1213,6 +1261,13 @@ def _evaluate_rendered_page_quality(
             if endpoint.startswith("//"):
                 continue
             if endpoint.startswith("/openai/") or endpoint.startswith("/dashboard") or endpoint.startswith("/login"):
+                continue
+            if not _is_likely_endpoint_reference(
+                endpoint_scan_text,
+                endpoint_match.start(),
+                endpoint_match.end(),
+                endpoint,
+            ):
                 continue
             if not route_validation_enabled:
                 continue
@@ -1244,8 +1299,16 @@ def _evaluate_rendered_page_quality(
                     if not isinstance(diagram, dict):
                         continue
                     caption = str(diagram.get("caption", "")).strip().lower()
-                    if caption and any(token in lower_text for token in caption.split()[:2]):
+                    if caption and any(token in prose_reference_lower for token in caption.split()[:2]):
                         explained += 1
+                interpretation_count = 0
+                for seg in content.get("prose_segments", []) or []:
+                    if not isinstance(seg, dict) or seg.get("type") != "text":
+                        continue
+                    seg_text = str(seg.get("content", "")).lower()
+                    if "diagram interpretation:" in seg_text or "this diagram" in seg_text:
+                        interpretation_count += 1
+                explained = max(explained, min(len(page_diagrams), interpretation_count))
                 explained_diagrams += explained
                 if explained == 0:
                     warnings.append({
@@ -1286,6 +1349,7 @@ def _evaluate_rendered_page_quality(
                     "detail": f"Similarity {sim:.2f} exceeds threshold {settings.wiki_quality_cross_page_similarity_threshold:.2f}",
                 })
 
+    # Home runtime sections are mandatory signals for holistic understanding.
     if not has_runtime_roster:
         warnings.append({
             "page": "home",

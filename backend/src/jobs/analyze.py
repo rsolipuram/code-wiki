@@ -283,12 +283,26 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             repo.primary_languages = fingerprint.languages[:5]
             repo.size_files = fingerprint.file_count
             repo.size_lines = fingerprint.loc
+            degraded_flag = False
             if generation_warnings:
+                critical_warning_reasons = {
+                    "placeholder_leak",
+                    "runtime_agent_roster_missing",
+                    "runtime_flow_missing",
+                    "unresolved_path_reference",
+                    "unresolved_endpoint_reference",
+                }
+                degraded_warnings = [
+                    w for w in generation_warnings
+                    if isinstance(w, dict) and str(w.get("reason", "")) in critical_warning_reasons
+                ]
+                degraded_flag = bool(degraded_warnings)
                 repo.progress = {
                     **(repo.progress or {}),
-                    "degraded": True,
+                    "degraded": degraded_flag,
                     "warning_count": len(generation_warnings),
                     "warnings": generation_warnings,
+                    "critical_warning_count": len(degraded_warnings),
                     "quality_metrics": quality_metrics,
                 }
                 _progress(9, "Finalizing", f"Complete with {len(generation_warnings)} warning(s)")
@@ -307,7 +321,9 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                 from src.api.progress_events import publish_progress
                 payload = {"type": "done", "status": "ready"}
                 if generation_warnings:
-                    payload["degraded"] = True
+                    payload["degraded"] = degraded_flag
+                    payload["has_warnings"] = True
+                    payload["critical_degraded"] = degraded_flag
                     payload["warning_count"] = len(generation_warnings)
                 publish_progress(repository_id, payload)
             except Exception:
