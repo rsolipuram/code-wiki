@@ -332,11 +332,28 @@ Exclude: generic programming terms (function, class, method, etc.)."""
 
 
 def build_api_reference(entities: list[ParsedEntity], repo_path: str = "") -> dict[str, Any]:
-    """Build alphabetical API reference index (FR-008)."""
+    """Build endpoint/API-oriented reference index (FR-008)."""
     api_entities = [
         e for e in entities
-        if not e.name.startswith("_") and e.entity_type in ("function", "class")
+        if not e.name.startswith("_") and e.entity_type in ("function", "class", "method")
     ]
+
+    def _is_api_like(entity: ParsedEntity) -> bool:
+        metadata = getattr(entity, "entity_metadata", {}) or {}
+        decorators = metadata.get("decorators", [])
+        route_decorator_re = re.compile(r"\b(?:router|app)\.(?:get|post|put|delete|patch|options|head)\s*\(")
+        if isinstance(decorators, list):
+            for dec in decorators:
+                dec_str = str(dec).lower()
+                if route_decorator_re.search(dec_str):
+                    return True
+        name = (entity.name or "").lower()
+        qname = (entity.qualified_name or "").lower()
+        signature = (entity.signature or "").lower()
+        api_keywords = ("route", "endpoint", "request", "response", "handler", "api")
+        return any(k in name or k in qname or k in signature for k in api_keywords)
+
+    api_entities = [e for e in api_entities if _is_api_like(e)]
     api_entities.sort(key=lambda e: e.name.lower())
 
     api_entities = _dedupe_entities_by_location(

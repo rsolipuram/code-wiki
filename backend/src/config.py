@@ -44,11 +44,35 @@ class Settings(BaseSettings):
     # Performance
     max_concurrent_parses: int = Field(default=5, alias="MAX_CONCURRENT_PARSES")
     parse_timeout_seconds: int = Field(default=900, alias="PARSE_TIMEOUT_SECONDS")
+    wiki_agent_invoke_timeout_seconds: int = Field(
+        default=900,
+        alias="WIKI_AGENT_INVOKE_TIMEOUT_SECONDS",
+    )
+    wiki_agent_heartbeat_seconds: int = Field(
+        default=15,
+        alias="WIKI_AGENT_HEARTBEAT_SECONDS",
+    )
+    architect_context_max_chars: int = Field(
+        default=24000,
+        alias="ARCHITECT_CONTEXT_MAX_CHARS",
+    )
 
     # Feature flags
     enable_chat: bool = Field(default=True, alias="ENABLE_CHAT")
     enable_diagrams: bool = Field(default=False, alias="ENABLE_DIAGRAMS")
     wiki_v2_enabled: bool = Field(default=True, alias="WIKI_V2_ENABLED")
+    wiki_auto_entity_linking_enabled: bool = Field(
+        default=False,
+        alias="WIKI_AUTO_ENTITY_LINKING_ENABLED",
+    )
+    wiki_quality_max_avg_sentence_words: int = Field(
+        default=24,
+        alias="WIKI_QUALITY_MAX_AVG_SENTENCE_WORDS",
+    )
+    wiki_quality_cross_page_similarity_threshold: float = Field(
+        default=0.78,
+        alias="WIKI_QUALITY_CROSS_PAGE_SIMILARITY_THRESHOLD",
+    )
 
     model_config = {"env_file": ".env", "populate_by_name": True}
 

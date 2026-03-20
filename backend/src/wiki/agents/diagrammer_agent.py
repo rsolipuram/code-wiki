@@ -351,4 +351,8 @@ def _validate_mermaid(source: str) -> bool:
         if not has_class_or_relation:
             return False
 
+    lowered = source.lower()
+    if "would be here" in lowered or "representative line range" in lowered:
+        return False
+
     return True

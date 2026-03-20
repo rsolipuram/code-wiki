@@ -239,9 +239,11 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                 if isinstance(v2_result, dict):
                     pages_created = int(v2_result.get("pages_created", 0))
                     generation_warnings = v2_result.get("generation_warnings", []) or []
+                    quality_metrics = v2_result.get("quality_metrics", {}) or {}
                 else:
                     pages_created = int(v2_result)
                     generation_warnings = []
+                    quality_metrics = {}
             else:
                 # V1 fallback: persist modules then generate pages
                 _persist_modules_and_entities(session, wiki.id, modules_data, local_path)
@@ -260,6 +262,7 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                     page_progress_callback=_page_progress_callback,
                 )
                 generation_warnings = []
+                quality_metrics = {}
 
             wiki.page_count = pages_created
             wiki.module_count = len(modules_data)
@@ -268,6 +271,8 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             if generation_warnings:
                 stats["warnings_count"] = len(generation_warnings)
                 stats["generation_warnings"] = generation_warnings
+            if quality_metrics:
+                stats["quality_metrics"] = quality_metrics
             logger.info("[%s] Step 8 done (%.1fs): %d pages", repository_id, time.monotonic() - t0, pages_created)
 
             # ── Step 9: Finalizing ──────────────────────────────────────────
@@ -284,6 +289,7 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                     "degraded": True,
                     "warning_count": len(generation_warnings),
                     "warnings": generation_warnings,
+                    "quality_metrics": quality_metrics,
                 }
                 _progress(9, "Finalizing", f"Complete with {len(generation_warnings)} warning(s)")
             else:

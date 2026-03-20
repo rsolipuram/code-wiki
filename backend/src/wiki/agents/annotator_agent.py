@@ -191,6 +191,8 @@ Return the COMPLETE annotated prose."""
             section_title, coverage * 100, len(referenced & entity_qnames), len(entity_qnames),
         )
 
+        # Avoid over-annotation noise that hurts readability/trust.
+        result = _cap_entity_marker_density(result, max_markers=120)
         return result
 
     except Exception as exc:
@@ -208,3 +210,25 @@ def _fix_malformed_markers(text: str) -> str:
     text = re.sub(r"\[\[\s*entity\s*:\s*", "[[entity:", text)
     text = re.sub(r"\[\[\s*section\s*:\s*", "[[section:", text)
     return text
+
+
+def _cap_entity_marker_density(text: str, max_markers: int) -> str:
+    matches = list(re.finditer(r"\[\[entity:[^\]]+\]\]", text))
+    if len(matches) <= max_markers:
+        return text
+    keep_positions = set(m.span() for m in matches[:max_markers])
+    rebuilt: list[str] = []
+    last = 0
+    for m in matches:
+        start, end = m.span()
+        rebuilt.append(text[last:start])
+        marker = text[start:end]
+        if (start, end) in keep_positions:
+            rebuilt.append(marker)
+        else:
+            # Render plain display name instead of dropping content
+            label = marker[len("[[entity:"):-2].rsplit(".", 1)[-1]
+            rebuilt.append(label)
+        last = end
+    rebuilt.append(text[last:])
+    return "".join(rebuilt)

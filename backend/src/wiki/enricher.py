@@ -9,6 +9,7 @@ import logging
 import re
 from pathlib import Path
 
+from src.config import get_settings
 from src.parsers.base import ParsedEntity
 from src.wiki.diagram_generator import generate_diagram
 from src.wiki.table_generator import generate_table
@@ -267,6 +268,30 @@ _LANG_MAP = {
 }
 
 
+def _is_likely_truncated_snippet(lines: list[str]) -> bool:
+    """Heuristic guard against mid-expression/mid-block snippet windows."""
+    if not lines:
+        return True
+
+    first = lines[0].strip()
+    if not first:
+        return True
+
+    # Continuation-like starts usually indicate line-window clipping
+    if first.startswith((")", "]", "}", ",", ".", "->", "=>")):
+        return True
+    if first in {"else:", "elif:", "except:", "finally:"}:
+        return True
+
+    # If first line is syntactically balanced and standalone-like, keep it.
+    if first.count("=") == 1:
+        lhs = first.split("=", 1)[0].strip()
+        if lhs.isidentifier():
+            return False
+
+    return False
+
+
 def inject_code_blocks(
     segments: list[dict],
     repo_path: str,
@@ -307,7 +332,16 @@ def inject_code_blocks(
                 if full_path.is_file():
                     lines = full_path.read_text(errors="replace").splitlines()
                     # Convert 1-indexed to 0-indexed
-                    code = "\n".join(lines[max(0, start_line - 1):end_line])
+                    snippet_lines = lines[max(0, start_line - 1):end_line]
+                    if snippet_lines and not _is_likely_truncated_snippet(snippet_lines):
+                        code = "\n".join(snippet_lines)
+                    else:
+                        logger.warning(
+                            "Rejected likely-truncated snippet %s:%s-%s",
+                            file_path,
+                            start_line,
+                            end_line,
+                        )
             except Exception as exc:
                 logger.warning("Failed to read %s: %s", full_path, exc)
 
@@ -480,6 +514,10 @@ def auto_detect_entity_references(
     Min name length: 3 chars.
     Returns (updated_segments, new_source_links).
     """
+    settings = get_settings()
+    if not settings.wiki_auto_entity_linking_enabled:
+        return segments, []
+
     # Build reverse map: short_name → (qname, info)
     candidates: dict[str, tuple[str, dict]] = {}
     for qname, info in entity_index.items():

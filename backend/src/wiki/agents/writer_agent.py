@@ -235,8 +235,8 @@ def _write_section(
     ]
 
     prompt = f"""Write comprehensive, in-depth technical documentation for the "{section_title}" section.
-Be thorough — cover design decisions, error handling, integration points, and configuration.
-Do NOT artificially limit length. Write as much as needed to fully explain this section.
+Be precise and concise while covering design decisions, error handling, integration points, and configuration.
+Target 400-900 words unless source context is very small.
 
 System overview (for context, don't repeat):
 {system_narrative[:1500]}
@@ -258,6 +258,12 @@ FORMATTING RULES:
 7. Use [[code:filepath:start_line:end_line]] LIBERALLY to embed important source code inline
 8. Cover error handling, edge cases, configuration, and integration points
 9. Mention related sections by name: {', '.join(other_sections[:5])}
+10. Do NOT invent files, endpoints, classes, or functions not present in source context.
+11. Do NOT include placeholders or meta commentary (e.g., "[code:...]", "representative line range", "would be here").
+12. Keep prose precise and concise: avoid filler and repetitive restatements.
+13. Keep average sentence length under ~24 words and use short paragraphs.
+14. Explicitly include one Runtime Flow subsection describing input -> decision -> action -> persistence/output where applicable.
+15. Where agents/personas are discussed, enumerate all roles visible in context and describe handoff logic.
 
 Write comprehensive section content now. Be thorough and detailed."""
 

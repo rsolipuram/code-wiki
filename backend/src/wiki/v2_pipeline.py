@@ -10,12 +10,15 @@ special page generation (Getting Started, Function Index, etc.).
 """
 
 import logging
+import re
+import statistics
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from sqlalchemy.orm import Session
 
+from src.config import get_settings
 from src.dossier.schema import Dossier
 from src.models.code_entity import CodeEntity as CodeEntityModel
 from src.models.code_entity import EntityType, Module
@@ -61,6 +64,7 @@ def generate_wiki_v2(
     """Generate V2 wiki. Returns page count + generation warnings."""
     pages_created = 0
     generation_warnings: list[dict[str, str]] = []
+    quality_metrics: dict[str, Any] = {}
 
     def _report(name: str) -> None:
         nonlocal pages_created
@@ -237,6 +241,20 @@ def generate_wiki_v2(
         repo_name, repo_url, fingerprint, commit_hash,
         overview_diagram=overview_diagram,
     )
+    _inject_runtime_holistic_sections(
+        rendered_pages=rendered_pages,
+        plan=plan,
+        entity_index=entity_index,
+        call_graph=call_graph,
+    )
+    _sanitize_rendered_pages(rendered_pages)
+    quality_warnings, quality_metrics = _evaluate_rendered_page_quality(
+        rendered_pages=rendered_pages,
+        all_files=all_files,
+        repo_path=repo_path,
+        entity_index=entity_index,
+    )
+    generation_warnings.extend(quality_warnings)
     logger.info(
         "V2 Phase 4 (Render): %d pages (%.1fs)",
         len(rendered_pages), time.monotonic() - t0,
@@ -371,6 +389,7 @@ def generate_wiki_v2(
     return {
         "pages_created": pages_created,
         "generation_warnings": generation_warnings,
+        "quality_metrics": quality_metrics,
     }
 
 
@@ -895,3 +914,398 @@ def _first_text(segments: list[dict], max_len: int = 100) -> str:
         if sum(len(t) for t in parts) >= max_len:
             break
     return " ".join(parts).strip()[:max_len]
+
+
+_PLACEHOLDER_PATTERNS = (
+    re.compile(r"\[code:\s*[^\]]+\]", re.IGNORECASE),
+    re.compile(r"representative line range", re.IGNORECASE),
+    re.compile(r"would be here", re.IGNORECASE),
+    re.compile(r"\bplaceholder\b", re.IGNORECASE),
+)
+_PATH_PATTERN = re.compile(r"\b[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+){1,}\.(?:py|ts|tsx|js|jsx|json|md|yaml|yml)\b")
+_ENDPOINT_PATTERN = re.compile(r"(?<![a-zA-Z0-9_])/[-a-zA-Z0-9_/{}/:]+")
+_URL_PATTERN = re.compile(r"https?://[^\s)\]>]+", re.IGNORECASE)
+_ROUTER_DEF_RE = re.compile(r"(?P<name>\w+)\s*=\s*APIRouter\((?P<args>.*?)\)", re.DOTALL)
+_ROUTE_DECORATOR_RE = re.compile(
+    r"@(?P<router>\w+)\.(?:get|post|put|delete|patch|options|head)\(\s*"
+    r"(?P<quote>[\"'])(?P<path>[^\"']+)(?P=quote)"
+)
+_INCLUDE_ROUTER_RE = re.compile(r"include_router\((?P<args>.*?)\)", re.DOTALL)
+_PREFIX_RE = re.compile(r"prefix\s*=\s*(?P<quote>[\"'])(?P<prefix>[^\"']*)(?P=quote)")
+_SKIP_ROUTE_SCAN_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build"}
+
+
+def _normalize_text(text: str) -> str:
+    lowered = re.sub(r"[^a-z0-9\s]", " ", text.lower())
+    return re.sub(r"\s+", " ", lowered).strip()
+
+
+def _tokenize_text(text: str) -> set[str]:
+    normalized = _normalize_text(text)
+    return set(normalized.split()) if normalized else set()
+
+
+def _jaccard_similarity_from_tokens(a_tokens: set[str], b_tokens: set[str]) -> float:
+    if not a_tokens or not b_tokens:
+        return 0.0
+    return len(a_tokens & b_tokens) / len(a_tokens | b_tokens)
+
+
+def _normalize_endpoint_path(path: str) -> str:
+    """Normalize endpoint path for robust comparisons."""
+    normalized = path.strip()
+    if not normalized:
+        return ""
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    normalized = re.sub(r"/{2,}", "/", normalized)
+    if len(normalized) > 1 and normalized.endswith("/"):
+        normalized = normalized[:-1]
+    return normalized
+
+
+def _collect_route_paths(repo_path: str) -> set[str]:
+    """Collect FastAPI-like route paths from the analyzed repository."""
+    root = Path(repo_path).resolve()
+    if not root.exists():
+        return set()
+
+    route_paths: set[str] = set()
+    include_prefixes: set[str] = set()
+
+    for file in root.rglob("*.py"):
+        if any(part in _SKIP_ROUTE_SCAN_DIRS for part in file.parts):
+            continue
+        try:
+            content = file.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+        router_prefixes: dict[str, str] = {}
+        for m in _ROUTER_DEF_RE.finditer(content):
+            prefix_match = _PREFIX_RE.search(m.group("args"))
+            router_prefixes[m.group("name")] = (
+                _normalize_endpoint_path(prefix_match.group("prefix")) if prefix_match else ""
+            )
+
+        for m in _ROUTE_DECORATOR_RE.finditer(content):
+            route = _normalize_endpoint_path(m.group("path"))
+            if not route:
+                continue
+            route_paths.add(route)
+            local_prefix = router_prefixes.get(m.group("router"), "")
+            route_paths.add(_normalize_endpoint_path(f"{local_prefix}{route}"))
+
+        for m in _INCLUDE_ROUTER_RE.finditer(content):
+            prefix_match = _PREFIX_RE.search(m.group("args"))
+            if prefix_match:
+                include_prefix = _normalize_endpoint_path(prefix_match.group("prefix"))
+                if include_prefix:
+                    include_prefixes.add(include_prefix)
+
+    if not route_paths:
+        return set()
+
+    expanded = set(route_paths)
+    for prefix in include_prefixes:
+        for route in route_paths:
+            expanded.add(_normalize_endpoint_path(f"{prefix}{route}"))
+    return {path for path in expanded if path}
+
+
+def _extract_page_text(content: dict[str, Any]) -> str:
+    chunks: list[str] = []
+    if isinstance(content.get("system_narrative"), str):
+        chunks.append(content["system_narrative"])
+    for seg in content.get("prose_segments", []) or []:
+        if not isinstance(seg, dict):
+            continue
+        seg_type = str(seg.get("type", "")).lower()
+        if seg_type == "text":
+            chunks.append(str(seg.get("content", "")))
+        elif seg_type == "heading":
+            chunks.append(str(seg.get("text", "")))
+    for table in content.get("tables", []) or []:
+        if isinstance(table, dict):
+            if isinstance(table.get("caption"), str):
+                chunks.append(table["caption"])
+            for row in table.get("rows", []) or []:
+                if isinstance(row, list):
+                    chunks.append(" ".join(str(c) for c in row))
+    return "\n".join(chunks)
+
+
+def _sanitize_rendered_pages(rendered_pages: list[dict[str, Any]]) -> None:
+    """Drop duplicate section-like items to reduce noisy repetition."""
+    for page in rendered_pages:
+        content = page.get("content")
+        if not isinstance(content, dict):
+            continue
+
+        related = content.get("related_pages")
+        if isinstance(related, list):
+            seen: set[str] = set()
+            deduped = []
+            for item in related:
+                if not isinstance(item, dict):
+                    continue
+                slug = str(item.get("slug", "")).strip()
+                if not slug or slug in seen:
+                    continue
+                seen.add(slug)
+                deduped.append(item)
+            content["related_pages"] = deduped
+
+        tables = content.get("tables")
+        if isinstance(tables, list):
+            seen_sigs: set[str] = set()
+            deduped_tables = []
+            for table in tables:
+                if not isinstance(table, dict):
+                    continue
+                headers = table.get("headers", [])
+                rows = table.get("rows", [])
+                caption = table.get("caption", "")
+                sig = _normalize_text(
+                    f"{caption} {' '.join(str(h) for h in headers)} "
+                    + " ".join(" ".join(str(c) for c in r) for r in rows if isinstance(r, list))
+                )
+                if not sig or sig in seen_sigs:
+                    continue
+                seen_sigs.add(sig)
+                deduped_tables.append(table)
+            content["tables"] = deduped_tables
+
+
+def _inject_runtime_holistic_sections(
+    rendered_pages: list[dict[str, Any]],
+    plan: WikiPlan,
+    entity_index: dict[str, dict],
+    call_graph: dict[str, list[str]],
+) -> None:
+    """Ensure runtime agent roster + flow exist for holistic comprehension."""
+    home_page = next((p for p in rendered_pages if p.get("slug") == "home"), None)
+    if not home_page:
+        return
+    content = home_page.get("content")
+    if not isinstance(content, dict):
+        return
+
+    prose_segments = content.get("prose_segments")
+    if not isinstance(prose_segments, list):
+        prose_segments = []
+        content["prose_segments"] = prose_segments
+
+    names = sorted(
+        {
+            str(info.get("name", ""))
+            for info in entity_index.values()
+            if str(info.get("name", "")).lower().endswith("agent")
+        }
+    )
+    if not names:
+        # fallback to section names that look agent-related
+        names = [s.title for s in plan.sections if "agent" in s.title.lower()]
+
+    if names and not any(
+        isinstance(seg, dict)
+        and seg.get("type") == "heading"
+        and str(seg.get("text", "")).strip().lower() == "runtime agent roster"
+        for seg in prose_segments
+    ):
+        prose_segments.append({"type": "heading", "level": 2, "text": "Runtime Agent Roster"})
+        prose_segments.append({
+            "type": "text",
+            "content": "Agents detected in repository context:\n- " + "\n- ".join(names[:20]),
+        })
+
+    if not any(
+        isinstance(seg, dict)
+        and seg.get("type") == "heading"
+        and str(seg.get("text", "")).strip().lower() == "runtime flow"
+        for seg in prose_segments
+    ):
+        edges = []
+        for caller, callees in call_graph.items():
+            if not callees:
+                continue
+            caller_name = entity_index.get(caller, {}).get("name", caller.rsplit(".", 1)[-1])
+            for callee in callees[:2]:
+                callee_name = entity_index.get(callee, {}).get("name", callee.rsplit(".", 1)[-1])
+                edges.append(f"{caller_name} -> {callee_name}")
+            if len(edges) >= 8:
+                break
+        prose_segments.append({"type": "heading", "level": 2, "text": "Runtime Flow"})
+        prose_segments.append({
+            "type": "text",
+            "content": (
+                "Input -> decision -> action -> persistence -> output. "
+                "Representative flow edges:\n- " + ("\n- ".join(edges) if edges else "No call edges detected")
+            ),
+        })
+
+
+def _evaluate_rendered_page_quality(
+    rendered_pages: list[dict[str, Any]],
+    all_files: list[str],
+    repo_path: str,
+    entity_index: dict[str, dict],
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    settings = get_settings()
+    warnings: list[dict[str, str]] = []
+    metrics: dict[str, Any] = {}
+
+    known_files = set(all_files)
+    routes = _collect_route_paths(repo_path)
+    route_validation_enabled = bool(routes)
+    known_entity_names = {
+        str(info.get("name", "")).lower()
+        for info in entity_index.values()
+        if info.get("name")
+    }
+    rendered_texts: dict[str, str] = {}
+    avg_sentence_words: list[float] = []
+    placeholders = 0
+    bad_paths = 0
+    bad_endpoints = 0
+    auto_link_like = 0
+    total_diagrams = 0
+    explained_diagrams = 0
+    has_runtime_roster = False
+    has_runtime_flow = False
+
+    for page in rendered_pages:
+        slug = str(page.get("slug", "unknown"))
+        content = page.get("content", {})
+        if not isinstance(content, dict):
+            continue
+        text = _extract_page_text(content)
+        rendered_texts[slug] = text
+        lower_text = text.lower()
+
+        if "runtime agent roster" in lower_text:
+            has_runtime_roster = True
+        if "runtime flow" in lower_text or "sequence of interactions" in lower_text:
+            has_runtime_flow = True
+
+        for pattern in _PLACEHOLDER_PATTERNS:
+            for _ in pattern.finditer(text):
+                placeholders += 1
+                warnings.append({
+                    "page": slug,
+                    "reason": "placeholder_leak",
+                    "detail": f"Matched placeholder pattern '{pattern.pattern}'",
+                })
+
+        for path_match in _PATH_PATTERN.finditer(text):
+            path_candidate = path_match.group(0)
+            if path_candidate not in known_files and not str(Path(repo_path) / path_candidate).exists():
+                bad_paths += 1
+                warnings.append({
+                    "page": slug,
+                    "reason": "unresolved_path_reference",
+                    "detail": path_candidate[:250],
+                })
+
+        endpoint_scan_text = _URL_PATTERN.sub(" ", text)
+        for endpoint_match in _ENDPOINT_PATTERN.finditer(endpoint_scan_text):
+            endpoint = _normalize_endpoint_path(endpoint_match.group(0))
+            if endpoint.startswith("//"):
+                continue
+            if endpoint.startswith("/openai/") or endpoint.startswith("/dashboard") or endpoint.startswith("/login"):
+                continue
+            if not route_validation_enabled:
+                continue
+            if endpoint not in routes and not endpoint.startswith("/v1/"):
+                bad_endpoints += 1
+                warnings.append({
+                    "page": slug,
+                    "reason": "unresolved_endpoint_reference",
+                    "detail": endpoint[:250],
+                })
+
+        sentences = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip()]
+        if sentences:
+            avg = statistics.mean(len(s.split()) for s in sentences)
+            avg_sentence_words.append(avg)
+            if avg > settings.wiki_quality_max_avg_sentence_words:
+                warnings.append({
+                    "page": slug,
+                    "reason": "verbosity_high",
+                    "detail": f"Average sentence length {avg:.1f} words exceeds {settings.wiki_quality_max_avg_sentence_words}",
+                })
+
+        page_diagrams = content.get("diagrams", [])
+        if isinstance(page_diagrams, list):
+            total_diagrams += len(page_diagrams)
+            if page_diagrams:
+                explained = 0
+                for diagram in page_diagrams:
+                    if not isinstance(diagram, dict):
+                        continue
+                    caption = str(diagram.get("caption", "")).strip().lower()
+                    if caption and any(token in lower_text for token in caption.split()[:2]):
+                        explained += 1
+                explained_diagrams += explained
+                if explained == 0:
+                    warnings.append({
+                        "page": slug,
+                        "reason": "diagram_not_explained",
+                        "detail": "Page has diagrams but prose does not clearly reference them.",
+                    })
+
+        for link in content.get("source_links", []) or []:
+            if not isinstance(link, dict):
+                continue
+            name = str(link.get("name", "")).strip().lower()
+            if name in {"agent", "key", "state", "data", "model", "event"} and name not in known_entity_names:
+                auto_link_like += 1
+                warnings.append({
+                    "page": slug,
+                    "reason": "ambiguous_source_link",
+                    "detail": f"Ambiguous auto-link name '{name}'",
+                })
+
+    slugs = list(rendered_texts.keys())
+    tokenized_texts: dict[str, set[str]] = {
+        slug: _tokenize_text(rendered_texts.get(slug, "")) for slug in slugs
+    }
+    max_similarity = 0.0
+    for i, left in enumerate(slugs):
+        for right in slugs[i + 1:]:
+            sim = _jaccard_similarity_from_tokens(
+                tokenized_texts.get(left, set()),
+                tokenized_texts.get(right, set()),
+            )
+            if sim > max_similarity:
+                max_similarity = sim
+            if sim >= settings.wiki_quality_cross_page_similarity_threshold:
+                warnings.append({
+                    "page": f"{left}::{right}",
+                    "reason": "cross_page_duplication",
+                    "detail": f"Similarity {sim:.2f} exceeds threshold {settings.wiki_quality_cross_page_similarity_threshold:.2f}",
+                })
+
+    if not has_runtime_roster:
+        warnings.append({
+            "page": "home",
+            "reason": "runtime_agent_roster_missing",
+            "detail": "No 'Runtime Agent Roster' section detected across rendered pages.",
+        })
+    if not has_runtime_flow:
+        warnings.append({
+            "page": "home",
+            "reason": "runtime_flow_missing",
+            "detail": "No explicit runtime flow explanation detected across rendered pages.",
+        })
+
+    metrics["placeholders_detected"] = placeholders
+    metrics["unresolved_paths_detected"] = bad_paths
+    metrics["unresolved_endpoints_detected"] = bad_endpoints
+    metrics["ambiguous_links_detected"] = auto_link_like
+    metrics["max_cross_page_similarity"] = round(max_similarity, 3)
+    metrics["avg_sentence_words"] = round(statistics.mean(avg_sentence_words), 2) if avg_sentence_words else 0.0
+    metrics["diagram_coverage"] = round((explained_diagrams / total_diagrams), 3) if total_diagrams else 0.0
+    metrics["runtime_agent_roster_present"] = has_runtime_roster
+    metrics["runtime_flow_present"] = has_runtime_flow
+    return warnings, metrics

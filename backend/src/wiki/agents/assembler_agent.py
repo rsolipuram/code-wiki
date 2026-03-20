@@ -266,6 +266,12 @@ def _interleave_diagrams(segments: list[dict], diagrams: list[dict]) -> list[dic
                     "mermaid_source": diag.get("mermaid_source", ""),
                     "caption": diag.get("caption", ""),
                 })
+                caption = str(diag.get("caption", "")).strip()
+                if caption:
+                    result.append({
+                        "type": "text",
+                        "content": f"Diagram interpretation: This illustrates {caption.lower()}.",
+                    })
         elif seg_type == "text":
             text_segment_count += 1
             # Fallback: If no headings but many text segments, insert after every 5th text segment
@@ -276,6 +282,12 @@ def _interleave_diagrams(segments: list[dict], diagrams: list[dict]) -> list[dic
                     "mermaid_source": diag.get("mermaid_source", ""),
                     "caption": diag.get("caption", ""),
                 })
+                caption = str(diag.get("caption", "")).strip()
+                if caption:
+                    result.append({
+                        "type": "text",
+                        "content": f"Diagram interpretation: This illustrates {caption.lower()}.",
+                    })
 
     # Append any remaining diagrams at the end
     for diag in diagram_queue:
@@ -284,6 +296,13 @@ def _interleave_diagrams(segments: list[dict], diagrams: list[dict]) -> list[dic
             "mermaid_source": diag.get("mermaid_source", ""),
             "caption": diag.get("caption", ""),
         })
+        # Force explanatory prose hook so diagrams are instructional, not decorative
+        caption = str(diag.get("caption", "")).strip()
+        if caption:
+            result.append({
+                "type": "text",
+                "content": f"Diagram interpretation: This illustrates {caption.lower()}.",
+            })
 
     return result
 
