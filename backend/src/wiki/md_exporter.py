@@ -224,10 +224,20 @@ def _render_page_as_markdown(title: str, content: Any) -> str:
             lines.append(str(content))
         return "\n".join(lines)
 
-    # System narrative / intro text
-    narrative = content.get("narrative") or content.get("intro") or ""
-    if narrative:
-        lines += [narrative, ""]
+    page_type = content.get("page_type", "")
+
+    # Top-level diagrams — HOME ONLY. Section pages have diagrams already interleaved
+    # into prose_segments by the assembler; rendering content["diagrams"] there would
+    # duplicate every diagram.
+    for diag in (content.get("diagrams") or []) if page_type == "home" else []:
+        if not isinstance(diag, dict):
+            continue
+        mermaid_src = diag.get("mermaid_source", "")
+        caption = diag.get("caption", "")
+        if mermaid_src:
+            lines += ["```mermaid", mermaid_src, "```", ""]
+        if caption:
+            lines += [f"*{caption}*", ""]
 
     # Prose segments
     prose_segments = content.get("prose_segments") or []
