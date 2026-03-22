@@ -64,10 +64,10 @@ class CodebaseCompressor:
         scored: list[ScoredEntity],
         fingerprint: RepoFingerprint,
     ) -> CompressedCodebase:
-        """No LLM calls. Build key_entities and graphs from parsed data."""
+        """No LLM calls. Build file_summaries, key_entities and graphs from parsed data."""
         key_entities = self._build_key_entities_list(scored, limit=50)
         call_graph = self._build_call_graph_text(entities)
-        import_graph = self._build_import_graph_text(entities)
+        import_graph = self._build_import_graph_text(entities, repo_path)
 
         # Build repo summary from fingerprint metadata (no LLM)
         langs = ", ".join(fingerprint.languages[:5]) if fingerprint.languages else "unknown"
@@ -79,8 +79,14 @@ class CodebaseCompressor:
             f"System type: {fingerprint.system_type}."
         )
 
+        # Build lightweight file + directory summaries without LLM
+        file_summaries = self._build_file_summaries_no_llm(entities, repo_path)
+        directory_summaries = self._build_directory_summaries_no_llm(file_summaries)
+
         return CompressedCodebase(
             repo_summary=repo_summary,
+            file_summaries=file_summaries,
+            directory_summaries=directory_summaries,
             key_entities=key_entities,
             call_graph_summary=call_graph,
             import_graph_summary=import_graph,
@@ -123,7 +129,7 @@ class CodebaseCompressor:
 
         key_entities = self._build_key_entities_list(scored, limit=50)
         call_graph = self._build_call_graph_text(entities)
-        import_graph = self._build_import_graph_text(entities)
+        import_graph = self._build_import_graph_text(entities, repo_path)
 
         return CompressedCodebase(
             repo_summary=repo_summary,
@@ -192,7 +198,7 @@ class CodebaseCompressor:
 
         key_entities = self._build_key_entities_list(scored, limit=50)
         call_graph = self._build_call_graph_text(entities)
-        import_graph = self._build_import_graph_text(entities)
+        import_graph = self._build_import_graph_text(entities, repo_path)
 
         return CompressedCodebase(
             repo_summary=repo_summary,
@@ -205,6 +211,112 @@ class CodebaseCompressor:
         )
 
     # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _build_file_summaries_no_llm(
+        self,
+        entities: list[ParsedEntity],
+        repo_path: str,
+    ) -> dict[str, "FileSummary"]:
+        """Build FileSummary for each file without LLM calls — aggregate from entities."""
+        from pathlib import Path as _Path
+
+        prefix = repo_path.rstrip("/") + "/" if repo_path else ""
+
+        file_entities: dict[str, list[ParsedEntity]] = {}
+        for e in entities:
+            rel = e.file_path
+            if prefix and rel.startswith(prefix):
+                rel = rel[len(prefix):]
+            file_entities.setdefault(rel, []).append(e)
+
+        lang_map = {".py": "Python", ".ts": "TypeScript", ".js": "JavaScript",
+                    ".tsx": "TypeScript", ".jsx": "JavaScript", ".java": "Java",
+                    ".go": "Go", ".rs": "Rust"}
+
+        summaries: dict[str, FileSummary] = {}
+        for rel_path, ents in file_entities.items():
+            ext = _Path(rel_path).suffix
+            language = lang_map.get(ext, ext.lstrip(".") or "unknown")
+
+            # Line count from file on disk
+            full_path = _Path(repo_path) / rel_path if repo_path else _Path(rel_path)
+            line_count = 0
+            try:
+                if full_path.is_file():
+                    line_count = sum(1 for _ in full_path.open(errors="replace"))
+            except Exception:
+                pass
+
+            # Use first entity's docstring as the summary if available
+            top_ent = next((e for e in ents if e.docstring), None)
+            summary = (top_ent.docstring or "").strip()[:300] if top_ent else ""
+
+            exported_symbols = [
+                e.name for e in ents
+                if e.entity_type in ("class", "function", "variable")
+                and e.name and not e.name.startswith("_")
+            ]
+
+            # Dependencies from module-level imports
+            dependencies: list[str] = []
+            module_ents = [e for e in ents if e.entity_type == "module"]
+            if module_ents:
+                seen_deps: set[str] = set()
+                for imp in (module_ents[0].imports or []):
+                    top = imp.split(".")[0] if imp else ""
+                    if top and not top.startswith("_") and top not in seen_deps:
+                        seen_deps.add(top)
+                        dependencies.append(top)
+
+            key_ents = [e.qualified_name for e in ents
+                        if e.entity_type in ("class", "function", "variable")][:5]
+
+            summaries[rel_path] = FileSummary(
+                file_path=rel_path,
+                language=language,
+                line_count=line_count,
+                summary=summary,
+                entity_count=len(ents),
+                key_entities=key_ents,
+                exported_symbols=exported_symbols[:30],
+                dependencies=dependencies[:20],
+            )
+        return summaries
+
+    def _build_directory_summaries_no_llm(
+        self,
+        file_summaries: dict[str, "FileSummary"],
+    ) -> dict[str, "DirectorySummary"]:
+        """Build DirectorySummary for each directory without LLM calls."""
+        from pathlib import Path as _Path
+
+        dir_files: dict[str, list[str]] = {}
+        for rel_path in file_summaries:
+            parent = str(_Path(rel_path).parent)
+            if parent == ".":
+                parent = ""
+            dir_files.setdefault(parent, []).append(rel_path)
+
+        summaries: dict[str, DirectorySummary] = {}
+        for dir_path, file_paths in dir_files.items():
+            if not dir_path:
+                continue  # skip root-level files
+            all_key_ents: list[str] = []
+            for fp in file_paths:
+                fs = file_summaries.get(fp)
+                if fs:
+                    all_key_ents.extend(fs.key_entities)
+
+            child_files = [_Path(fp).name for fp in file_paths]
+
+            summaries[dir_path] = DirectorySummary(
+                dir_path=dir_path,
+                file_count=len(file_paths),
+                summary="",
+                child_files=child_files,
+                key_entities=list(dict.fromkeys(all_key_ents))[:10],
+            )
+        return summaries
 
     def _summarize_file(
         self,
@@ -414,13 +526,17 @@ class CodebaseCompressor:
         # Cap to avoid huge text
         return "; ".join(edges[:100])
 
-    def _build_import_graph_text(self, entities: list[ParsedEntity]) -> str:
-        """Build text representation of import graph."""
+    def _build_import_graph_text(self, entities: list[ParsedEntity], repo_path: str = "") -> str:
+        """Build text representation of import graph with relative file paths."""
         imports: list[str] = []
         seen: set[str] = set()
+        prefix = repo_path.rstrip("/") + "/" if repo_path else ""
         for e in entities:
+            rel = e.file_path
+            if prefix and rel.startswith(prefix):
+                rel = rel[len(prefix):]
             for imp in e.imports:
-                key = f"{e.file_path} imports {imp}"
+                key = f"{rel} imports {imp}"
                 if key not in seen:
                     seen.add(key)
                     imports.append(key)

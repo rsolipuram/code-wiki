@@ -218,12 +218,23 @@ def _write_compressor_dump(root: Path, compressed: dict) -> None:
     if ig:
         lines += ["## Import Graph Summary", "", ig, ""]
 
-    # Key entities
+    # Key entities — items are either qualified_name strings or dicts from compressor
     key_entities = compressed.get("key_entities") or []
     if key_entities:
         lines += ["## Key Entities (Ranked by Centrality)", ""]
-        for i, qname in enumerate(key_entities[:50], 1):
-            lines.append(f"{i}. `{qname}`")
+        for i, item in enumerate(key_entities[:50], 1):
+            if isinstance(item, dict):
+                qname = item.get("qualified_name", "")
+                etype = item.get("entity_type", "")
+                sig = item.get("signature", "")
+                label = f"`{qname}`"
+                if etype:
+                    label += f" *({etype})*"
+                if sig and sig != qname:
+                    label += f" — `{sig}`"
+            else:
+                label = f"`{item}`"
+            lines.append(f"{i}. {label}")
         lines.append("")
 
     # File summary table
