@@ -99,6 +99,7 @@ open http://localhost:3000          # Frontend
 ## Key Specs & Docs
 
 - Setup guide: `specs/001-code-wiki/quickstart.md`
+- Worker pipeline deep dive: `specs/001-code-wiki/worker-analysis-pipeline.md`
 - Full spec: `specs/001-code-wiki/spec.md`
 - Tech decisions: `specs/001-code-wiki/research.md`
 - API contract: `specs/001-code-wiki/contracts/openapi.yaml`
