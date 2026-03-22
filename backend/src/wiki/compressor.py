@@ -1,10 +1,13 @@
 """Phase 0: Hierarchical code summarization.
 
 Compresses a codebase to fit in LLM context windows.
-Three levels based on repo size:
-  - "none"        (<100 files, <10k LOC): no LLM, use raw code
-  - "file_only"   (100-999 files): per-file summaries → repo summary
-  - "full_pyramid" (1000+ files): file → dir → repo summaries
+Two strategies based on repo size:
+  - "flat"    (<1000 files): LLM per-file + per-dir + repo summary (flat aggregation)
+  - "pyramid" (1000+ files): file → dir → repo (3-level progressive rollup)
+
+Within "flat", parallelism is tuned by file count:
+  < 100 files  → 4 parallel workers
+  100-999 files → 2 parallel workers
 """
 
 import json
@@ -16,7 +19,7 @@ from typing import Optional
 from src.llm.client import chat
 from src.parsers.base import ParsedEntity
 from src.recon.fingerprint import RepoFingerprint
-from src.wiki.interestingness import ScoredEntity
+from src.wiki.interestingness import ScoredEntity, score_entities
 from src.wiki.v2_types import (
     CompressedCodebase,
     DirectorySummary,
@@ -42,60 +45,60 @@ class CodebaseCompressor:
             level, fingerprint.file_count, fingerprint.loc,
         )
 
-        if level == "none":
-            return self._compress_none(repo_path, entities, scored_entities, fingerprint)
-        elif level == "file_only":
-            return self._compress_file_level(repo_path, entities, scored_entities, fingerprint)
+        if level == "flat":
+            return self._compress_flat(repo_path, entities, scored_entities, fingerprint)
         else:
-            return self._compress_full_pyramid(repo_path, entities, scored_entities, fingerprint)
+            return self._compress_pyramid(repo_path, entities, scored_entities, fingerprint)
 
     def _decide_compression_level(self, fingerprint: RepoFingerprint) -> str:
-        if fingerprint.file_count < 100 and fingerprint.loc < 10_000:
-            return "none"
-        elif fingerprint.file_count < 1000:
-            return "file_only"
+        if fingerprint.file_count < 1000:
+            return "flat"
         else:
-            return "full_pyramid"
+            return "pyramid"
 
-    def _compress_none(
+    def _workers_for(self, file_count: int) -> int:
+        """Tune parallelism to repo size — avoid overwhelming local LM Studio."""
+        if file_count < 100:
+            return 4
+        return 2
+
+    def _compress_flat(
         self,
         repo_path: str,
         entities: list[ParsedEntity],
         scored: list[ScoredEntity],
         fingerprint: RepoFingerprint,
     ) -> CompressedCodebase:
-        """Small repo path: LLM per-file summaries + graph/entity data, no dir/repo LLM calls."""
-        key_entities = self._build_key_entities_list(scored, limit=50)
-        call_graph = self._build_call_graph_text(entities)
-        import_graph = self._build_import_graph_text(entities, repo_path)
+        """Flat aggregation: LLM per-file + per-dir + repo summary.
 
-        # Repo summary from fingerprint (no LLM — small repos don't need it)
-        langs = ", ".join(fingerprint.languages[:5]) if fingerprint.languages else "unknown"
-        desc = fingerprint.project_description or fingerprint.project_name or "a code repository"
-        repo_summary = (
-            f"{desc}. "
-            f"Contains {fingerprint.file_count} files with {fingerprint.loc:,} lines of code. "
-            f"Primary languages: {langs}. "
-            f"System type: {fingerprint.system_type}."
-        )
+        Used for repos < 1000 files. Parallelism scales with file count:
+          < 100 files  → 4 workers
+          100-999 files → 2 workers
+        """
+        workers = self._workers_for(fingerprint.file_count)
 
-        # Build structural metadata (no LLM) for exported_symbols, dependencies etc.
-        file_summaries = self._build_file_summaries_no_llm(entities, repo_path)
+        # ── Step 1: extract structural metadata from AST (no LLM) ────────────
+        file_summaries = self._extract_file_metadata(entities, repo_path)
 
-        # Upgrade each file's summary prose via LLM (same as file_only path)
+        # ── Step 2: upgrade each file's summary prose via LLM ────────────────
+        # Rebuild file→entities map using normalised relative paths (same as
+        # _extract_file_metadata) so keys match.
+        import os as _os
+        abs_prefix = _os.path.abspath(repo_path).rstrip("/") + "/"
+        rel_prefix = repo_path.rstrip("/") + "/"
+
+        def _to_rel(fp: str) -> str:
+            if fp.startswith(abs_prefix):
+                return fp[len(abs_prefix):]
+            if fp.startswith(rel_prefix):
+                return fp[len(rel_prefix):]
+            return fp
+
         file_entities: dict[str, list[ParsedEntity]] = {}
         for e in entities:
-            import os as _os
-            abs_prefix = _os.path.abspath(repo_path).rstrip("/") + "/"
-            rel_prefix = repo_path.rstrip("/") + "/"
-            fp = e.file_path
-            if fp.startswith(abs_prefix):
-                fp = fp[len(abs_prefix):]
-            elif fp.startswith(rel_prefix):
-                fp = fp[len(rel_prefix):]
-            file_entities.setdefault(fp, []).append(e)
+            file_entities.setdefault(_to_rel(e.file_path), []).append(e)
 
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(self._summarize_file, rel_path, ents, repo_path): rel_path
                 for rel_path, ents in file_entities.items()
@@ -105,7 +108,6 @@ class CodebaseCompressor:
                 try:
                     result = future.result(timeout=60)
                     if result and rel_path in file_summaries:
-                        # Merge: keep structural fields, overwrite summary prose
                         fs = file_summaries[rel_path]
                         file_summaries[rel_path] = FileSummary(
                             file_path=fs.file_path,
@@ -113,58 +115,37 @@ class CodebaseCompressor:
                             line_count=fs.line_count,
                             summary=result.summary,
                             entity_count=fs.entity_count,
-                            key_entities=fs.key_entities,
+                            key_entities=result.key_entities,  # scored, not positional
                             exported_symbols=fs.exported_symbols,
                             dependencies=fs.dependencies,
                         )
                 except Exception as exc:
-                    logger.warning("LLM summary failed for %s: %s", rel_path, exc)
+                    logger.warning("LLM file summary failed for %s: %s", rel_path, exc)
 
-        directory_summaries = self._build_directory_summaries_no_llm(file_summaries)
+        # ── Step 3: LLM directory summaries ───────────────────────────────────
+        dir_groups: dict[str, list[str]] = {}
+        for fp in file_summaries:
+            parent = str(Path(fp).parent)
+            if parent != ".":
+                dir_groups.setdefault(parent, []).append(fp)
 
-        return CompressedCodebase(
-            repo_summary=repo_summary,
-            file_summaries=file_summaries,
-            directory_summaries=directory_summaries,
-            key_entities=key_entities,
-            call_graph_summary=call_graph,
-            import_graph_summary=import_graph,
-            compression_level="none",
-        )
-
-    def _compress_file_level(
-        self,
-        repo_path: str,
-        entities: list[ParsedEntity],
-        scored: list[ScoredEntity],
-        fingerprint: RepoFingerprint,
-    ) -> CompressedCodebase:
-        """Per-file summaries → repo summary."""
-        # Group entities by file
-        file_entities: dict[str, list[ParsedEntity]] = {}
-        for e in entities:
-            file_entities.setdefault(e.file_path, []).append(e)
-
-        # Summarize files in parallel
-        file_summaries: dict[str, FileSummary] = {}
-        with ThreadPoolExecutor(max_workers=1) as pool:
+        directory_summaries: dict[str, DirectorySummary] = {}
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
-                pool.submit(self._summarize_file, fp, ents, repo_path): fp
-                for fp, ents in file_entities.items()
+                pool.submit(self._summarize_directory, dp, files, file_summaries): dp
+                for dp, files in dir_groups.items()
             }
             for future in as_completed(futures):
-                fp = futures[future]
+                dp = futures[future]
                 try:
-                    summary = future.result(timeout=30)
-                    if summary:
-                        file_summaries[fp] = summary
+                    ds = future.result(timeout=60)
+                    if ds:
+                        directory_summaries[dp] = ds
                 except Exception as exc:
-                    logger.warning("File summary failed for %s: %s", fp, exc)
+                    logger.warning("LLM dir summary failed for %s: %s", dp, exc)
 
-        # Single LLM call: all file summaries → repo summary
-        repo_summary = self._generate_repo_summary(
-            file_summaries, fingerprint, entities,
-        )
+        # ── Step 4: repo summary from all file summaries ──────────────────────
+        repo_summary = self._generate_repo_summary(file_summaries, fingerprint, entities)
 
         key_entities = self._build_key_entities_list(scored, limit=50)
         call_graph = self._build_call_graph_text(entities)
@@ -173,20 +154,25 @@ class CodebaseCompressor:
         return CompressedCodebase(
             repo_summary=repo_summary,
             file_summaries=file_summaries,
+            directory_summaries=directory_summaries,
             key_entities=key_entities,
             call_graph_summary=call_graph,
             import_graph_summary=import_graph,
-            compression_level="file_only",
+            compression_level="flat",
         )
 
-    def _compress_full_pyramid(
+    def _compress_pyramid(
         self,
         repo_path: str,
         entities: list[ParsedEntity],
         scored: list[ScoredEntity],
         fingerprint: RepoFingerprint,
     ) -> CompressedCodebase:
-        """3-level: file → directory → repo summaries."""
+        """3-level progressive rollup: file → directory → repo.
+
+        Used for repos >= 1000 files where flat aggregation would overflow
+        context when generating the repo summary.
+        """
         # Level 0: file summaries
         file_entities: dict[str, list[ParsedEntity]] = {}
         for e in entities:
@@ -246,20 +232,21 @@ class CodebaseCompressor:
             key_entities=key_entities,
             call_graph_summary=call_graph,
             import_graph_summary=import_graph,
-            compression_level="full_pyramid",
+            compression_level="pyramid",
         )
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
-    def _build_file_summaries_no_llm(
+    def _extract_file_metadata(
         self,
         entities: list[ParsedEntity],
         repo_path: str,
     ) -> dict[str, "FileSummary"]:
-        """Build FileSummary for each file without LLM calls — aggregate from entities.
+        """Extract structural metadata per file from AST — no LLM.
 
-        Handles mixed absolute/relative file_path values across parsers by normalising
-        everything against the absolute repo_path before stripping the prefix.
+        Handles mixed absolute/relative file_path values across parsers.
+        Summary prose is left as docstring placeholder; LLM replaces it later.
+        key_entities are scored by interestingness, not positional.
         """
         from pathlib import Path as _Path
         import os as _os
@@ -298,7 +285,7 @@ class CodebaseCompressor:
             except Exception:
                 pass
 
-            # Use first entity's docstring as the summary placeholder (overwritten by LLM in _compress_none)
+            # Docstring placeholder — overwritten by LLM in compress steps
             top_ent = next((e for e in ents if e.docstring), None)
             summary = (top_ent.docstring or "").strip()[:300] if top_ent else ""
 
@@ -319,8 +306,9 @@ class CodebaseCompressor:
                         seen_deps.add(top)
                         dependencies.append(top)
 
-            key_ents = [e.qualified_name for e in ents
-                        if e.entity_type in ("class", "function", "variable")][:5]
+            # Key entities: top 5 by interestingness score (not positional)
+            scored_ents = score_entities(ents)
+            key_ents = [se.entity.qualified_name for se in scored_ents[:5]]
 
             summaries[rel_path] = FileSummary(
                 file_path=rel_path,
@@ -334,11 +322,14 @@ class CodebaseCompressor:
             )
         return summaries
 
-    def _build_directory_summaries_no_llm(
+    def _extract_directory_metadata(
         self,
         file_summaries: dict[str, "FileSummary"],
     ) -> dict[str, "DirectorySummary"]:
-        """Build DirectorySummary for each directory without LLM calls."""
+        """Build DirectorySummary stubs per directory from file metadata — no LLM.
+
+        Used as fallback when LLM directory summarization fails or is skipped.
+        """
         from pathlib import Path as _Path
 
         dir_files: dict[str, list[str]] = {}
@@ -422,7 +413,9 @@ class CodebaseCompressor:
             # Fallback: use first entity's docstring
             summary = file_entities[0].docstring or "" if file_entities else ""
 
-        key_ents = [e.qualified_name for e in file_entities[:5]]
+        # Key entities: top 5 by interestingness score, not positional order
+        scored_ents = score_entities(file_entities)
+        key_ents = [se.entity.qualified_name for se in scored_ents[:5]]
 
         # Extract exported symbols (non-private names for classes, functions, variables)
         exported_symbols = [
