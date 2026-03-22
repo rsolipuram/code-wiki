@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from src.dossier.manager import DossierManager
+from src.dossier.schema import FileOwnership, OwnershipMap
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ AGENT_NAME = "ownership_extractor"
 
 def run(repo_path: str, dossier_manager: DossierManager) -> None:
     root = Path(repo_path)
-    ownership: dict[str, list[str]] = {}
+    ownerships: list[FileOwnership] = []
 
     for codeowners_path in [root / "CODEOWNERS", root / ".github" / "CODEOWNERS", root / "docs" / "CODEOWNERS"]:
         if codeowners_path.exists():
@@ -25,12 +26,25 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
                     parts = line.split()
                     if len(parts) >= 2:
                         pattern, owners = parts[0], parts[1:]
-                        ownership[pattern] = owners
+                        for owner in owners:
+                            ownerships.append(FileOwnership(
+                                file_path=pattern,
+                                owner=owner,
+                                via="CODEOWNERS",
+                            ))
             except OSError:
                 pass
             break  # Only one CODEOWNERS file
 
-    extra = dossier_manager.get_section("extra") or {}
-    dossier_manager.write_section("extra", {**extra, "ownership": ownership})
+    unique_owners = list({fo.owner for fo in ownerships})
+
+    dossier_manager.write_section(
+        "ownership",
+        OwnershipMap(
+            agent_name=AGENT_NAME,
+            owners=ownerships,
+            owner_count=len(unique_owners),
+        ),
+    )
     dossier_manager.mark_agent_complete(AGENT_NAME)
-    logger.info("OwnershipExtractor: %d ownership patterns", len(ownership))
+    logger.info("OwnershipExtractor: %d ownership patterns", len(ownerships))

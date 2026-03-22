@@ -51,9 +51,10 @@ def _build_records(dossier: Dossier) -> list[tuple[str, str, dict]]:
         }
         records.append((finding.id, text, metadata))
 
-    # Technical debt items
-    if dossier.technical_debt:
-        for item in dossier.technical_debt.items:
+    # Technical debt items (now in sections["technical_debt"])
+    technical_debt = dossier.sections.get("technical_debt")
+    if technical_debt is not None and hasattr(technical_debt, "items"):
+        for item in technical_debt.items:
             text = f"Type: {item.type}\nFile: {item.file_path}:{item.line_number}\nDescription: {item.description}"
             metadata = {
                 "section": "technical_debt",

@@ -8,6 +8,7 @@ import time
 
 from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
+from src.dossier.schema import AuthFlow, AuthFlowAnalysis
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
@@ -19,16 +20,10 @@ TIME_LIMIT = 180
 
 
 def run(repo_path: str, dossier_manager: DossierManager) -> None:
-    # Only run if triggered by a relevant tag
-    if not any(dossier_manager.has_tag(tag) for tag in TRIGGER_TAGS):
-        logger.info("AuthFlowTracer: no trigger tags found, skipping")
-        dossier_manager.mark_agent_complete(AGENT_NAME)
-        return
-
     start_time = time.time()
     steps = 0
     visited: set[str] = set()
-    auth_flows: list[dict] = []
+    raw_flows: list[dict] = []
 
     auth_files = search_code(repo_path, r"login|authenticate|jwt\.sign|jwt\.verify|passport",
                              extensions=[".py", ".ts", ".js"])
@@ -58,14 +53,32 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
             logger.warning("AuthFlowTracer LLM call failed: %s", exc)
             continue
         messages.append({"role": "assistant", "content": response})
-        auth_flows.extend(_extract_auth_flows(response))
+        raw_flows.extend(_extract_auth_flows(response))
         if "STOP" in response:
             break
 
-    extra = dossier_manager.get_section("extra") or {}
-    dossier_manager.write_section("extra", {**extra, "auth_flows": auth_flows})
+    # Infer auth patterns from found files and LLM analysis
+    detected_patterns: list[AuthFlow] = []
+    if raw_flows:
+        # Derive pattern from step names found in the flow
+        steps_seen = {f.get("step", "") for f in raw_flows}
+        if any(s in steps_seen for s in ("issue", "validate", "refresh", "revoke")):
+            detected_patterns.append(AuthFlow(pattern="jwt"))
+        elif steps_seen:
+            detected_patterns.append(AuthFlow(pattern="session"))
+    elif candidates:
+        # Files exist but LLM found no structured flows — still record an unknown pattern
+        detected_patterns.append(AuthFlow(pattern="unknown"))
+
+    dossier_manager.write_section(
+        "auth_flow",
+        AuthFlowAnalysis(
+            agent_name=AGENT_NAME,
+            flows=detected_patterns,
+        ),
+    )
     dossier_manager.mark_agent_complete(AGENT_NAME)
-    logger.info("AuthFlowTracer: %d flow steps found", len(auth_flows))
+    logger.info("AuthFlowTracer: %d flow steps found", len(raw_flows))
 
 
 def _extract_auth_flows(response: str) -> list[dict]:

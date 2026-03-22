@@ -14,6 +14,14 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+# ─── AgentOutput base ─────────────────────────────────────────────────────────
+
+class AgentOutput(BaseModel):
+    """Base class for all single-value Dossier section outputs."""
+    agent_name: str = ""
+    confidence: float = 1.0
+
+
 def _new_id() -> str:
     return str(uuid.uuid4())
 
@@ -58,7 +66,7 @@ class DependencyEntry(BaseModel):
     is_direct: bool = True
 
 
-class DependencyAnalysis(BaseModel):
+class DependencyAnalysis(AgentOutput):
     packages: list[DependencyEntry] = Field(default_factory=list)
     total_vulnerabilities: int = 0
     high_risk_packages: list[str] = Field(default_factory=list)
@@ -74,7 +82,7 @@ class ContainerService(BaseModel):
     environment_vars: list[str] = Field(default_factory=list)
 
 
-class ContainerTopology(BaseModel):
+class ContainerTopology(AgentOutput):
     services: list[ContainerService] = Field(default_factory=list)
     base_images: list[str] = Field(default_factory=list)
     is_multi_stage: bool = False
@@ -94,7 +102,7 @@ class CIJob(BaseModel):
     steps: list[CIStep] = Field(default_factory=list)
 
 
-class CIPipeline(BaseModel):
+class CIPipeline(AgentOutput):
     provider: str  # github_actions | jenkins | circleci | etc.
     triggers: list[str] = Field(default_factory=list)  # push, pull_request, schedule
     jobs: list[CIJob] = Field(default_factory=list)
@@ -105,9 +113,8 @@ class CIPipeline(BaseModel):
 
 # ─── Architecture ─────────────────────────────────────────────────────────────
 
-class ArchitectureStyle(BaseModel):
+class ArchitectureStyle(AgentOutput):
     primary_style: str  # monolith | microservices | event-driven | serverless | hybrid
-    confidence: float = 0.0  # 0.0–1.0
     patterns_detected: list[str] = Field(default_factory=list)  # MVC, Repository, CQRS, etc.
     layers: list[str] = Field(default_factory=list)  # api, service, repository, domain, etc.
     rationale: str = ""
@@ -122,7 +129,7 @@ class BusinessRule(BaseModel):
     source: str = ""  # e.g. "docstring", "comment", "inferred"
 
 
-class DomainModel(BaseModel):
+class DomainModel(AgentOutput):
     entities: list[str] = Field(default_factory=list)  # detected business entities
     business_rules: list[BusinessRule] = Field(default_factory=list)
     ubiquitous_language: list[str] = Field(default_factory=list)  # domain terms
@@ -139,7 +146,7 @@ class TechnicalDebtItem(BaseModel):
     severity: Severity = Severity.LOW
 
 
-class TechnicalDebt(BaseModel):
+class TechnicalDebt(AgentOutput):
     items: list[TechnicalDebtItem] = Field(default_factory=list)
     todo_count: int = 0
     fixme_count: int = 0
@@ -161,7 +168,7 @@ class ConflictAnalysis(BaseModel):
 
 # ─── Observability ───────────────────────────────────────────────────────────
 
-class ObservabilityProfile(BaseModel):
+class ObservabilityProfile(AgentOutput):
     has_logging: bool = False
     has_metrics: bool = False
     has_tracing: bool = False
@@ -173,7 +180,7 @@ class ObservabilityProfile(BaseModel):
 
 # ─── Error Handling ───────────────────────────────────────────────────────────
 
-class ErrorResilienceProfile(BaseModel):
+class ErrorResilienceProfile(AgentOutput):
     retry_patterns_detected: bool = False
     circuit_breaker_detected: bool = False
     global_error_handlers: list[str] = Field(default_factory=list)
@@ -189,9 +196,103 @@ class FeatureFlag(BaseModel):
     usage_count: int = 0
 
 
-class FeatureFlagInventory(BaseModel):
+class FeatureFlagInventory(AgentOutput):
     flags: list[FeatureFlag] = Field(default_factory=list)
     provider: Optional[str] = None  # LaunchDarkly, custom, etc.
+
+
+# ─── Auth Flow ───────────────────────────────────────────────────────────────
+
+class AuthFlow(BaseModel):
+    pattern: str  # e.g. "jwt", "session", "oauth", "api_key"
+    token_storage: str = ""  # e.g. "header", "cookie", "localStorage"
+    refresh_strategy: str = ""
+    vulnerabilities: list[str] = Field(default_factory=list)
+
+
+class AuthFlowAnalysis(AgentOutput):
+    flows: list[AuthFlow] = Field(default_factory=list)
+    has_mfa: bool = False
+    auth_libraries: list[str] = Field(default_factory=list)
+
+
+# ─── Data Flow ───────────────────────────────────────────────────────────────
+
+class DataFlowEdge(BaseModel):
+    source: str
+    destination: str
+    data_type: str = ""
+    crosses_trust_boundary: bool = False
+
+
+class DataFlowAnalysis(AgentOutput):
+    flows: list[DataFlowEdge] = Field(default_factory=list)
+    sensitive_fields: list[str] = Field(default_factory=list)
+    external_calls: list[str] = Field(default_factory=list)
+
+
+# ─── Performance ─────────────────────────────────────────────────────────────
+
+class PerformanceHotspot(BaseModel):
+    file_path: str
+    line_number: int
+    issue_type: str  # "n+1", "blocking_io", "unbounded_loop", "large_payload"
+    description: str
+
+
+class PerformanceProfile(AgentOutput):
+    hotspots: list[PerformanceHotspot] = Field(default_factory=list)
+    n_plus_one_detected: bool = False
+    blocking_io_files: list[str] = Field(default_factory=list)
+
+
+# ─── IaC ─────────────────────────────────────────────────────────────────────
+
+class IaCResource(BaseModel):
+    resource_type: str
+    name: str
+    provider: str = ""
+
+
+class IaCAnalysis(AgentOutput):
+    provider: str = ""  # terraform, pulumi, cdk, cloudformation
+    resources: list[IaCResource] = Field(default_factory=list)
+    environments: list[str] = Field(default_factory=list)
+    has_state_backend: bool = False
+
+
+# ─── Ownership ───────────────────────────────────────────────────────────────
+
+class FileOwnership(BaseModel):
+    file_path: str
+    owner: str
+    via: str = ""  # CODEOWNERS, git blame, package.json
+
+
+class OwnershipMap(AgentOutput):
+    owners: list[FileOwnership] = Field(default_factory=list)
+    unowned_files: list[str] = Field(default_factory=list)
+    owner_count: int = 0
+
+
+# ─── Section Registry ─────────────────────────────────────────────────────────
+
+_SECTION_REGISTRY: dict[str, type["AgentOutput"]] = {
+    "architecture": ArchitectureStyle,
+    "dependencies": DependencyAnalysis,
+    "container_topology": ContainerTopology,
+    "ci_pipeline": CIPipeline,
+    "domain_model": DomainModel,
+    "technical_debt": TechnicalDebt,
+    "observability": ObservabilityProfile,
+    "error_resilience": ErrorResilienceProfile,
+    "feature_flags": FeatureFlagInventory,
+    "auth_flow": AuthFlowAnalysis,
+    "data_flow": DataFlowAnalysis,
+    "performance": PerformanceProfile,
+    "iac": IaCAnalysis,
+    "ownership": OwnershipMap,
+}
 
 
 # ─── Root Dossier ─────────────────────────────────────────────────────────────
@@ -208,17 +309,11 @@ class Dossier(BaseModel):
     repository_url: Optional[str] = None
     commit_hash: Optional[str] = None
 
-    # Layer 1 findings (one section per facet)
+    # Layer 1 findings — dynamic section registry (one entry per facet agent)
+    sections: dict[str, Any] = Field(default_factory=dict)
+
+    # Security findings (append-only list — not a single AgentOutput)
     security: list[SecurityFinding] = Field(default_factory=list)
-    dependencies: Optional[DependencyAnalysis] = None
-    container_topology: Optional[ContainerTopology] = None
-    ci_pipeline: Optional[CIPipeline] = None
-    architecture: Optional[ArchitectureStyle] = None
-    domain_model: Optional[DomainModel] = None
-    technical_debt: Optional[TechnicalDebt] = None
-    observability: Optional[ObservabilityProfile] = None
-    error_resilience: Optional[ErrorResilienceProfile] = None
-    feature_flags: Optional[FeatureFlagInventory] = None
 
     # Cross-facet conflicts (produced by ConflictSynthesizer)
     conflicts: list[ConflictAnalysis] = Field(default_factory=list)
@@ -230,3 +325,12 @@ class Dossier(BaseModel):
     agents_completed: list[str] = Field(default_factory=list)
     agents_failed: list[str] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)  # overflow / future fields
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a plain dict with sections serialized for downstream consumers."""
+        d = self.model_dump(exclude={"sections"})
+        d["sections"] = {
+            key: (val.model_dump() if isinstance(val, AgentOutput) else val)
+            for key, val in self.sections.items()
+        }
+        return d

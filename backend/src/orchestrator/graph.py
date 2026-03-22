@@ -37,11 +37,9 @@ from src.agents.single_pass import (
     performance_hotspot_scanner,
     technical_debt_assessor,
 )
-from src.agents.triage import triage_agent
 from src.dossier.manager import DossierManager
 from src.dossier.rag_index import index_dossier
 from src.dossier.schema import Dossier
-from src.orchestrator.tag_triggers import get_all_triggered_agents
 from src.recon import repo_recon
 from src.recon.fingerprint import RepoFingerprint
 
@@ -121,46 +119,21 @@ class AnalysisPipeline:
             fingerprint = repo_recon.run(self.repo_path)
         self.dossier_manager.dossier.extra["fingerprint"] = fingerprint.to_dict()
 
-        # ── Triage ─────────────────────────────────────────────────────────────
-        logger.info("[Triage] Planning agent execution")
-        plan = triage_agent.run(fingerprint)
-        logger.info(
-            "[Triage] Plan: heuristic=%s, react=%s, single_pass=%s",
-            plan.get("heuristic_agents", "all"),
-            plan.get("react_agents", "all"),
-            plan.get("single_pass_agents", "all"),
-        )
-
-        # ── Layer 1a: Heuristic agents (parallel) ────────────────────────────
-        heuristic_to_run = {
-            k: v for k, v in _HEURISTIC_AGENTS.items()
-            if k in plan.get("heuristic_agents", list(_HEURISTIC_AGENTS))
-        }
-        react_to_run = plan.get("react_agents", list(_REACT_AGENTS))
-        single_to_run = {
-            k: v for k, v in _SINGLE_PASS_AGENTS.items()
-            if k in plan.get("single_pass_agents", list(_SINGLE_PASS_AGENTS))
-        }
+        # ── Layer 1a: Heuristic agents (parallel) ────────────────────────
+        heuristic_to_run = _HEURISTIC_AGENTS
+        react_to_run = list(_REACT_AGENTS.keys())
+        single_to_run = _SINGLE_PASS_AGENTS
 
         # Compute total agent count for progress reporting
-        self._agents_total = len(heuristic_to_run) + len(react_to_run) + len(single_to_run)
+        self._agents_total = len(_HEURISTIC_AGENTS) + len(_REACT_AGENTS) + len(_SINGLE_PASS_AGENTS)
         self._agents_completed = 0
 
         logger.info("[Layer 1a] Running %d heuristic agents in parallel", len(heuristic_to_run))
         self._run_parallel(heuristic_to_run)
 
-        # ── Layer 1b: ReAct agents (sequential, tag-aware) ───────────────────
+        # ── Layer 1b: ReAct agents (sequential) ─────────────────────────────
         logger.info("[Layer 1b] Running %d ReAct agents", len(react_to_run))
         self._run_react_agents(react_to_run, fingerprint)
-
-        # ── Tag-triggered additional agents ───────────────────────────────────
-        triggered = get_all_triggered_agents(self.dossier_manager.dossier.emitted_tags)
-        extra_react = [a for a in triggered if a in _REACT_AGENTS and
-                       a not in self.dossier_manager.dossier.agents_completed]
-        if extra_react:
-            self._agents_total += len(extra_react)
-            logger.info("[Tag triggers] Running %d additional agents: %s", len(extra_react), extra_react)
-            self._run_react_agents(extra_react, fingerprint)
 
         # ── Layer 1c: Single-pass agents (parallel) ───────────────────────────
         logger.info("[Layer 1c] Running %d single-pass agents", len(single_to_run))

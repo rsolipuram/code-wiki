@@ -5,6 +5,7 @@ import logging
 
 from src.agents.primitives.tools import search_code
 from src.dossier.manager import DossierManager
+from src.dossier.schema import PerformanceHotspot, PerformanceProfile
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
@@ -35,21 +36,45 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
 Return JSON only:
 {{
   "hotspots": [
-    {{"type": "<n+1|blocking-io|memory-leak|missing-cache>", "file": "<path>", "description": "<desc>"}},
+    {{"type": "<n+1|blocking-io|memory-leak|missing-cache>", "file": "<path>", "line": <int>, "description": "<desc>"}},
     ...
   ],
   "severity_assessment": "<high|medium|low>"
 }}"""
 
+    hotspots: list[PerformanceHotspot] = []
+    n_plus_one_detected = False
+    blocking_io_files: list[str] = []
+
     try:
         response = chat(messages=[{"role": "user", "content": prompt}])
         data = json.loads(response)
-        hotspots = data.get("hotspots", [])
+        for h in data.get("hotspots", []):
+            issue_type = h.get("type", "unknown")
+            file_path = h.get("file", "")
+            line_number = int(h.get("line", 0))
+            description = h.get("description", "")
+            hotspots.append(PerformanceHotspot(
+                file_path=file_path,
+                line_number=line_number,
+                issue_type=issue_type,
+                description=description,
+            ))
+            if "n+1" in issue_type.lower() or "n_plus_one" in issue_type.lower():
+                n_plus_one_detected = True
+            if "blocking" in issue_type.lower() and file_path:
+                blocking_io_files.append(file_path)
     except Exception as exc:
         logger.warning("PerformanceHotspotScanner failed: %s", exc)
-        hotspots = []
 
-    extra = dossier_manager.get_section("extra") or {}
-    dossier_manager.write_section("extra", {**extra, "performance_hotspots": hotspots})
+    dossier_manager.write_section(
+        "performance",
+        PerformanceProfile(
+            agent_name=AGENT_NAME,
+            hotspots=hotspots,
+            n_plus_one_detected=n_plus_one_detected,
+            blocking_io_files=list(set(blocking_io_files)),
+        ),
+    )
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("PerformanceHotspotScanner: %d hotspots", len(hotspots))

@@ -1,7 +1,7 @@
 """DataFlowTracer — ReAct agent that traces data transformations from entry points.
 
 Applies the same termination safeguards as SecuritySentinel.
-Writes to Dossier extra['data_flows'].
+Writes to Dossier sections['data_flow'].
 """
 
 import logging
@@ -9,6 +9,7 @@ import time
 
 from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
+from src.dossier.schema import DataFlowAnalysis, DataFlowEdge
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
     start_time = time.time()
     steps = 0
     visited: set[str] = set()
-    data_flows: list[dict] = []
+    raw_flows: list[dict] = []
 
     entry_files = search_code(
         repo_path, r"@app\.route|@router\.|def handle|async def post|async def get",
@@ -41,8 +42,10 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
     candidate_files = list({r["file"] for r in entry_files})
 
     if not candidate_files:
-        extra = dossier_manager.get_section("extra") or {}
-        dossier_manager.write_section("extra", {**extra, "data_flows": []})
+        dossier_manager.write_section(
+            "data_flow",
+            DataFlowAnalysis(agent_name=AGENT_NAME),
+        )
         dossier_manager.mark_agent_complete(AGENT_NAME)
         return
 
@@ -71,15 +74,29 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
             continue
 
         messages.append({"role": "assistant", "content": response})
-        data_flows.extend(_extract_flows(response))
+        raw_flows.extend(_extract_flows(response))
 
         if "STOP" in response:
             break
 
-    extra = dossier_manager.get_section("extra") or {}
-    dossier_manager.write_section("extra", {**extra, "data_flows": data_flows})
+    # Map raw dicts to DataFlowEdge objects
+    edges: list[DataFlowEdge] = []
+    for f in raw_flows:
+        edges.append(DataFlowEdge(
+            source=f.get("entry", ""),
+            destination=f.get("destination", ""),
+            data_type=f.get("transform", ""),
+        ))
+
+    dossier_manager.write_section(
+        "data_flow",
+        DataFlowAnalysis(
+            agent_name=AGENT_NAME,
+            flows=edges,
+        ),
+    )
     dossier_manager.mark_agent_complete(AGENT_NAME)
-    logger.info("DataFlowTracer: %d flows found in %d steps", len(data_flows), steps)
+    logger.info("DataFlowTracer: %d flows found in %d steps", len(raw_flows), steps)
 
 
 def _extract_flows(response: str) -> list[dict]:

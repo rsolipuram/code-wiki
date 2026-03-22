@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from src.dossier.manager import DossierManager
+from src.dossier.schema import IaCAnalysis, IaCResource
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +33,26 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
         if matched:
             findings[tool] = matched
 
-    # Store in Dossier extra field (no dedicated schema section for IaC yet)
+    # Determine primary provider (first detected tool wins)
+    primary_provider = next(iter(findings), "")
+
+    # Build IaCResource list from discovered files
+    resources: list[IaCResource] = []
+    for tool, files in findings.items():
+        for file_path in files:
+            resources.append(IaCResource(
+                resource_type="file",
+                name=file_path,
+                provider=tool,
+            ))
+
     dossier_manager.write_section(
-        "extra",
-        {**dossier_manager.get_section("extra"), "iac": findings},
+        "iac",
+        IaCAnalysis(
+            agent_name=AGENT_NAME,
+            provider=primary_provider,
+            resources=resources,
+        ),
     )
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("IaCAnalyzer: detected tools %s", list(findings.keys()))

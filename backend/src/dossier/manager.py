@@ -9,6 +9,7 @@ from src.dossier.schema import (
     SecurityFinding,
     Severity,
     TechnicalDebtItem,
+    _SECTION_REGISTRY,
 )
 
 
@@ -42,11 +43,32 @@ class DossierManager:
             self._dossier.conflicts.append(conflict)
 
     def write_section(self, section: str, value: Any) -> None:
-        """Set a top-level Dossier section by name (e.g. 'architecture')."""
+        """Set a Dossier section by name (e.g. 'architecture').
+
+        For registry-known sections, validates the value type.
+        For 'extra', merges into the extra dict.
+        """
         with self._lock:
-            if not hasattr(self._dossier, section):
-                raise ValueError(f"Unknown Dossier section: {section!r}")
-            object.__setattr__(self._dossier, section, value)
+            if section == "extra":
+                if isinstance(value, dict):
+                    self._dossier.extra.update(value)
+                else:
+                    self._dossier.extra = value
+                return
+            if section in _SECTION_REGISTRY:
+                expected = _SECTION_REGISTRY[section]
+                if not isinstance(value, expected):
+                    raise TypeError(
+                        f"write_section({section!r}): expected {expected.__name__}, "
+                        f"got {type(value).__name__}"
+                    )
+            else:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "write_section: unregistered section key %r — consider adding to _SECTION_REGISTRY",
+                    section,
+                )
+            self._dossier.sections[section] = value
 
     def mark_agent_complete(self, agent_name: str) -> None:
         with self._lock:
@@ -76,7 +98,10 @@ class DossierManager:
         Returns:
             Filtered list of findings from the requested section.
         """
-        items = getattr(self._dossier, section, None)
+        if section == "security":
+            items = self._dossier.security
+        else:
+            items = self.get_section(section)
         if items is None:
             return []
         if not isinstance(items, list):
@@ -100,7 +125,9 @@ class DossierManager:
 
     def get_section(self, section: str) -> Any:
         """Return the full value of a Dossier section."""
-        return getattr(self._dossier, section, None)
+        if section == "extra":
+            return self._dossier.extra
+        return self._dossier.sections.get(section)
 
     def has_tag(self, tag: str) -> bool:
         return tag in self._dossier.emitted_tags
