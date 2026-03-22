@@ -64,12 +64,12 @@ class CodebaseCompressor:
         scored: list[ScoredEntity],
         fingerprint: RepoFingerprint,
     ) -> CompressedCodebase:
-        """No LLM calls. Build file_summaries, key_entities and graphs from parsed data."""
+        """Small repo path: LLM per-file summaries + graph/entity data, no dir/repo LLM calls."""
         key_entities = self._build_key_entities_list(scored, limit=50)
         call_graph = self._build_call_graph_text(entities)
         import_graph = self._build_import_graph_text(entities, repo_path)
 
-        # Build repo summary from fingerprint metadata (no LLM)
+        # Repo summary from fingerprint (no LLM — small repos don't need it)
         langs = ", ".join(fingerprint.languages[:5]) if fingerprint.languages else "unknown"
         desc = fingerprint.project_description or fingerprint.project_name or "a code repository"
         repo_summary = (
@@ -79,8 +79,47 @@ class CodebaseCompressor:
             f"System type: {fingerprint.system_type}."
         )
 
-        # Build lightweight file + directory summaries without LLM
+        # Build structural metadata (no LLM) for exported_symbols, dependencies etc.
         file_summaries = self._build_file_summaries_no_llm(entities, repo_path)
+
+        # Upgrade each file's summary prose via LLM (same as file_only path)
+        file_entities: dict[str, list[ParsedEntity]] = {}
+        for e in entities:
+            import os as _os
+            abs_prefix = _os.path.abspath(repo_path).rstrip("/") + "/"
+            rel_prefix = repo_path.rstrip("/") + "/"
+            fp = e.file_path
+            if fp.startswith(abs_prefix):
+                fp = fp[len(abs_prefix):]
+            elif fp.startswith(rel_prefix):
+                fp = fp[len(rel_prefix):]
+            file_entities.setdefault(fp, []).append(e)
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {
+                pool.submit(self._summarize_file, rel_path, ents, repo_path): rel_path
+                for rel_path, ents in file_entities.items()
+            }
+            for future in as_completed(futures):
+                rel_path = futures[future]
+                try:
+                    result = future.result(timeout=60)
+                    if result and rel_path in file_summaries:
+                        # Merge: keep structural fields, overwrite summary prose
+                        fs = file_summaries[rel_path]
+                        file_summaries[rel_path] = FileSummary(
+                            file_path=fs.file_path,
+                            language=fs.language,
+                            line_count=fs.line_count,
+                            summary=result.summary,
+                            entity_count=fs.entity_count,
+                            key_entities=fs.key_entities,
+                            exported_symbols=fs.exported_symbols,
+                            dependencies=fs.dependencies,
+                        )
+                except Exception as exc:
+                    logger.warning("LLM summary failed for %s: %s", rel_path, exc)
+
         directory_summaries = self._build_directory_summaries_no_llm(file_summaries)
 
         return CompressedCodebase(
@@ -217,16 +256,28 @@ class CodebaseCompressor:
         entities: list[ParsedEntity],
         repo_path: str,
     ) -> dict[str, "FileSummary"]:
-        """Build FileSummary for each file without LLM calls — aggregate from entities."""
-        from pathlib import Path as _Path
+        """Build FileSummary for each file without LLM calls — aggregate from entities.
 
-        prefix = repo_path.rstrip("/") + "/" if repo_path else ""
+        Handles mixed absolute/relative file_path values across parsers by normalising
+        everything against the absolute repo_path before stripping the prefix.
+        """
+        from pathlib import Path as _Path
+        import os as _os
+
+        abs_repo = _os.path.abspath(repo_path).rstrip("/") + "/" if repo_path else ""
+        rel_repo = repo_path.rstrip("/") + "/" if repo_path else ""
+
+        def _to_rel(fp: str) -> str:
+            """Strip repo_path prefix regardless of whether fp is abs or relative."""
+            if abs_repo and fp.startswith(abs_repo):
+                return fp[len(abs_repo):]
+            if rel_repo and fp.startswith(rel_repo):
+                return fp[len(rel_repo):]
+            return fp
 
         file_entities: dict[str, list[ParsedEntity]] = {}
         for e in entities:
-            rel = e.file_path
-            if prefix and rel.startswith(prefix):
-                rel = rel[len(prefix):]
+            rel = _to_rel(e.file_path)
             file_entities.setdefault(rel, []).append(e)
 
         lang_map = {".py": "Python", ".ts": "TypeScript", ".js": "JavaScript",
@@ -247,7 +298,7 @@ class CodebaseCompressor:
             except Exception:
                 pass
 
-            # Use first entity's docstring as the summary if available
+            # Use first entity's docstring as the summary placeholder (overwritten by LLM in _compress_none)
             top_ent = next((e for e in ents if e.docstring), None)
             summary = (top_ent.docstring or "").strip()[:300] if top_ent else ""
 
@@ -528,13 +579,21 @@ class CodebaseCompressor:
 
     def _build_import_graph_text(self, entities: list[ParsedEntity], repo_path: str = "") -> str:
         """Build text representation of import graph with relative file paths."""
+        import os as _os
         imports: list[str] = []
         seen: set[str] = set()
-        prefix = repo_path.rstrip("/") + "/" if repo_path else ""
+        abs_prefix = _os.path.abspath(repo_path).rstrip("/") + "/" if repo_path else ""
+        rel_prefix = repo_path.rstrip("/") + "/" if repo_path else ""
+
+        def _to_rel(fp: str) -> str:
+            if abs_prefix and fp.startswith(abs_prefix):
+                return fp[len(abs_prefix):]
+            if rel_prefix and fp.startswith(rel_prefix):
+                return fp[len(rel_prefix):]
+            return fp
+
         for e in entities:
-            rel = e.file_path
-            if prefix and rel.startswith(prefix):
-                rel = rel[len(prefix):]
+            rel = _to_rel(e.file_path)
             for imp in e.imports:
                 key = f"{rel} imports {imp}"
                 if key not in seen:
