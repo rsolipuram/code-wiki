@@ -1,23 +1,21 @@
 """Markdown artifact exporter — writes pipeline artifacts to disk.
 
 After wiki generation, this module writes all intermediate artifacts as
-human-readable Markdown files in a folder tree that **mirrors the analyzed
-repository's structure**. This lets you browse the summaries alongside the
-source they describe.
+human-readable Markdown files in a folder tree that **directly mirrors the
+analyzed repository's structure**. No wrapper subdirectories.
 
 Output layout (relative to wiki_artifacts_dir):
     {repo_name}/
+      _repo.md                      # Top-level repo overview
+      _compressor.md                # Full compressor dump (call graph, import graph, all file stats)
+      {dir}/
+        _dir.md                     # Directory rollup
+        {file}.md                   # One .md per source file (mirrors repo tree exactly)
       _meta/
-        domain_entities.json      # LLM domain recon output
-        architecture_model.json   # ARCHITECT output
-        wiki_plan.json            # PLANNER output
-        critic_result.json        # CRITIC quality gate result
-      summaries/
-        _repo_summary.md          # Top-level repo overview
-        {file_path}.md            # One .md per source file (mirrors repo tree)
-        {dir_path}/_dir_summary.md  # Directory-level rollup
-      pages/
-        {slug}.md                 # Rendered wiki pages as Markdown
+        domain_entities.json        # LLM domain recon output
+        architecture_model.json     # ARCHITECT output
+        wiki_plan.json              # PLANNER output
+        critic_result.json          # CRITIC quality gate result
 """
 
 import json
@@ -64,20 +62,20 @@ def export_wiki_artifacts(
         logger.warning("MD export: _meta write failed: %s", exc)
 
     try:
-        _write_summaries(root, compressed)
+        _write_repo_tree(root, compressed)
     except Exception as exc:
-        logger.warning("MD export: summaries write failed: %s", exc)
+        logger.warning("MD export: repo tree write failed: %s", exc)
 
     try:
-        _write_pages(root, rendered_pages)
+        _write_compressor_dump(root, compressed)
     except Exception as exc:
-        logger.warning("MD export: pages write failed: %s", exc)
+        logger.warning("MD export: compressor dump write failed: %s", exc)
 
     logger.info("MD export: artifacts written to %s", root)
     return root
 
 
-# ── _meta ────────────────────────────────────────────────────────────────────
+# ── _meta ─────────────────────────────────────────────────────────────────────
 
 def _write_meta(
     root: Path,
@@ -98,35 +96,34 @@ def _write_meta(
     _dump("critic_result.json", critic_result)
 
 
-# ── summaries ────────────────────────────────────────────────────────────────
+# ── repo tree (direct mirror) ─────────────────────────────────────────────────
 
-def _write_summaries(root: Path, compressed: dict) -> None:
-    summaries_dir = root / "summaries"
-    summaries_dir.mkdir(exist_ok=True)
+def _write_repo_tree(root: Path, compressed: dict) -> None:
+    """Write _repo.md, per-file .md files, and _dir.md rollups directly at the
+    mirrored repo path — no wrapper subdirectory."""
 
-    # Top-level repo summary
+    # _repo.md at root
     repo_summary = compressed.get("repo_summary", "")
     if repo_summary:
-        _safe_write(summaries_dir / "_repo_summary.md", f"# Repository Overview\n\n{repo_summary}\n")
+        _safe_write(root / "_repo.md", f"# Repository Overview\n\n{repo_summary}\n")
 
-    # Per-file summaries — mirror the repo tree
+    # Per-file summaries — directly at root/{rel_path}.md
     file_summaries: dict[str, dict] = compressed.get("file_summaries") or {}
     for rel_path, fs in file_summaries.items():
         if isinstance(fs, dict):
-            _write_file_summary_md(summaries_dir, rel_path, fs)
+            _write_file_summary_md(root, rel_path, fs)
 
-    # Per-directory summaries
+    # Per-directory rollups — directly at root/{dir_path}/_dir.md
     dir_summaries: dict[str, dict] = compressed.get("directory_summaries") or {}
     for dir_path, ds in dir_summaries.items():
         if isinstance(ds, dict):
-            _write_dir_summary_md(summaries_dir, dir_path, ds)
+            _write_dir_md(root, dir_path, ds)
 
 
-def _write_file_summary_md(summaries_dir: Path, rel_path: str, fs: dict) -> None:
-    """Write one .md file for a source file summary, preserving directory structure."""
-    # Convert rel_path like "airline/agents.py" → summaries_dir/airline/agents.md
+def _write_file_summary_md(root: Path, rel_path: str, fs: dict) -> None:
+    """Write one .md file at root/{dir}/{stem}.md — directly mirrors the repo tree."""
     p = Path(rel_path)
-    out_path = summaries_dir / p.parent / (p.stem + ".md")
+    out_path = root / p.parent / (p.stem + ".md")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     language = fs.get("language", "")
@@ -164,9 +161,9 @@ def _write_file_summary_md(summaries_dir: Path, rel_path: str, fs: dict) -> None
     _safe_write(out_path, "\n".join(lines))
 
 
-def _write_dir_summary_md(summaries_dir: Path, dir_path: str, ds: dict) -> None:
-    """Write _dir_summary.md for a directory."""
-    out_path = summaries_dir / dir_path / "_dir_summary.md"
+def _write_dir_md(root: Path, dir_path: str, ds: dict) -> None:
+    """Write _dir.md at root/{dir_path}/_dir.md."""
+    out_path = root / dir_path / "_dir.md"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     file_count = ds.get("file_count", 0)
@@ -175,7 +172,7 @@ def _write_dir_summary_md(summaries_dir: Path, dir_path: str, ds: dict) -> None:
     key_entities = ds.get("key_entities") or []
 
     lines = [
-        f"# `{dir_path}/` — Directory Summary",
+        f"# `{dir_path}/`",
         "",
         f"**Files**: {file_count}",
         "",
@@ -187,7 +184,7 @@ def _write_dir_summary_md(summaries_dir: Path, dir_path: str, ds: dict) -> None:
     if child_files:
         lines += ["## Files", ""]
         for f in child_files:
-            lines.append(f"- `{f}`")
+            lines.append(f"- [`{f}`]({f.split('/')[-1].rsplit('.', 1)[0] + '.md'})")
         lines.append("")
 
     if key_entities:
@@ -199,100 +196,85 @@ def _write_dir_summary_md(summaries_dir: Path, dir_path: str, ds: dict) -> None:
     _safe_write(out_path, "\n".join(lines))
 
 
-# ── pages ────────────────────────────────────────────────────────────────────
+# ── compressor dump ───────────────────────────────────────────────────────────
 
-def _write_pages(root: Path, rendered_pages: list[dict[str, Any]]) -> None:
-    """Write rendered wiki pages as .md files."""
-    pages_dir = root / "pages"
-    pages_dir.mkdir(exist_ok=True)
+def _write_compressor_dump(root: Path, compressed: dict) -> None:
+    """Write _compressor.md — full dump of everything the compressor produced."""
+    lines = ["# Compressor Output Dump", ""]
 
-    for page in rendered_pages:
-        slug = page.get("slug", "unknown")
-        title = page.get("title", slug)
-        content = page.get("content")
+    compression_level = compressed.get("compression_level", "unknown")
+    lines += [f"**Compression level**: `{compression_level}`", ""]
 
-        md_text = _render_page_as_markdown(title, content)
-        _safe_write(pages_dir / f"{slug}.md", md_text)
+    # Call graph summary
+    cg = compressed.get("call_graph_summary", "")
+    if cg:
+        lines += ["## Call Graph Summary", "", cg, ""]
 
+    # Import graph summary
+    ig = compressed.get("import_graph_summary", "")
+    if ig:
+        lines += ["## Import Graph Summary", "", ig, ""]
 
-def _render_page_as_markdown(title: str, content: Any) -> str:
-    """Convert a rendered page content dict to Markdown text."""
-    lines = [f"# {title}", ""]
+    # Key entities
+    key_entities = compressed.get("key_entities") or []
+    if key_entities:
+        lines += ["## Key Entities (Ranked by Centrality)", ""]
+        for i, qname in enumerate(key_entities[:50], 1):
+            lines.append(f"{i}. `{qname}`")
+        lines.append("")
 
-    if not isinstance(content, dict):
-        if content:
-            lines.append(str(content))
-        return "\n".join(lines)
+    # File summary table
+    file_summaries: dict[str, dict] = compressed.get("file_summaries") or {}
+    if file_summaries:
+        lines += [
+            "## File Summaries",
+            "",
+            "| File | Language | Lines | Entities | Exported Symbols | Dependencies |",
+            "|------|----------|-------|----------|------------------|--------------|",
+        ]
+        for rel_path, fs in sorted(file_summaries.items()):
+            if not isinstance(fs, dict):
+                continue
+            lang = fs.get("language", "")
+            lc = fs.get("line_count", 0)
+            ec = fs.get("entity_count", 0)
+            syms = ", ".join(f"`{s}`" for s in (fs.get("exported_symbols") or [])[:5])
+            deps = ", ".join(f"`{d}`" for d in (fs.get("dependencies") or [])[:5])
+            lines.append(f"| `{rel_path}` | {lang} | {lc} | {ec} | {syms} | {deps} |")
+        lines.append("")
 
-    page_type = content.get("page_type", "")
-
-    # Top-level diagrams — HOME ONLY. Section pages have diagrams already interleaved
-    # into prose_segments by the assembler; rendering content["diagrams"] there would
-    # duplicate every diagram.
-    for diag in (content.get("diagrams") or []) if page_type == "home" else []:
-        if not isinstance(diag, dict):
+    # Per-file detail blocks
+    lines += ["## File Details", ""]
+    for rel_path, fs in sorted(file_summaries.items()):
+        if not isinstance(fs, dict):
             continue
-        mermaid_src = diag.get("mermaid_source", "")
-        caption = diag.get("caption", "")
-        if mermaid_src:
-            lines += ["```mermaid", mermaid_src, "```", ""]
-        if caption:
-            lines += [f"*{caption}*", ""]
-
-    # Prose segments
-    prose_segments = content.get("prose_segments") or []
-    for seg in prose_segments:
-        if not isinstance(seg, dict):
-            lines += [str(seg), ""]
+        summary = fs.get("summary", "")
+        key_ents = fs.get("key_entities") or []
+        if not summary and not key_ents:
             continue
-        seg_type = seg.get("type", "text")
-        if seg_type == "heading":
-            level = seg.get("level", 2)
-            text = seg.get("text", "")
-            lines += ["#" * level + f" {text}", ""]
-        elif seg_type == "text":
-            lines += [seg.get("content", ""), ""]
-        elif seg_type == "diagram":
-            src = seg.get("mermaid_source", "")
-            caption = seg.get("caption", "")
-            if src:
-                lines += ["```mermaid", src, "```", ""]
-            if caption:
-                lines += [f"*{caption}*", ""]
-        elif seg_type == "code_block":
-            lang = seg.get("language", "")
-            code = seg.get("code", "")
-            fp = seg.get("file_path", "")
-            if fp:
-                lines += [f"**`{fp}`**", ""]
-            lines += [f"```{lang}", code, "```", ""]
-        elif seg_type in ("source_link", "section_link"):
-            text = seg.get("text", "") or seg.get("entity_name", "")
-            url = seg.get("url", "")
-            if url and text:
-                lines += [f"[{text}]({url})", ""]
-            elif text:
-                lines += [text, ""]
+        lines += [f"### `{rel_path}`", ""]
+        if summary:
+            lines += [summary, ""]
+        if key_ents:
+            lines += ["**Key entities**: " + ", ".join(f"`{q}`" for q in key_ents), ""]
 
-    # Tables
-    tables = content.get("tables") or []
-    for tbl in tables:
-        if not isinstance(tbl, dict):
-            continue
-        headers = tbl.get("headers") or []
-        rows = tbl.get("rows") or []
-        if headers:
-            lines += ["| " + " | ".join(str(h) for h in headers) + " |"]
-            lines += ["| " + " | ".join(["---"] * len(headers)) + " |"]
-            for row in rows:
-                if isinstance(row, (list, tuple)):
-                    lines += ["| " + " | ".join(str(c) for c in row) + " |"]
-            lines += [""]
+    # Directory summaries
+    dir_summaries: dict[str, dict] = compressed.get("directory_summaries") or {}
+    if dir_summaries:
+        lines += ["## Directory Summaries", ""]
+        for dir_path, ds in sorted(dir_summaries.items()):
+            if not isinstance(ds, dict):
+                continue
+            summary = ds.get("summary", "")
+            fc = ds.get("file_count", 0)
+            lines += [f"### `{dir_path}/` ({fc} files)", ""]
+            if summary:
+                lines += [summary, ""]
 
-    return "\n".join(lines)
+    _safe_write(root / "_compressor.md", "\n".join(lines))
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 def _safe_write(path: Path, content: str) -> None:
     """Write content to path, creating parent directories as needed."""
