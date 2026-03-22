@@ -1,7 +1,9 @@
 """LangGraph StateGraph orchestrator for the wiki agent pipeline.
 
 Execution flow:
-  architect → planner → writer → [annotator, diagrammer, tabulator] → assembler
+  architect → planner → writer → critic → (pass) → [annotator, diagrammer, tabulator] → assembler
+                                         ↑                ↓ (fail, retry ≤ 2×)
+                                         └── writer (retry)
 
 Each node function creates agents, invokes them with relevant state slices,
 and returns state updates.
@@ -63,11 +65,21 @@ def build_wiki_graph() -> StateGraph:
     from src.wiki.agents.tabulator_agent import tabulator_node
     from src.wiki.agents.assembler_agent import assembler_node
 
+    from src.wiki.agents.architect_agent import architect_node
+    from src.wiki.agents.planner_agent import planner_node
+    from src.wiki.agents.writer_agent import writer_node
+    from src.wiki.agents.critic_agent import critic_node, critic_route, MAX_RETRIES
+    from src.wiki.agents.annotator_agent import annotator_node
+    from src.wiki.agents.diagrammer_agent import diagrammer_node
+    from src.wiki.agents.tabulator_agent import tabulator_node
+    from src.wiki.agents.assembler_agent import assembler_node
+
     graph = StateGraph(WikiState)
 
     graph.add_node("architect", architect_node)
     graph.add_node("planner", planner_node)
     graph.add_node("writer", writer_node)
+    graph.add_node("critic", critic_node)
     graph.add_node("annotator", annotator_node)
     graph.add_node("diagrammer", diagrammer_node)
     graph.add_node("tabulator", tabulator_node)
@@ -76,11 +88,51 @@ def build_wiki_graph() -> StateGraph:
     graph.set_entry_point("architect")
     graph.add_edge("architect", "planner")
     graph.add_edge("planner", "writer")
-    # After writer: annotator, diagrammer, tabulator run in parallel
-    graph.add_edge("writer", "annotator")
-    graph.add_edge("writer", "diagrammer")
-    graph.add_edge("writer", "tabulator")
-    # All three must complete before assembler
+    graph.add_edge("writer", "critic")
+
+    # Critic: fan-out to enrichment pipeline on pass, retry writer on fail.
+    # We use conditional_edges where "annotator" means: also kick off diagrammer+tabulator.
+    # LangGraph 0.2.x doesn't support direct conditional fan-out to multiple nodes,
+    # so we implement it as: critic → annotator (always on pass), critic also sends
+    # to diagrammer and tabulator via unconditional edges from a pass state.
+    # Simplest correct approach: keep annotator as the serial fan-in gatekeeper and
+    # have diagrammer/tabulator start from critic pass via conditional edges too.
+    def critic_route_annotator(state: WikiState) -> str:
+        return critic_route(state)
+
+    def critic_route_diagrammer(state: WikiState) -> str:
+        result = state.get("critic_result") or {}
+        passed = result.get("passed", True)
+        retry_count = state.get("writer_retry_count") or 0
+        if not passed and retry_count <= MAX_RETRIES:
+            return "__end__"
+        return "diagrammer"
+
+    def critic_route_tabulator(state: WikiState) -> str:
+        result = state.get("critic_result") or {}
+        passed = result.get("passed", True)
+        retry_count = state.get("writer_retry_count") or 0
+        if not passed and retry_count <= MAX_RETRIES:
+            return "__end__"
+        return "tabulator"
+
+    graph.add_conditional_edges(
+        "critic",
+        critic_route_annotator,
+        {"writer": "writer", "annotator": "annotator"},
+    )
+    graph.add_conditional_edges(
+        "critic",
+        critic_route_diagrammer,
+        {"diagrammer": "diagrammer", "__end__": END},
+    )
+    graph.add_conditional_edges(
+        "critic",
+        critic_route_tabulator,
+        {"tabulator": "tabulator", "__end__": END},
+    )
+
+    # All three enrichment nodes must complete before assembler
     graph.add_edge("annotator", "assembler")
     graph.add_edge("diagrammer", "assembler")
     graph.add_edge("tabulator", "assembler")

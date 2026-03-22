@@ -19,6 +19,8 @@ class FileSummary:
     summary: str  # ~50 words from LLM, or empty for "none" compression
     entity_count: int
     key_entities: list[str] = field(default_factory=list)  # qualified names
+    exported_symbols: list[str] = field(default_factory=list)  # e.g. ["triage_agent", "cancel_flight"]
+    dependencies: list[str] = field(default_factory=list)    # e.g. ["openai", "db_utils"]
 
 
 @dataclass

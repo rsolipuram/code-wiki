@@ -106,13 +106,20 @@ def architect_node(state: WikiState) -> dict:
             f"## Directory Structure\n" + "\n".join(dir_lines[:30])
         )
 
-    # 3. File summaries
+    # 3. File summaries (include exported_symbols so architect knows what each file exposes)
     file_summaries = compressed.get("file_summaries", {})
     if file_summaries:
         file_lines = []
         for path, fs in sorted(file_summaries.items()):
-            summary = fs.get("summary", "") if isinstance(fs, dict) else str(fs)
-            file_lines.append(f"  {path}: {summary}")
+            if isinstance(fs, dict):
+                summary = fs.get("summary", "")
+                symbols = fs.get("exported_symbols", [])
+                deps = fs.get("dependencies", [])
+                symbols_str = f"  exports=[{', '.join(symbols[:8])}]" if symbols else ""
+                deps_str = f"  deps=[{', '.join(deps[:6])}]" if deps else ""
+                file_lines.append(f"  {path}: {summary}{symbols_str}{deps_str}")
+            else:
+                file_lines.append(f"  {path}: {fs}")
         context_parts.append(
             f"## File Summaries ({len(file_summaries)} files)\n"
             + "\n".join(file_lines[:50])

@@ -49,10 +49,19 @@ FORMATTING RULES:
 
 
 def writer_node(state: WikiState) -> dict:
-    """WRITER node — generate prose for all sections in parallel."""
+    """WRITER node — generate prose for all sections in parallel.
+
+    On retry (writer_retry_count > 0): only rewrites sections that the critic
+    flagged as missing required entities, injecting the missing names directly.
+    """
     t0 = time.monotonic()
-    logger.info("WRITER agent starting")
-    report_agent_progress("writer", "running", "Writing technical prose")
+    retry_count = (state.get("writer_retry_count") or 0)
+    is_retry = retry_count > 0
+    logger.info("WRITER agent starting (retry=%d)", retry_count)
+    report_agent_progress(
+        "writer", "running",
+        f"Writing technical prose (retry {retry_count})" if is_retry else "Writing technical prose",
+    )
 
     plan = state.get("plan", {})
     architecture = state.get("architecture", {})
@@ -62,25 +71,40 @@ def writer_node(state: WikiState) -> dict:
     dossier = state.get("dossier", {})
     entity_index = state.get("entity_index", {})
     domain_entities = state.get("domain_entities") or {}
+    critic_result = state.get("critic_result") or {}
+
+    # Which sections need rewriting (all on first pass, failing ones on retry)
+    missing_per_section: dict[str, list[str]] = critic_result.get("missing_per_section") or {}
 
     arch = ArchitectureModel.from_dict(architecture)
     sections = plan.get("sections", [])
 
-    # 1. Generate system narrative
-    system_narrative = _generate_system_narrative(
-        plan, arch, compressed, dossier, domain_entities,
-    )
+    # 1. Generate system narrative (only on first pass)
+    if is_retry:
+        system_narrative = state.get("system_narrative") or ""
+    else:
+        system_narrative = _generate_system_narrative(
+            plan, arch, compressed, dossier, domain_entities,
+        )
 
     # 2. Generate section content in parallel
-    narrated_sections = {}
+    # On retry: start from existing narrated_sections and only overwrite failing ones
+    narrated_sections: dict = dict(state.get("narrated_sections") or {}) if is_retry else {}
+    sections_to_write = [
+        s for s in sections
+        if not is_retry or s.get("id", "") in missing_per_section
+    ]
 
     with ThreadPoolExecutor(max_workers=10) as pool:
         futures = {}
-        for section in sections:
+        for section in sections_to_write:
+            # On retry: inject the missing entity names the critic flagged
+            missing_entities = missing_per_section.get(section.get("id", ""), []) if is_retry else []
             future = pool.submit(
                 _write_section,
                 section, system_narrative, arch, compressed,
                 repo_path, entities, entity_index, dossier, plan, domain_entities,
+                missing_entities,
             )
             futures[future] = section
 
@@ -112,10 +136,12 @@ def writer_node(state: WikiState) -> dict:
     return {
         "system_narrative": system_narrative,
         "narrated_sections": narrated_sections,
+        "writer_retry_count": retry_count + 1,
         "agent_results": [{
             "agent": "writer",
             "success": True,
             "elapsed": elapsed,
+            "retry": retry_count,
             "sections": len(narrated_sections),
             "narrative_words": len(system_narrative.split()),
         }],
@@ -232,8 +258,14 @@ def _write_section(
     dossier: dict,
     plan: dict,
     domain_entities: dict | None = None,
+    missing_entities: list[str] | None = None,
 ) -> dict:
-    """Write prose for a single section."""
+    """Write prose for a single section.
+
+    Args:
+        missing_entities: On critic retry, the list of entity names that were
+            missing from the previous prose. Injected as a hard requirement.
+    """
     section_id = section.get("id", "unknown")
     section_title = section.get("title", section_id)
 
@@ -297,6 +329,18 @@ def _write_section(
                 + domain_context_block
             )
 
+    # Critic retry injection: hard-require missing entity names
+    missing_entities_block = ""
+    if missing_entities:
+        names_str = ", ".join(f'"{n}"' for n in missing_entities[:20])
+        missing_entities_block = (
+            f"\n⚠️  CRITIC RETRY — HARD REQUIREMENT:\n"
+            f"Your previous draft was missing these specific entity names: {names_str}\n"
+            f"You MUST mention each of these by their exact name in your prose. "
+            f"Do not paraphrase or omit them. If they are agents, explain their role. "
+            f"If they are tools or functions, explain what they do."
+        )
+
     prompt = f"""Write precise, concise technical documentation for the "{section_title}" section.
 Cover design decisions, error handling, integration points, and configuration. Name specific agents, tools, and classes.
 Target 300-600 words. Do NOT exceed 800 words.
@@ -304,6 +348,7 @@ Target 300-600 words. Do NOT exceed 800 words.
 {domain_context_block}
 
 {primary_concepts_block}
+{missing_entities_block}
 
 System overview (do not restate — cross-reference only):
 {system_narrative[:1000]}

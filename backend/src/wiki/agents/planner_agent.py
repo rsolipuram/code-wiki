@@ -31,12 +31,14 @@ Output ONLY valid JSON with this structure:
       "title": "Architecture-First Title (e.g., The Handoff Flow)",
       "maps_to_components": ["Exact Component Name from the architecture"],
       "primary_concepts": ["agent-definitions", "tool-implementations"],
+      "required_entities": ["triage_agent", "cancel_flight", "TriageAgent"],
       "subsections": [
         {
           "id": "sub-slug",
           "title": "Subsection Title",
           "describes": "What this subsection explains",
-          "relevant_entities": ["module.ClassName"]
+          "relevant_entities": ["module.ClassName"],
+          "required_entities": ["triage_agent"]
         }
       ],
       "diagram_type": "architecture|flowchart|sequence|class",
@@ -44,6 +46,13 @@ Output ONLY valid JSON with this structure:
     }
   ]
 }
+
+The `required_entities` field MUST list the exact variable/class/function names that MUST appear 
+in the written prose for that section. This creates a contract with the writer:
+- For agent-related sections: list agent variable names (e.g. "triage_agent", not "Triage Agent")
+- For tool sections: list function names that must be mentioned
+- For data model sections: list class names
+- Leave empty ([]) for overview or architecture sections with no specific code entities
 
 Guidelines:
 - Create 5-10 sections that represent the "Chapters" of a developer's mental model
@@ -77,6 +86,7 @@ def planner_node(state: WikiState) -> dict:
     fingerprint = state.get("fingerprint", {})
     all_files = state.get("all_files", [])
     entity_index = state.get("entity_index", {})
+    domain_entities = state.get("domain_entities", {})
 
     arch = ArchitectureModel.from_dict(architecture)
 
@@ -135,12 +145,29 @@ def planner_node(state: WikiState) -> dict:
 
     full_context = "\n\n".join(context_parts)
 
-    prompt = f"""Plan the wiki sections for this codebase.
+    # Build domain entities context so the planner can mandate specific entity names per section
+    domain_ctx = ""
+    agents_list = (domain_entities or {}).get("agents", [])
+    tools_list = (domain_entities or {}).get("tools", [])
+    guardrails_list = (domain_entities or {}).get("guardrails", [])
+    if agents_list or tools_list or guardrails_list:
+        lines = ["## Domain Entities (use exact names in required_entities fields)"]
+        if agents_list:
+            agent_names = [a.get("name") or a.get("var_name") or "" for a in agents_list if a]
+            lines.append(f"Agents: {', '.join(filter(None, agent_names[:20]))}")
+        if tools_list:
+            tool_names = [t.get("name", "") for t in tools_list if t]
+            lines.append(f"Tools: {', '.join(filter(None, tool_names[:20]))}")
+        if guardrails_list:
+            gr_names = [g.get("name", "") for g in guardrails_list if g]
+            lines.append(f"Guardrails: {', '.join(filter(None, gr_names[:20]))}")
+        domain_ctx = "\n".join(lines)
 
-{full_context}
-
-Create sections that map to the architectural components.
-Output ONLY valid JSON matching the schema above."""
+    prompt_parts = [f"Plan the wiki sections for this codebase.\n\n{full_context}"]
+    if domain_ctx:
+        prompt_parts.append(domain_ctx)
+    prompt_parts.append("Create sections that map to the architectural components.\nOutput ONLY valid JSON matching the schema above.")
+    prompt = "\n\n".join(prompt_parts)
 
     try:
         response = chat(
@@ -153,7 +180,7 @@ Output ONLY valid JSON matching the schema above."""
             cache_ttl=3600,
         )
 
-        plan = _parse_plan_response(response, arch, all_files, entity_index)
+        plan = _parse_plan_response(response, arch, all_files, entity_index, domain_entities)
     except Exception as exc:
         logger.error("PLANNER agent failed: %s", exc)
         plan = _fallback_plan(arch, fingerprint, all_files, entity_index)
@@ -182,6 +209,7 @@ def _parse_plan_response(
     arch: ArchitectureModel,
     all_files: list,
     entity_index: dict,
+    domain_entities: dict | None = None,
 ) -> dict:
     """Parse LLM response into WikiPlan-compatible dict."""
     text = response.strip()

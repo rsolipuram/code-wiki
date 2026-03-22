@@ -9,6 +9,7 @@ Also handles Module/WikiPage/CodeEntity persistence and
 special page generation (Getting Started, Function Index, etc.).
 """
 
+import json
 import logging
 import re
 import statistics
@@ -20,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from src.config import get_settings
 from src.dossier.schema import Dossier
+from src.llm.client import chat
 from src.models.code_entity import CodeEntity as CodeEntityModel
 from src.models.code_entity import EntityType, Module
 from src.models.wiki import PageType, Wiki, WikiPage
@@ -36,6 +38,7 @@ from src.wiki.page_builders.special_pages import (
     build_getting_started,
     build_glossary,
 )
+from src.wiki.md_exporter import export_wiki_artifacts
 from src.wiki.renderer import render_wiki_pages
 from src.wiki.v2_types import (
     EnrichedSection,
@@ -84,8 +87,8 @@ def generate_wiki_v2(
     
     scored_entities = score_entities(entities)
     
-    # ── Phase 2A: Extract domain entities (agents, tools, guardrails) ────
-    domain_entities = _extract_domain_entities(entity_index, call_graph, repo_path)
+    # ── Phase 2A: Discover domain entities (agents, tools, guardrails) ──────
+    domain_entities = _discover_domain_entities(entity_index, dossier)
     logger.info(
         "Domain entities: %d agents, %d tools, %d guardrails",
         len(domain_entities.get("agents", [])),
@@ -137,6 +140,8 @@ def generate_wiki_v2(
                 "file_path": v.file_path, "language": v.language,
                 "line_count": v.line_count, "summary": v.summary,
                 "entity_count": v.entity_count, "key_entities": v.key_entities,
+                "exported_symbols": v.exported_symbols,
+                "dependencies": v.dependencies,
             }
             for k, v in compressed.file_summaries.items()
         },
@@ -392,6 +397,23 @@ def generate_wiki_v2(
             home_db.content = updated_home_content
 
     session.commit()
+
+    # ── Markdown artifact export ─────────────────────────────────────────────
+    try:
+        settings = get_settings()
+        wiki_artifacts_dir = str(Path(settings.repo_cache_dir).parent / "wiki_artifacts")
+        export_wiki_artifacts(
+            repo_name=repo_name,
+            wiki_artifacts_dir=wiki_artifacts_dir,
+            compressed=compressed_dict,
+            domain_entities=domain_entities,
+            architecture=final_state.get("architecture") or {},
+            plan=final_state.get("plan") or {},
+            critic_result=final_state.get("critic_result") or {},
+            rendered_pages=rendered_pages,
+        )
+    except Exception as exc:
+        logger.warning("MD artifact export failed (non-fatal): %s", exc)
 
     total_elapsed = time.monotonic() - t_total
     logger.info(
@@ -933,161 +955,108 @@ def _first_text(segments: list[dict], max_len: int = 100) -> str:
     return " ".join(parts).strip()[:max_len]
 
 
-def _extract_domain_entities(
+def _discover_domain_entities(
     entity_index: dict[str, dict],
-    call_graph: dict[str, list[str]],
-    repo_path: str,
+    dossier: "Dossier",
 ) -> dict:
-    """Extract domain-level actors from entity index.
+    """Discover domain-level actors using AI analysis of the entity index.
 
-    Identifies agents, tools, and guardrails by name pattern and file location.
-    Returns a DomainEntitySummary with: agents, tools, guardrails, all_names.
+    Replaces brittle regex heuristics with a targeted LLM sweep that classifies
+    classes and top-level variable assignments (TLAs from the parser) as:
+    agent, tool, guardrail, or none.
+
+    Returns a dict with keys: agents, tools, guardrails, all_names, agent_count.
+    Falls back to an empty result on LLM error — never crashes the pipeline.
     """
-    _AGENT_SUFFIXES = (
-        "agent", "handler", "controller", "service", "processor",
-        "bot", "actor", "runner", "worker", "flow", "pipeline",
-    )
-    # Also detect classes in files named agent*.py / *_agent.py / agents/*.py
-    _AGENT_FILE_PATTERNS = ("/agent", "agents/", "_agent.", "-agent.")
-    _TOOL_FILE_PATTERNS = ("/tools.py", "/tools.ts", "/tool.py", "/tools/", "tools.js")
-    _GUARDRAIL_PATTERNS = ("guardrail", "guard", "validator", "middleware", "filter")
-
-    agents: list[dict] = []
-    tools: list[dict] = []
-    guardrails: list[dict] = []
-    seen: set[str] = set()
-
-    # Build reverse mapping: qname → entity info with tool list from call graph
+    # Build a compact list of candidates for the LLM: classes and TLA variables
+    candidates: list[dict] = []
     for qname, info in entity_index.items():
+        etype = str(info.get("entity_type", ""))
         name = str(info.get("name", ""))
-        entity_type = str(info.get("entity_type", ""))
-        file_path = str(info.get("file_path", ""))
-        if not name or name.startswith("_") or name in seen:
+        if etype not in ("class", "variable") or not name or name.startswith("_"):
             continue
-        if entity_type not in ("class", "function"):
-            continue
+        entry: dict[str, Any] = {
+            "name": name,
+            "qualified_name": qname,
+            "entity_type": etype,
+            "file": str(info.get("file_path", "")),
+            "docstring": str(info.get("docstring", "") or "")[:200],
+        }
+        if etype == "variable":
+            meta = info.get("entity_metadata") or {}
+            entry["rhs_call"] = meta.get("rhs_call", "")
+            entry["constructor_kwargs"] = {
+                k: str(v)[:80] for k, v in (meta.get("constructor_kwargs") or {}).items()
+            }
+        if etype == "class":
+            meta = info.get("entity_metadata") or {}
+            entry["bases"] = meta.get("bases", [])
+        candidates.append(entry)
 
-        name_lower = name.lower()
-        file_lower = file_path.lower()
-        docstring = str(info.get("docstring", "") or "")
+    if not candidates:
+        logger.info("No class/variable candidates found — skipping domain entity discovery")
+        return {"agents": [], "tools": [], "guardrails": [], "all_names": [], "agent_count": 0}
 
-        # ── Agents: classes by suffix OR by agent file location ──
-        is_agent_by_suffix = (
-            entity_type == "class"
-            and any(name_lower.endswith(s) for s in _AGENT_SUFFIXES)
-            and not file_lower.endswith((".tsx", ".ts"))
-            and not name_lower.endswith("props")
-            and name_lower not in ("agent", "baseagent", "abstractagent")
+    system_type = str(getattr(dossier, "system_type", "") or "")
+    candidates_json = json.dumps(candidates[:150], indent=2)  # cap at 150 to stay within context
+
+    prompt = f"""You are analyzing a {system_type or "software"} repository.
+
+Below is a list of classes and top-level variable assignments found in the codebase.
+Classify each entry as one of: "agent", "tool", "guardrail", or "none".
+
+Rules:
+- "agent": An AI agent instance or class (e.g. triage_agent = Agent(...), class TriageAgent, LLM-backed worker)
+- "tool": A callable that an agent invokes (function tool, tool wrapper, action)  
+- "guardrail": Input/output validation, safety filter, content policy enforcer
+- "none": Generic utility, data model, config, or unrelated class
+
+IMPORTANT: Base classes, abstract classes, and SDK framework classes (e.g. "Agent", "BaseAgent")
+should be classified as "none" — only concrete instances and subclasses matter.
+
+Candidates:
+{candidates_json}
+
+Respond with ONLY a JSON object (no markdown, no explanation):
+{{
+  "agents": [
+    {{"name": "...", "qualified_name": "...", "file": "...", "docstring": "...", "role": "one-sentence role description", "var_name": "..."}}
+  ],
+  "tools": [
+    {{"name": "...", "qualified_name": "...", "file": "...", "docstring": "..."}}
+  ],
+  "guardrails": [
+    {{"name": "...", "qualified_name": "...", "file": "...", "docstring": "..."}}
+  ]
+}}
+"""
+
+    try:
+        raw = chat(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=2048,
+            cache_ttl=3600,
+            trace_context={"stage": "domain_recon", "component": "v2_pipeline"},
         )
-        is_agent_by_file = (
-            entity_type == "class"
-            and any(p in file_lower for p in _AGENT_FILE_PATTERNS)
-            and not file_lower.endswith((".tsx", ".ts"))
-            and not name_lower.endswith("props")
-            and name_lower not in ("agent", "baseagent", "abstractagent")
-        )
-        if is_agent_by_suffix or is_agent_by_file:
-            # Find handoff targets (other agent-like callees)
-            callees = call_graph.get(qname, [])
-            handoff_targets = []
-            tool_names = []
-            for callee in callees:
-                callee_info = entity_index.get(callee, {})
-                callee_name = str(callee_info.get("name", ""))
-                callee_type = str(callee_info.get("entity_type", ""))
-                if any(callee_name.lower().endswith(s) for s in _AGENT_SUFFIXES):
-                    handoff_targets.append(callee_name)
-                elif callee_type == "function" and any(
-                    p in str(callee_info.get("file_path", "")).lower()
-                    for p in _TOOL_FILE_PATTERNS
-                ):
-                    tool_names.append(callee_name)
-            agents.append({
-                "name": name,
-                "qualified_name": qname,
-                "file": file_path,
-                "docstring": docstring[:200],
-                "handoff_targets": handoff_targets[:6],
-                "tools": tool_names[:8],
-            })
-            seen.add(name)
-            continue
+        # Strip markdown fences if present
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw, count=1)
+            raw = re.sub(r"\n?```$", "", raw)
+        result = json.loads(raw)
+    except Exception as exc:
+        logger.warning("LLM domain recon failed (%s) — returning empty domain entities", exc)
+        return {"agents": [], "tools": [], "guardrails": [], "all_names": [], "agent_count": 0}
 
-        # ── Tools: functions in tools files ──
-        if entity_type == "function" and any(p in file_lower for p in _TOOL_FILE_PATTERNS):
-            tools.append({
-                "name": name,
-                "qualified_name": qname,
-                "file": file_path,
-                "docstring": docstring[:150],
-            })
-            seen.add(name)
-            continue
-
-        # ── Guardrails: any entity with guardrail-related naming ──
-        if any(p in name_lower for p in _GUARDRAIL_PATTERNS):
-            guardrails.append({
-                "name": name,
-                "qualified_name": qname,
-                "file": file_path,
-                "docstring": docstring[:150],
-            })
-            seen.add(name)
-
-    # ── SDK Instantiation Pattern: var = Agent[...](name="...", ...) ───────────
-    # Catches repos using OpenAI Agents SDK, LangChain, AutoGen, CrewAI etc.
-    # where agents are instances not subclasses.
-    _SDK_AGENT_RE = re.compile(
-        r'^(?P<var>[a-z_][a-z0-9_]*)\s*=\s*\bAgent(?:\[[^\]]*\])?\s*\(',
-        re.MULTILINE,
+    agents = result.get("agents") or []
+    tools = result.get("tools") or []
+    guardrails = result.get("guardrails") or []
+    all_names = [e.get("name", "") for e in agents] + [e.get("name", "") for e in tools] + [e.get("name", "") for e in guardrails]
+    logger.info(
+        "LLM domain recon: %d agents, %d tools, %d guardrails",
+        len(agents), len(tools), len(guardrails),
     )
-    _AGENT_NAME_RE = re.compile(r'\bname\s*=\s*["\'](?P<name>[^"\']+)["\']')
-    _AGENT_FILE_RE = re.compile(r'(?:^|/)agents?(?:\.py|/\w+\.py)$', re.IGNORECASE)
-
-    seen_sdk: set[str] = set()
-    if repo_path:
-        agent_files = [
-            info.get("file_path", "")
-            for info in entity_index.values()
-            if _AGENT_FILE_RE.search(str(info.get("file_path", "")))
-        ]
-        for rel_path in set(agent_files):
-            abs_path = Path(repo_path) / rel_path
-            try:
-                source = abs_path.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                continue
-            for m in _SDK_AGENT_RE.finditer(source):
-                var_name = m.group("var")
-                if var_name in seen_sdk or var_name in seen:
-                    continue
-                # Extract `name="..."` from the same Agent(...) call block
-                call_start = m.end()
-                # Grab up to 500 chars after the `Agent(` to find the name= arg
-                snippet = source[call_start : call_start + 500]
-                name_m = _AGENT_NAME_RE.search(snippet)
-                display_name = name_m.group("name") if name_m else var_name.replace("_", " ").title()
-                # Extract tools list from snippet
-                tool_match = re.search(r'tools\s*=\s*\[([^\]]*)\]', snippet)
-                tool_list = []
-                if tool_match:
-                    tool_list = [t.strip() for t in tool_match.group(1).split(",") if t.strip()][:8]
-                # Extract handoff_description
-                hdesc_m = re.search(r'handoff_description\s*=\s*["\']([^"\']+)["\']', snippet)
-                hdesc = hdesc_m.group(1)[:200] if hdesc_m else ""
-                agents.append({
-                    "name": display_name,
-                    "qualified_name": f"{rel_path}::{var_name}",
-                    "file": rel_path,
-                    "docstring": hdesc,
-                    "handoff_targets": [],
-                    "tools": tool_list,
-                    "var_name": var_name,
-                })
-                seen_sdk.add(var_name)
-                seen.add(display_name)
-
-    all_names = [e["name"] for e in agents] + [e["name"] for e in tools] + [e["name"] for e in guardrails]
     return {
         "agents": agents,
         "tools": tools,
@@ -1095,6 +1064,7 @@ def _extract_domain_entities(
         "all_names": all_names,
         "agent_count": len(agents),
     }
+
 
 
 _PLACEHOLDER_PATTERNS = (
@@ -1332,10 +1302,10 @@ def _inject_runtime_holistic_sections(
             table_rows = []
             for ag in agents[:12]:
                 name = ag.get("name", "")
-                # Extract role from docstring first line or name-based heuristic
-                role = (ag.get("docstring") or "").split("\n")[0].strip()
+                # Extract role from LLM-provided field, then docstring, then name-based fallback
+                role = (ag.get("role") or ag.get("docstring") or "").split("\n")[0].strip()
                 if not role:
-                    role = _infer_agent_role(name)
+                    role = f"Handles {name.replace('Agent', '').replace('Handler', '').strip()} operations"
                 tools_list = ag.get("tools", []) or []
                 tools_str = ", ".join(f"`{t}`" for t in tools_list[:4]) if tools_list else "—"
                 table_rows.append(f"| **{name}** | {role[:80]} | {tools_str} |")
@@ -1386,27 +1356,6 @@ def _inject_runtime_holistic_sections(
                 "mermaid_source": mermaid_src,
                 "caption": "Agent handoff flow — how user requests route through the system",
             })
-
-
-def _infer_agent_role(name: str) -> str:
-    """Infer a short role description from the agent class name."""
-    mapping = {
-        "triage": "Routes user requests to the appropriate specialist agent",
-        "flight": "Provides flight status, delays, and connection information",
-        "booking": "Handles flight bookings, rebookings, and cancellations",
-        "cancellation": "Handles flight bookings, rebookings, and cancellations",
-        "seat": "Manages seat assignments and special service requests",
-        "faq": "Answers policy questions on baggage, compensation, and amenities",
-        "refund": "Processes compensation claims and travel disruption support",
-        "compensation": "Processes compensation claims and travel disruption support",
-        "auth": "Handles authentication and authorization",
-        "payment": "Processes payment transactions",
-    }
-    name_lower = name.lower()
-    for keyword, role in mapping.items():
-        if keyword in name_lower:
-            return role
-    return f"Handles {name.replace('Agent', '').replace('Handler', '').strip()} operations"
 
 
 def _build_agent_handoff_diagram(

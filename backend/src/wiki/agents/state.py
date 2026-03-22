@@ -94,3 +94,7 @@ class WikiState(TypedDict, total=False):
     # enriched_sections contains segments of type: 'text', 'source_link', 'code_block', 'section_link', 'heading', 'diagram', 'table'
     enriched_sections: Annotated[list, add]  # (appended by ASSEMBLER)
     agent_results: Annotated[list, add]      # AgentResult telemetry
+
+    # ── Critic / retry fields ──
+    critic_result: dict           # {passed: bool, missing_per_section: {id: [names]}, retry_count: int}
+    writer_retry_count: int       # Current retry attempt (0 = first pass)

@@ -260,6 +260,27 @@ class CodebaseCompressor:
             summary = file_entities[0].docstring or "" if file_entities else ""
 
         key_ents = [e.qualified_name for e in file_entities[:5]]
+
+        # Extract exported symbols (non-private names for classes, functions, variables)
+        exported_symbols = [
+            e.name for e in file_entities
+            if e.entity_type in ("class", "function", "variable")
+            and e.name and not e.name.startswith("_")
+        ]
+
+        # Extract dependencies from module-level imports
+        dependencies: list[str] = []
+        module_entities = [e for e in file_entities if e.entity_type == "module"]
+        if module_entities:
+            raw_imports = module_entities[0].imports or []
+            # Normalize to top-level package name (e.g. "openai.types" → "openai")
+            seen_deps: set[str] = set()
+            for imp in raw_imports:
+                top = imp.split(".")[0] if imp else ""
+                if top and not top.startswith("_") and top not in seen_deps:
+                    seen_deps.add(top)
+                    dependencies.append(top)
+
         return FileSummary(
             file_path=file_path,
             language=language,
@@ -267,6 +288,8 @@ class CodebaseCompressor:
             summary=summary.strip(),
             entity_count=len(file_entities),
             key_entities=key_ents,
+            exported_symbols=exported_symbols[:30],
+            dependencies=dependencies[:20],
         )
 
     def _summarize_directory(

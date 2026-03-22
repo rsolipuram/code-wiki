@@ -53,7 +53,7 @@ class Settings(BaseSettings):
         alias="WIKI_AGENT_HEARTBEAT_SECONDS",
     )
     architect_context_max_chars: int = Field(
-        default=24000,
+        default=32000,
         alias="ARCHITECT_CONTEXT_MAX_CHARS",
     )
 

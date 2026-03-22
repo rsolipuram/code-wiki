@@ -148,6 +148,9 @@ class PythonParser(CodeParser):
             )
         )
 
+        # set parent references needed for nested-function detection in the walk below
+        _set_parents(tree)
+
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 docstring = ast.get_docstring(node)
@@ -215,8 +218,77 @@ class PythonParser(CodeParser):
                     )
                 )
 
-        # set parent references (needed for nested function detection above)
-        _set_parents(tree)
+        # Top-Level Assignments: capture module-level variable assignments
+        # where the RHS is a Call to an uppercase-initial name (PEP 8 class convention).
+        # e.g.  triage_agent = Agent(name="Triage Agent", tools=[...])
+        # e.g.  client = OpenAI()
+        # Skips private names (_x), non-class calls (get_config()), and nested scopes.
+        for node in ast.iter_child_nodes(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            # Resolve the RHS call node
+            if isinstance(node, ast.Assign):
+                value = node.value
+                targets = node.targets
+            else:
+                value = node.value
+                targets = [node.target] if node.value else []
+            if not isinstance(value, ast.Call):
+                continue
+            # Get the constructor name (e.g. "Agent" from Agent(...) or Agent[T](...))
+            func = value.func
+            if isinstance(func, ast.Subscript):
+                func = func.value  # unwrap Agent[AirlineAgentChatContext] → Agent
+            if isinstance(func, ast.Attribute):
+                rhs_call = func.attr
+            elif isinstance(func, ast.Name):
+                rhs_call = func.id
+            else:
+                continue
+            # Only capture calls to uppercase-initial names (class constructors)
+            if not rhs_call or not rhs_call[0].isupper():
+                continue
+            # Extract each assigned variable name
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    var_name = target.id
+                elif isinstance(target, ast.Tuple):
+                    # handle a, b = SomeCall() — skip multi-assign
+                    continue
+                else:
+                    continue
+                if not var_name or var_name.startswith("_"):
+                    continue
+                # Build constructor kwargs dict for metadata
+                constructor_kwargs: dict[str, str] = {}
+                for kw in value.keywords:
+                    if kw.arg:
+                        try:
+                            constructor_kwargs[kw.arg] = ast.unparse(kw.value)
+                        except Exception:
+                            pass
+                # Build a readable signature
+                try:
+                    sig = f"{var_name} = {ast.unparse(value)}"
+                except Exception:
+                    sig = f"{var_name} = {rhs_call}(...)"
+                entities.append(
+                    ParsedEntity(
+                        name=var_name,
+                        qualified_name=f"{module_name}.{var_name}",
+                        entity_type="variable",
+                        file_path=file_path,
+                        line_start=node.lineno,
+                        line_end=getattr(node, "end_lineno", node.lineno),
+                        signature=sig[:500],
+                        calls=[rhs_call],
+                        entity_metadata={
+                            "rhs_call": rhs_call,
+                            "constructor_kwargs": constructor_kwargs,
+                        },
+                    )
+                )
+
         return entities
 
     def _raw_imports(self, tree: ast.Module) -> list[str]:
