@@ -40,8 +40,8 @@ def generate_system_narrative(
 
     # Build architecture context from dossier
     arch_context = ""
-    if dossier and dossier.architecture:
-        arch = dossier.architecture
+    arch = dossier.sections.get("architecture") if dossier else None
+    if arch:
         arch_context = (
             f"\nArchitecture: {arch.primary_style} "
             f"(patterns: {', '.join(arch.patterns_detected[:5])})"
@@ -387,17 +387,18 @@ def _get_dossier_context(section: WikiSectionPlan, dossier) -> str:
                 )
 
     # Architecture info
-    if dossier.architecture:
-        arch = dossier.architecture
+    arch = dossier.sections.get("architecture")
+    if arch:
         parts.append(
             f"Architecture: {arch.primary_style}, "
             f"patterns: {', '.join(arch.patterns_detected[:3])}"
         )
 
     # Technical debt
-    if dossier.technical_debt:
+    tech_debt = dossier.sections.get("technical_debt")
+    if tech_debt:
         relevant_debt = [
-            item for item in dossier.technical_debt.items
+            item for item in tech_debt.items
             if item.file_path in relevant_files
         ]
         if relevant_debt:

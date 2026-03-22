@@ -243,8 +243,9 @@ def _format_dossier_context(findings: list[dict], dossier: Optional[Dossier]) ->
         desc = f.get("description", str(f)[:100])
         parts.append(f"[{section}] {desc}")
 
-    if dossier and dossier.architecture:
-        parts.append(f"[architecture] style={dossier.architecture.primary_style}")
+    arch = dossier.sections.get("architecture") if dossier else None
+    if arch:
+        parts.append(f"[architecture] style={arch.primary_style}")
 
     return "\n".join(parts)
 
