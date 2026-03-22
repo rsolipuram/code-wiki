@@ -10,7 +10,7 @@ Output layout (relative to wiki_artifacts_dir):
       _compressor.md                # Full compressor dump (call graph, import graph, all file stats)
       {dir}/
         _dir.md                     # Directory rollup
-        {file}.md                   # One .md per source file (mirrors repo tree exactly)
+        {file.py}.md                # One .md per source file — full filename preserved (foo.py → foo.py.md)
       _meta/
         domain_entities.json        # LLM domain recon output
         architecture_model.json     # ARCHITECT output
@@ -121,9 +121,11 @@ def _write_repo_tree(root: Path, compressed: dict) -> None:
 
 
 def _write_file_summary_md(root: Path, rel_path: str, fs: dict) -> None:
-    """Write one .md file at root/{dir}/{stem}.md — directly mirrors the repo tree."""
+    """Write one .md file at root/{dir}/{filename}.md — preserves full filename
+    (e.g. agents.py → agents.py.md) to avoid collisions between files that share
+    a stem (foo.py vs foo.ts) and reserved artifact names (_dir.md, _repo.md)."""
     p = Path(rel_path)
-    out_path = root / p.parent / (p.stem + ".md")
+    out_path = root / p.parent / (p.name + ".md")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     language = fs.get("language", "")
@@ -184,7 +186,8 @@ def _write_dir_md(root: Path, dir_path: str, ds: dict) -> None:
     if child_files:
         lines += ["## Files", ""]
         for f in child_files:
-            lines.append(f"- [`{f}`]({f.split('/')[-1].rsplit('.', 1)[0] + '.md'})")
+            # Link uses full filename + .md to match _write_file_summary_md output
+            lines.append(f"- [`{f}`]({f.split('/')[-1]}.md)")
         lines.append("")
 
     if key_entities:
