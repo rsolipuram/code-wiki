@@ -108,3 +108,37 @@ open http://localhost:3000          # Frontend
 
 See `.claude/rules/architecture.md` for facet intelligence, agent pipeline, and wiki generation details.
 See `.claude/rules/wiki-content.md` for wiki page types, quality benchmarks, and content strategy.
+
+## Code analysis pipeline setup (end-to-end)
+
+The pipeline is asynchronous and runs as an RQ background job:
+
+1. `POST /repositories` enqueues `analyze_repository(...)` (see `backend/src/api/routes/repositories.py`).
+2. An RQ worker (`rq worker --worker-class rq.SimpleWorker analysis`) executes `backend/src/jobs/analyze.py::analyze_repository`.
+3. `analyze_repository` runs the 9-step flow:
+   - clone repo
+   - run repo recon (`src/recon/repo_recon.py`)
+   - parse entities (`src/parsers/extractor.py`)
+   - persist/index entities (PostgreSQL + Qdrant)
+   - run facet analysis (`src/orchestrator/graph.py::run_analysis`)
+   - build relationship graph (Neo4j)
+   - detect modules
+   - generate wiki pages (`src/wiki/v2_pipeline.py` when V2 enabled)
+   - finalize status/progress
+4. Progress is dual-written to:
+   - PostgreSQL (`repositories.progress` JSON)
+   - Redis pub/sub for SSE (`src/api/progress_events.py`)
+
+Facet analysis orchestration (`backend/src/orchestrator/graph.py`) is layered:
+
+- Layer 0: Repo fingerprinting (or re-use precomputed fingerprint)
+- Layer 1a: Heuristic agents
+- Layer 1b: ReAct agents (+ tag-triggered follow-up agents)
+- Layer 1c: Single-pass agents
+- Conflict synthesis + dossier indexing for RAG
+
+Wiki generation (V2) uses a LangGraph state pipeline in `backend/src/wiki/agents/graph.py`:
+
+`architect -> planner -> writer -> critic -> (annotator + diagrammer + tabulator) -> assembler`
+
+The critic can route back to writer for bounded retries before enrichment/assembly.
