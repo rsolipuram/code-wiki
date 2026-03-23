@@ -3,6 +3,7 @@
 import json
 import logging
 from pathlib import Path
+from typing import Optional
 
 from src.agents.primitives.tools import search_code
 from src.dossier.manager import DossierManager
@@ -14,18 +15,40 @@ logger = logging.getLogger(__name__)
 AGENT_NAME = "business_rule_extractor"
 
 
-def run(repo_path: str, dossier_manager: DossierManager) -> None:
-    # Collect docstrings and comments from domain-ish files
-    domain_files = search_code(repo_path, r"class|interface|struct|type\s+\w+",
-                               extensions=[".py", ".ts", ".go", ".java"])
-    samples = []
-    for result in domain_files[:15]:
-        file_path = Path(repo_path) / result["file"]
-        try:
-            content = file_path.read_text(errors="replace")[:1500]
-            samples.append(f"--- {result['file']} ---\n{content}")
-        except OSError:
-            pass
+def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
+    # Build candidate file list: prefer key_entities from compressed if available
+    if compressed is not None and compressed.key_entities:
+        # Extract unique file paths from top-scored entities (classes, interfaces, models)
+        seen: set[str] = set()
+        candidate_files: list[str] = []
+        for entity in compressed.key_entities:
+            f = entity.get("file_path", "")
+            if f and f not in seen:
+                seen.add(f)
+                candidate_files.append(f)
+        samples = []
+        for rel_path in candidate_files[:15]:
+            file_path = Path(repo_path) / rel_path
+            try:
+                content = file_path.read_text(errors="replace")[:1500]
+                # Prefer LLM summary if available, prepend it for context
+                summary = compressed.file_summaries.get(rel_path)
+                header = f"[Summary: {summary.summary}]\n" if summary else ""
+                samples.append(f"--- {rel_path} ---\n{header}{content}")
+            except OSError:
+                pass
+    else:
+        # Fallback: regex search
+        domain_files = search_code(repo_path, r"class|interface|struct|type\s+\w+",
+                                   extensions=[".py", ".ts", ".go", ".java"])
+        samples = []
+        for result in domain_files[:15]:
+            file_path = Path(repo_path) / result["file"]
+            try:
+                content = file_path.read_text(errors="replace")[:1500]
+                samples.append(f"--- {result['file']} ---\n{content}")
+            except OSError:
+                pass
 
     if not samples:
         dossier_manager.write_section("domain_model", DomainModel())

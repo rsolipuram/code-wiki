@@ -19,7 +19,7 @@ MAX_STEPS = 15
 TIME_LIMIT = 150
 
 
-def run(repo_path: str, dossier_manager: DossierManager) -> None:
+def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
     triggered_risks = [tag for tag in TRIGGER_TAGS if dossier_manager.has_tag(tag)]
     if not triggered_risks:
         logger.info("VulnChainTracer: no trigger tags, skipping")

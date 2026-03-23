@@ -40,8 +40,10 @@ from src.agents.single_pass import (
 from src.dossier.manager import DossierManager
 from src.dossier.rag_index import index_dossier
 from src.dossier.schema import Dossier
+from src.dossier.serializer import dossier_output_path, serialize_dossier
 from src.recon import repo_recon
 from src.recon.fingerprint import RepoFingerprint
+from src.wiki.v2_types import CompressedCodebase
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +91,15 @@ class AnalysisPipeline:
         repository_id: str,
         fingerprint: Optional[RepoFingerprint] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        compressed: Optional["CompressedCodebase"] = None,
+        repo_name: Optional[str] = None,
     ) -> None:
         self.repo_path = repo_path
         self.repository_id = repository_id
         self.fingerprint = fingerprint
         self.progress_callback = progress_callback
+        self.compressed = compressed
+        self.repo_name = repo_name
         self._agents_completed = 0
         self._agents_total = 0
         self.dossier_manager = DossierManager(Dossier(
@@ -154,6 +160,13 @@ class AnalysisPipeline:
         logger.info("[Conflict] Running ConflictSynthesizer")
         conflict_synthesizer.run(self.dossier_manager)
 
+        # ── Serialize Dossier to disk for inspection ──────────────────────────
+        try:
+            out_path = dossier_output_path(self.repo_path, repo_name=self.repo_name)
+            serialize_dossier(self.dossier_manager.dossier, out_path)
+        except Exception as exc:
+            logger.warning("[Dossier] Serialization failed (non-fatal): %s", exc)
+
         # ── Index Dossier into Qdrant for RAG ─────────────────────────────────
         logger.info("[RAG] Indexing Dossier findings")
         try:
@@ -192,7 +205,7 @@ class AnalysisPipeline:
             t0 = time.monotonic()
             logger.info("[ReAct] Starting agent %s", name)
             try:
-                _REACT_AGENTS[name](self.repo_path, self.dossier_manager)
+                _REACT_AGENTS[name](self.repo_path, self.dossier_manager, self.compressed)
                 elapsed = time.monotonic() - t0
                 logger.info("[ReAct] Agent %s completed (%.1fs)", name, elapsed)
                 self._report_agent_progress(name)
@@ -206,14 +219,14 @@ class AnalysisPipeline:
                 self._report_agent_progress(name)
 
     def _run_single_pass(self, agents: dict, fingerprint: RepoFingerprint) -> None:
-        """Run single-pass agents (most accept fingerprint, some don't)."""
+        """Run single-pass agents (architectural_classifier also gets fingerprint; all get compressed)."""
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             futures = {}
             for name, fn in agents.items():
                 if name == "architectural_classifier":
-                    future = executor.submit(fn, self.repo_path, self.dossier_manager, fingerprint)
+                    future = executor.submit(fn, self.repo_path, self.dossier_manager, fingerprint, self.compressed)
                 else:
-                    future = executor.submit(fn, self.repo_path, self.dossier_manager)
+                    future = executor.submit(fn, self.repo_path, self.dossier_manager, self.compressed)
                 futures[future] = name
 
             for future in concurrent.futures.as_completed(futures):
@@ -233,6 +246,8 @@ def run_analysis(
     repository_id: str,
     fingerprint: Optional[RepoFingerprint] = None,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    compressed: Optional["CompressedCodebase"] = None,
+    repo_name: Optional[str] = None,
 ) -> Dossier:
     """Entry point for the full analysis pipeline.
 
@@ -240,6 +255,8 @@ def run_analysis(
         repo_path: Absolute local path to the cloned repository.
         repository_id: Repository UUID from PostgreSQL.
         progress_callback: Optional (completed, total, agent_name) callback.
+        compressed: Optional pre-run CompressedCodebase to pass to agents.
+        repo_name: Human-readable repo name for artifact output path alignment.
 
     Returns:
         Populated Dossier ready for wiki generation.
@@ -249,5 +266,7 @@ def run_analysis(
         repository_id=repository_id,
         fingerprint=fingerprint,
         progress_callback=progress_callback,
+        compressed=compressed,
+        repo_name=repo_name,
     )
     return pipeline.run()

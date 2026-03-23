@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 AGENT_NAME = "error_resilience_analyzer"
 
 
-def run(repo_path: str, dossier_manager: DossierManager) -> None:
+def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
     retry_hits = search_code(repo_path, r"retry|backoff|Retry|@retry",
                              extensions=[".py", ".ts", ".js", ".go"])
     circuit_hits = search_code(repo_path, r"circuit.breaker|CircuitBreaker|hystrix",

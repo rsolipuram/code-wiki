@@ -41,6 +41,7 @@ from src.wiki.page_builders.special_pages import (
 from src.wiki.md_exporter import export_wiki_artifacts
 from src.wiki.renderer import render_wiki_pages
 from src.wiki.v2_types import (
+    CompressedCodebase,
     EnrichedSection,
     WikiPlan,
     WikiSectionPlan,
@@ -63,6 +64,7 @@ def generate_wiki_v2(
     dossier: Dossier,
     commit_hash: str,
     page_progress_callback: Optional[Callable[[int, str], None]] = None,
+    compressed: Optional[CompressedCodebase] = None,
 ) -> dict[str, Any]:
     """Generate V2 wiki. Returns page count + generation warnings."""
     pages_created = 0
@@ -119,13 +121,17 @@ def generate_wiki_v2(
 
     # ── Phase 0: Compress ────────────────────────────────────────────────
     t0 = time.monotonic()
-    _report("Phase 0: Compressing codebase")
-    compressor = CodebaseCompressor()
-    compressed = compressor.compress(repo_path, entities, fingerprint, scored_entities)
-    logger.info(
-        "V2 Phase 0 (Compress): level=%s (%.1fs)",
-        compressed.compression_level, time.monotonic() - t0,
-    )
+    if compressed is not None:
+        logger.info("V2 Phase 0 (Compress): reusing pre-run compressed codebase (level=%s)", compressed.compression_level)
+        _report("Phase 0: Using pre-computed codebase compression")
+    else:
+        _report("Phase 0: Compressing codebase")
+        compressor = CodebaseCompressor()
+        compressed = compressor.compress(repo_path, entities, fingerprint, scored_entities)
+        logger.info(
+            "V2 Phase 0 (Compress): level=%s (%.1fs)",
+            compressed.compression_level, time.monotonic() - t0,
+        )
 
     # ── Agent Pipeline ───────────────────────────────────────────────────
     # Runs: ARCHITECT → PLANNER → WRITER → [ANNOTATOR, DIAGRAMMER, TABULATOR] → ASSEMBLER

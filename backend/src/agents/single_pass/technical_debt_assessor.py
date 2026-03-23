@@ -15,7 +15,7 @@ _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "dist", "build"}
 _TODO_PATTERN = re.compile(r"#\s*(TODO|FIXME|HACK|XXX|NOTE):\s*(.+)", re.IGNORECASE)
 
 
-def run(repo_path: str, dossier_manager: DossierManager) -> None:
+def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
     """Scan for TODO/FIXME/HACK comments (no LLM call — pure pattern matching)."""
     root = Path(repo_path)
     items: list[TechnicalDebtItem] = []

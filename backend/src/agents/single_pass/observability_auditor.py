@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 AGENT_NAME = "observability_auditor"
 
 
-def run(repo_path: str, dossier_manager: DossierManager) -> None:
+def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
     log_hits = search_code(repo_path, r"logger\.|logging\.|log\.|console\.(log|error|warn)",
                            extensions=[".py", ".ts", ".js", ".go", ".java"])
     metric_hits = search_code(repo_path, r"prometheus|statsd|datadog|metrics\.|counter\.|gauge\.",

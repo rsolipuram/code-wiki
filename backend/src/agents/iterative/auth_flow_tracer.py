@@ -5,6 +5,7 @@ Traces authentication flows: login → token issuance → validation → refresh
 
 import logging
 import time
+from typing import Optional
 
 from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
@@ -18,16 +19,34 @@ TRIGGER_TAGS = {"pattern:jwt-auth", "pattern:session-auth", "pattern:oauth"}
 MAX_STEPS = 20
 TIME_LIMIT = 180
 
+_AUTH_KEYWORDS = {"login", "authenticate", "jwt", "token", "session", "oauth", "passport", "bearer"}
 
-def run(repo_path: str, dossier_manager: DossierManager) -> None:
+
+def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
     start_time = time.time()
     steps = 0
     visited: set[str] = set()
     raw_flows: list[dict] = []
 
-    auth_files = search_code(repo_path, r"login|authenticate|jwt\.sign|jwt\.verify|passport",
-                             extensions=[".py", ".ts", ".js"])
-    candidates = list({r["file"] for r in auth_files})
+    # Use compressed file_summaries + import_graph to pre-identify auth files
+    if compressed is not None and compressed.file_summaries:
+        candidates: list[str] = []
+        for rel_path, summary in compressed.file_summaries.items():
+            text = (summary.summary or "").lower()
+            if any(kw in text for kw in _AUTH_KEYWORDS):
+                candidates.append(rel_path)
+        # Also scan import_graph context for auth-related paths
+        if not candidates and compressed.import_graph_summary:
+            # Fall through to regex search below
+            candidates = []
+        logger.info("AuthFlowTracer: %d candidate files from compressed summaries", len(candidates))
+    else:
+        candidates = []
+
+    if not candidates:
+        auth_files = search_code(repo_path, r"login|authenticate|jwt\.sign|jwt\.verify|passport",
+                                 extensions=[".py", ".ts", ".js"])
+        candidates = list({r["file"] for r in auth_files})
 
     messages = [{"role": "system", "content": (
         "You are AuthFlowTracer. Map the complete authentication flow: "

@@ -25,6 +25,12 @@ MAX_STEPS = 30
 TIME_LIMIT = 300  # seconds
 CONVERGENCE_PATIENCE = 3  # consecutive no-new-findings before stopping
 
+_SECURITY_KEYWORDS = {
+    "auth", "login", "password", "jwt", "token", "session", "oauth",
+    "sql", "query", "injection", "secret", "key", "crypto", "hash",
+    "cors", "csrf", "xss", "deserializ", "pickle", "eval", "exec",
+}
+
 _SYSTEM_PROMPT = """You are SecuritySentinel, a specialist security analyst for code repositories.
 
 Your goal: identify authentication vulnerabilities, injection risks, secret exposure, and insecure patterns.
@@ -46,7 +52,7 @@ When you've covered all relevant files or have enough evidence, say STOP.
 """
 
 
-def run(repo_path: str, dossier_manager: DossierManager) -> None:
+def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
     """Execute the SecuritySentinel ReAct loop."""
     start_time = time.time()
     steps = 0
@@ -54,15 +60,24 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
     consecutive_no_findings = 0
     total_findings = 0
 
-    # Initial scan to find relevant files
-    auth_files = search_code(repo_path, r"auth|login|password|jwt|token|session|oauth",
-                             extensions=[".py", ".ts", ".tsx", ".js", ".jsx"])
-    security_files = search_code(repo_path, r"sql|query|execute|cursor|db\.run",
-                                 extensions=[".py", ".ts", ".js"])
+    # Use compressed file_summaries to pre-identify risky files
+    if compressed is not None and compressed.file_summaries:
+        candidate_files: list[str] = []
+        for rel_path, summary in compressed.file_summaries.items():
+            text = (summary.summary or "").lower()
+            if any(kw in text for kw in _SECURITY_KEYWORDS):
+                candidate_files.append(rel_path)
+        logger.info("SecuritySentinel: %d candidate files from compressed summaries", len(candidate_files))
+    else:
+        candidate_files = []
 
-    candidate_files: list[str] = list({
-        r["file"] for r in auth_files + security_files
-    })
+    if not candidate_files:
+        # Fallback: regex search
+        auth_files = search_code(repo_path, r"auth|login|password|jwt|token|session|oauth",
+                                 extensions=[".py", ".ts", ".tsx", ".js", ".jsx"])
+        security_files = search_code(repo_path, r"sql|query|execute|cursor|db\.run",
+                                     extensions=[".py", ".ts", ".js"])
+        candidate_files = list({r["file"] for r in auth_files + security_files})
 
     if not candidate_files:
         logger.info("SecuritySentinel: no candidate files found")

@@ -28,7 +28,7 @@ Return JSON only (no markdown):
 """
 
 
-def run(repo_path: str, dossier_manager: DossierManager, fingerprint: RepoFingerprint) -> None:
+def run(repo_path: str, dossier_manager: DossierManager, fingerprint: RepoFingerprint, compressed=None) -> None:
     import os
     try:
         dirs = [d for d in os.listdir(repo_path) if os.path.isdir(os.path.join(repo_path, d))

@@ -31,6 +31,8 @@ from src.parsers.extractor import extract_entities
 from src.recon import repo_recon
 from src.storage import graph_db
 from src.storage.repo_cache import clone, get_commit_hash, list_files
+from src.wiki.compressor import CodebaseCompressor
+from src.wiki.interestingness import score_entities
 from src.wiki.orchestrator import generate_module_wiki
 from src.wiki.v2_pipeline import generate_wiki_v2
 from src.dossier.rag_index import index_entities
@@ -159,6 +161,25 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             logger.info("[%s] Step 4 done (%.1fs)", repository_id, time.monotonic() - t0)
             _progress(4, "Persisting entities", f"Indexed {len(entities)} entities")
 
+            # ── Step 4.5: Compress codebase (shared by agents + wiki pipeline) ──
+            _progress(5, "Compressing codebase", "Building code summaries...")
+            t0 = time.monotonic()
+            logger.info("[%s] Step 4.5: Compressing codebase", repository_id)
+            compressed = None
+            try:
+                scored_entities = score_entities(entities)
+                compressor = CodebaseCompressor()
+                compressed = compressor.compress(str(local_path), entities, fingerprint, scored_entities)
+                logger.info(
+                    "[%s] Step 4.5 done (%.1fs): level=%s, %d key_entities, %d file_summaries",
+                    repository_id, time.monotonic() - t0,
+                    compressed.compression_level,
+                    len(compressed.key_entities),
+                    len(compressed.file_summaries),
+                )
+            except Exception as exc:
+                logger.warning("[%s] Step 4.5: compressor failed (non-fatal, agents will run without): %s", repository_id, exc)
+
             # ── Step 5: Run facet analysis (orchestrator) ───────────────────
             _progress(5, "Running AI analysis", "Starting agents...")
             t0 = time.monotonic()
@@ -173,6 +194,8 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                 str(local_path), repository_id,
                 fingerprint=fingerprint,
                 progress_callback=_agent_progress_callback,
+                compressed=compressed,
+                repo_name=repo.name or repo_url.split("/")[-1],
             )
             logger.info("[%s] Step 5 done (%.1fs)", repository_id, time.monotonic() - t0)
 
@@ -235,6 +258,7 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                     dossier=dossier,
                     commit_hash=commit_hash,
                     page_progress_callback=_page_progress_callback,
+                    compressed=compressed,
                 )
                 if isinstance(v2_result, dict):
                     pages_created = int(v2_result.get("pages_created", 0))

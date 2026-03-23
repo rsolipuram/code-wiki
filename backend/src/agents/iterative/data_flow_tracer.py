@@ -6,6 +6,7 @@ Writes to Dossier sections['data_flow'].
 
 import logging
 import time
+from typing import Optional
 
 from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
@@ -28,18 +29,35 @@ FLOW: entry=<file:fn> transform=<description> destination=<file or type>
 Say STOP when you have mapped the main data flows.
 """
 
+_ENTRY_POINT_KEYWORDS = {
+    "route", "handler", "endpoint", "controller", "api", "request", "response",
+    "handle", "process", "dispatch", "receive",
+}
 
-def run(repo_path: str, dossier_manager: DossierManager) -> None:
+
+def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
     start_time = time.time()
     steps = 0
     visited: set[str] = set()
     raw_flows: list[dict] = []
 
-    entry_files = search_code(
-        repo_path, r"@app\.route|@router\.|def handle|async def post|async def get",
-        extensions=[".py", ".ts", ".js"]
-    )
-    candidate_files = list({r["file"] for r in entry_files})
+    # Use compressed call_graph_summary + file_summaries to locate entry points
+    if compressed is not None and compressed.file_summaries:
+        candidate_files: list[str] = []
+        for rel_path, summary in compressed.file_summaries.items():
+            text = (summary.summary or "").lower()
+            if any(kw in text for kw in _ENTRY_POINT_KEYWORDS):
+                candidate_files.append(rel_path)
+        logger.info("DataFlowTracer: %d candidate files from compressed summaries", len(candidate_files))
+    else:
+        candidate_files = []
+
+    if not candidate_files:
+        entry_files = search_code(
+            repo_path, r"@app\.route|@router\.|def handle|async def post|async def get",
+            extensions=[".py", ".ts", ".js"]
+        )
+        candidate_files = list({r["file"] for r in entry_files})
 
     if not candidate_files:
         dossier_manager.write_section(
@@ -49,7 +67,14 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
         dossier_manager.mark_agent_complete(AGENT_NAME)
         return
 
+    # Prepend call_graph_summary as context if available
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    if compressed is not None and compressed.call_graph_summary:
+        messages.append({
+            "role": "user",
+            "content": f"Call graph summary for context:\n\n{compressed.call_graph_summary[:2000]}",
+        })
+        messages.append({"role": "assistant", "content": "Understood. I'll use this to trace data flows."})
 
     for file_rel in candidate_files[:10]:  # cap at 10 entry points
         if steps >= MAX_STEPS or (time.time() - start_time) > TIME_LIMIT:

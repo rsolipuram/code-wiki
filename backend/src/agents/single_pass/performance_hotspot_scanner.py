@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 AGENT_NAME = "performance_hotspot_scanner"
 
 
-def run(repo_path: str, dossier_manager: DossierManager) -> None:
+def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
     # Heuristic pre-filtering
     n_plus_one = search_code(repo_path, r"for\s+\w+\s+in\s+\w+.*\.(filter|get|find|query)\(",
                              extensions=[".py", ".ts", ".js"])
