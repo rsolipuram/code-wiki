@@ -30,9 +30,20 @@ def serialize_dossier(dossier: Dossier, output_path: str) -> str:
         The path that was written.
     """
     data = dossier.to_dict()
+
+    # Build tag distribution from responses
+    tag_dist: dict[str, int] = {}
+    for r in dossier.responses:
+        for t in r.tags:
+            tag_dist[t] = tag_dist.get(t, 0) + 1
+
     data["_meta"] = {
+        "response_count": len(dossier.responses),
+        "unique_tags": sorted(dossier.all_tags()),
+        "tag_distribution": tag_dist,
         "agents_completed": list(dossier.agents_completed),
         "agents_failed": list(dossier.agents_failed),
+        # Legacy fields (kept during migration)
         "section_keys": list(dossier.sections.keys()),
         "security_finding_count": len(dossier.security),
         "conflict_count": len(dossier.conflicts),
@@ -45,11 +56,10 @@ def serialize_dossier(dossier: Dossier, output_path: str) -> str:
     out.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
     logger.info(
-        "[Dossier] Serialized to %s  (sections=%s, security=%d, conflicts=%d)",
+        "[Dossier] Serialized to %s  (responses=%d, tags=%s)",
         output_path,
-        list(dossier.sections.keys()),
-        len(dossier.security),
-        len(dossier.conflicts),
+        len(dossier.responses),
+        sorted(dossier.all_tags()),
     )
     return output_path
 

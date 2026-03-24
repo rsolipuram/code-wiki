@@ -5,12 +5,13 @@ import logging
 
 from src.agents.primitives.tools import search_code
 from src.dossier.manager import DossierManager
-from src.dossier.schema import PerformanceHotspot, PerformanceProfile
+from src.dossier.schema import AgentResponse, PerformanceHotspot, PerformanceProfile
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "performance_hotspot_scanner"
+TAGS = ["performance", "optimization"]
 
 
 def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
@@ -67,14 +68,18 @@ Return JSON only:
     except Exception as exc:
         logger.warning("PerformanceHotspotScanner failed: %s", exc)
 
-    dossier_manager.write_section(
-        "performance",
-        PerformanceProfile(
-            agent_name=AGENT_NAME,
-            hotspots=hotspots,
-            n_plus_one_detected=n_plus_one_detected,
-            blocking_io_files=list(set(blocking_io_files)),
-        ),
+    perf_profile = PerformanceProfile(
+        agent_name=AGENT_NAME,
+        hotspots=hotspots,
+        n_plus_one_detected=n_plus_one_detected,
+        blocking_io_files=list(set(blocking_io_files)),
     )
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=perf_profile.confidence,
+        output=perf_profile.model_dump(),
+        output_type="PerformanceProfile",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("PerformanceHotspotScanner: %d hotspots", len(hotspots))

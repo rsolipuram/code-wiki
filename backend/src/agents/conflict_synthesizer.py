@@ -8,12 +8,13 @@ import json
 import logging
 
 from src.dossier.manager import DossierManager
-from src.dossier.schema import ConflictAnalysis
+from src.dossier.schema import AgentResponse, ConflictAnalysis
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "conflict_synthesizer"
+TAGS = ["conflict", "cross-cutting"]
 
 _CONFLICT_CHECKS = [
     {
@@ -39,28 +40,25 @@ def run(dossier_manager: DossierManager) -> None:
     conflicts_written = 0
 
     for check in _CONFLICT_CHECKS:
-        section_a = dossier_manager.get_section(check["facet_a"])
-        section_b = dossier_manager.get_section(check["facet_b"])
+        responses_a = dossier_manager.dossier.by_tag(check["facet_a"])
+        responses_b = dossier_manager.dossier.by_tag(check["facet_b"])
 
-        if section_a is None or section_b is None:
+        if not responses_a or not responses_b:
             continue
 
-        # Convert to string for LLM
-        def _serialize(obj):
-            if obj is None:
-                return "null"
-            try:
-                return obj.model_dump_json(indent=2)
-            except AttributeError:
-                return json.dumps(str(obj)[:500])
+        def _serialize_responses(responses):
+            parts = []
+            for r in responses[:3]:
+                parts.append(json.dumps(r.output, default=str)[:400])
+            return "\n".join(parts)
 
         prompt = f"""You are ConflictSynthesizer. {check['prompt_fragment']}
 
 {check['facet_a']} findings:
-{_serialize(section_a)[:800]}
+{_serialize_responses(responses_a)[:800]}
 
 {check['facet_b']} findings:
-{_serialize(section_b)[:800]}
+{_serialize_responses(responses_b)[:800]}
 
 IMPORTANT RULES:
 - Do NOT pick a winner or say one finding is "correct"
@@ -95,7 +93,12 @@ If no contradiction, return:
                 why_both_coexist=data.get("why_both_coexist", ""),
                 developer_questions=data.get("developer_questions", []),
             )
-            dossier_manager.write_conflict(conflict)
+            dossier_manager.write_response(AgentResponse(
+                agent_name=AGENT_NAME,
+                tags=TAGS,
+                output=conflict.model_dump(),
+                output_type="ConflictAnalysis",
+            ))
             conflicts_written += 1
             logger.info(
                 "Conflict detected: %s vs %s",

@@ -13,14 +13,15 @@ import time
 import uuid
 from typing import Any
 
-from src.agents.primitives.tools import read_file, search_code, write_finding
+from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
-from src.dossier.schema import SecurityFinding, Severity
+from src.dossier.schema import AgentResponse, SecurityFinding, Severity
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "security_sentinel"
+TAGS = ["security", "risk"]
 MAX_STEPS = 30
 TIME_LIMIT = 300  # seconds
 CONVERGENCE_PATIENCE = 3  # consecutive no-new-findings before stopping
@@ -160,6 +161,12 @@ def _extract_findings(response: str, file_path: str, dossier_manager: DossierMan
             evidence_lines=[evidence_file],
             tags=[f"risk:{finding_type}"],
         )
-        write_finding(dossier_manager, finding)
+        dossier_manager.write_response(AgentResponse(
+            agent_name=AGENT_NAME,
+            tags=TAGS + finding.tags,
+            confidence=1.0,
+            output=finding.model_dump(),
+            output_type="SecurityFinding",
+        ))
         count += 1
     return count

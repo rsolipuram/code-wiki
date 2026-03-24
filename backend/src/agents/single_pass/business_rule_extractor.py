@@ -7,12 +7,13 @@ from typing import Optional
 
 from src.agents.primitives.tools import search_code
 from src.dossier.manager import DossierManager
-from src.dossier.schema import BusinessRule, DomainModel
+from src.dossier.schema import AgentResponse, BusinessRule, DomainModel
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "business_rule_extractor"
+TAGS = ["domain", "business-rules"]
 
 
 def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
@@ -51,7 +52,14 @@ def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> Non
                 pass
 
     if not samples:
-        dossier_manager.write_section("domain_model", DomainModel(agent_name=AGENT_NAME))
+        empty_model = DomainModel(agent_name=AGENT_NAME)
+        dossier_manager.write_response(AgentResponse(
+            agent_name=AGENT_NAME,
+            tags=TAGS,
+            confidence=empty_model.confidence,
+            output=empty_model.model_dump(),
+            output_type="DomainModel",
+        ))
         dossier_manager.mark_agent_complete(AGENT_NAME)
         return
 
@@ -83,7 +91,13 @@ Return JSON only:
         logger.warning("BusinessRuleExtractor failed: %s", exc)
         model = DomainModel(agent_name=AGENT_NAME)
 
-    dossier_manager.write_section("domain_model", model)
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=model.confidence,
+        output=model.model_dump(),
+        output_type="DomainModel",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("BusinessRuleExtractor: %d entities, %d rules",
                 len(model.entities), len(model.business_rules))

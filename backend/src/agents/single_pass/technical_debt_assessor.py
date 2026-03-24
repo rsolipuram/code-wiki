@@ -5,11 +5,12 @@ import re
 from pathlib import Path
 
 from src.dossier.manager import DossierManager
-from src.dossier.schema import Severity, TechnicalDebt, TechnicalDebtItem
+from src.dossier.schema import AgentResponse, Severity, TechnicalDebt, TechnicalDebtItem
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "technical_debt_assessor"
+TAGS = ["quality", "technical-debt"]
 
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "dist", "build"}
 _TODO_PATTERN = re.compile(r"#\s*(TODO|FIXME|HACK|XXX|NOTE):\s*(.+)", re.IGNORECASE)
@@ -62,6 +63,12 @@ def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> Non
         fixme_count=fixme_count,
         smell_density=smell_density,
     )
-    dossier_manager.write_section("technical_debt", debt)
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=debt.confidence,
+        output=debt.model_dump(),
+        output_type="TechnicalDebt",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("TechnicalDebtAssessor: %d items (%.1f/kloc)", len(items), smell_density)

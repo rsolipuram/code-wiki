@@ -12,6 +12,7 @@ from typing import Optional
 
 from src.dossier.manager import DossierManager
 from src.dossier.schema import (
+    AgentResponse,
     DependencyAnalysis,
     DependencyEntry,
     DependencyVulnerability,
@@ -21,6 +22,7 @@ from src.dossier.schema import (
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "dependency_auditor"
+TAGS = ["dependencies", "supply-chain"]
 
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__", ".mypy_cache"}
 
@@ -61,7 +63,13 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
         total_vulnerabilities=total_vulns,
         high_risk_packages=high_risk,
     )
-    dossier_manager.write_section("dependencies", analysis)
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=1.0,
+        output=analysis.model_dump(),
+        output_type="DependencyAnalysis",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("DependencyAuditor: found %d packages, %d vulns", len(packages), total_vulns)
 

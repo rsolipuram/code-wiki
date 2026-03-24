@@ -5,12 +5,13 @@ import logging
 
 from src.agents.primitives.tools import search_code
 from src.dossier.manager import DossierManager
-from src.dossier.schema import ObservabilityProfile
+from src.dossier.schema import AgentResponse, ObservabilityProfile
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "observability_auditor"
+TAGS = ["observability", "monitoring"]
 
 
 def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
@@ -57,7 +58,13 @@ Return JSON only:
             has_tracing=len(trace_hits) > 0,
         )
 
-    dossier_manager.write_section("observability", profile)
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=profile.confidence,
+        output=profile.model_dump(),
+        output_type="ObservabilityProfile",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("ObservabilityAuditor: logging=%s metrics=%s tracing=%s",
                 profile.has_logging, profile.has_metrics, profile.has_tracing)

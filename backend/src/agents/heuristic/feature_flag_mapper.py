@@ -5,11 +5,12 @@ import re
 from pathlib import Path
 
 from src.dossier.manager import DossierManager
-from src.dossier.schema import FeatureFlag, FeatureFlagInventory
+from src.dossier.schema import AgentResponse, FeatureFlag, FeatureFlagInventory
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "feature_flag_mapper"
+TAGS = ["feature-flags", "configuration"]
 
 # Patterns to detect feature flag usage
 _FLAG_PATTERNS = [
@@ -52,6 +53,12 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
                     flags[name] = FeatureFlag(name=name, file_path=rel, usage_count=1)
 
     inventory = FeatureFlagInventory(agent_name=AGENT_NAME, flags=list(flags.values()))
-    dossier_manager.write_section("feature_flags", inventory)
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=1.0,
+        output=inventory.model_dump(),
+        output_type="FeatureFlagInventory",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("FeatureFlagMapper: %d flags detected", len(flags))

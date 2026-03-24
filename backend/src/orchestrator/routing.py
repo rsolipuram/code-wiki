@@ -29,9 +29,10 @@ def route_after_conflict(dossier: Dossier) -> str:
 
 def should_run_security(dossier: Dossier) -> bool:
     """Heuristic: run SecuritySentinel if web framework detected."""
-    deps = dossier.sections.get("dependencies")
-    if deps is not None and hasattr(deps, "packages"):
-        pkg_names = [p.name.lower() for p in deps.packages]
+    deps_resp = dossier.latest_by_tag("dependencies")
+    if deps_resp is not None:
+        packages = deps_resp.output.get("packages", [])
+        pkg_names = [p.get("name", "").lower() if isinstance(p, dict) else "" for p in packages]
         web_frameworks = {"fastapi", "flask", "django", "express", "koa", "nestjs", "spring"}
         return bool(set(pkg_names) & web_frameworks)
     return True  # run by default if no dep info

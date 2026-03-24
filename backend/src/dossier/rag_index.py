@@ -10,7 +10,7 @@ import logging
 import uuid
 from typing import Any, Optional
 
-from src.dossier.schema import Dossier, SecurityFinding, TechnicalDebtItem
+from src.dossier.schema import Dossier
 from src.llm.embeddings import embed_batch
 from src.storage.vector_db import COLLECTION_CODE_ENTITIES, delete_by_filter, upsert
 
@@ -19,72 +19,73 @@ logger = logging.getLogger(__name__)
 COLLECTION = "dossier_findings"
 
 
-def _finding_to_text(finding: Any) -> str:
-    """Serialize a finding to a plain text string for embedding."""
-    parts: list[str] = []
-    if hasattr(finding, "type"):
-        parts.append(f"Type: {finding.type}")
-    if hasattr(finding, "description"):
-        parts.append(f"Description: {finding.description}")
-    if hasattr(finding, "related_files") and finding.related_files:
-        parts.append(f"Files: {', '.join(finding.related_files)}")
-    if hasattr(finding, "related_modules") and finding.related_modules:
-        parts.append(f"Modules: {', '.join(finding.related_modules)}")
-    if hasattr(finding, "evidence_lines") and finding.evidence_lines:
-        parts.append(f"Evidence: {'; '.join(finding.evidence_lines[:3])}")
-    return "\n".join(parts)
-
 
 def _build_records(dossier: Dossier) -> list[tuple[str, str, dict]]:
-    """Collect (id, text, metadata) tuples from all Dossier sections."""
+    """Collect (id, text, metadata) tuples from all Dossier responses."""
     records: list[tuple[str, str, dict]] = []
 
-    # Security findings
-    for finding in dossier.security:
-        text = _finding_to_text(finding)
-        metadata = {
-            "section": "security",
-            "type": finding.type,
-            "severity": finding.severity.value,
-            "related_files": finding.related_files,
-            "related_modules": finding.related_modules,
-        }
-        records.append((finding.id, text, metadata))
+    for resp in dossier.responses:
+        out = resp.output
+        otype = resp.output_type
 
-    # Technical debt items (now in sections["technical_debt"])
-    technical_debt = dossier.sections.get("technical_debt")
-    if technical_debt is not None and hasattr(technical_debt, "items"):
-        for item in technical_debt.items:
-            text = f"Type: {item.type}\nFile: {item.file_path}:{item.line_number}\nDescription: {item.description}"
+        if otype == "SecurityFinding":
+            text = _finding_to_text_from_dict(out)
             metadata = {
-                "section": "technical_debt",
-                "type": item.type,
-                "severity": item.severity.value,
-                "related_files": [item.file_path],
+                "section": "security",
+                "type": out.get("type", ""),
+                "severity": out.get("severity", "info"),
+                "related_files": out.get("related_files", []),
+                "related_modules": out.get("related_modules", []),
+            }
+            records.append((out.get("id", str(uuid.uuid4())), text, metadata))
+
+        elif otype == "TechnicalDebt":
+            for item in out.get("items", []):
+                text = f"Type: {item.get('type', '')}\nFile: {item.get('file_path', '')}:{item.get('line_number', 0)}\nDescription: {item.get('description', '')}"
+                metadata = {
+                    "section": "technical_debt",
+                    "type": item.get("type", ""),
+                    "severity": item.get("severity", "low"),
+                    "related_files": [item.get("file_path", "")],
+                    "related_modules": [],
+                }
+                records.append((item.get("id", str(uuid.uuid4())), text, metadata))
+
+        elif otype == "ConflictAnalysis":
+            text = (
+                f"Conflict between {out.get('facet_a', '')} and {out.get('facet_b', '')}.\n"
+                f"{out.get('facet_a', '')} says: {out.get('finding_a', '')}\n"
+                f"{out.get('facet_b', '')} says: {out.get('finding_b', '')}\n"
+                f"Context: {out.get('why_both_coexist', '')}"
+            )
+            metadata = {
+                "section": "conflicts",
+                "type": "conflict",
+                "severity": "info",
+                "related_files": [],
                 "related_modules": [],
             }
-            records.append((item.id, text, metadata))
+            records.append((out.get("id", str(uuid.uuid4())), text, metadata))
 
-    # Conflicts
-    for conflict in dossier.conflicts:
-        text = (
-            f"Conflict between {conflict.facet_a} and {conflict.facet_b}.\n"
-            f"{conflict.facet_a} says: {conflict.finding_a}\n"
-            f"{conflict.facet_b} says: {conflict.finding_b}\n"
-            f"Context: {conflict.why_both_coexist}"
-        )
-        metadata = {
-            "section": "conflicts",
-            "type": "conflict",
-            "severity": "info",
-            "related_files": [],
-            "related_modules": [],
-        }
-        records.append((conflict.id, text, metadata))
-
-    # Drop records with blank text — empty vectors waste index space and produce junk search results
+    # Drop records with blank text
     records = [(id_, text, payload) for id_, text, payload in records if text.strip()]
     return records
+
+
+def _finding_to_text_from_dict(out: dict) -> str:
+    """Serialize a finding dict to plain text for embedding."""
+    parts: list[str] = []
+    if out.get("type"):
+        parts.append(f"Type: {out['type']}")
+    if out.get("description"):
+        parts.append(f"Description: {out['description']}")
+    if out.get("related_files"):
+        parts.append(f"Files: {', '.join(out['related_files'])}")
+    if out.get("related_modules"):
+        parts.append(f"Modules: {', '.join(out['related_modules'])}")
+    if out.get("evidence_lines"):
+        parts.append(f"Evidence: {'; '.join(out['evidence_lines'][:3])}")
+    return "\n".join(parts)
 
 
 def index_entities(entities: list[Any], repo_id: str) -> None:

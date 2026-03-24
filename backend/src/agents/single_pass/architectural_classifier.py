@@ -4,13 +4,14 @@ import json
 import logging
 
 from src.dossier.manager import DossierManager
-from src.dossier.schema import ArchitectureStyle
+from src.dossier.schema import AgentResponse, ArchitectureStyle
 from src.llm.client import chat
 from src.recon.fingerprint import RepoFingerprint
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "architectural_classifier"
+TAGS = ["architecture", "design-patterns"]
 
 _PROMPT = """Classify the architecture of a software system based on the repository fingerprint and entity summary.
 
@@ -57,6 +58,12 @@ def run(repo_path: str, dossier_manager: DossierManager, fingerprint: RepoFinger
             rationale="Fallback from RepoFingerprint system_type",
         )
 
-    dossier_manager.write_section("architecture", style)
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=style.confidence,
+        output=style.model_dump(),
+        output_type="ArchitectureStyle",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("ArchitecturalClassifier: %s (%.2f)", style.primary_style, style.confidence)

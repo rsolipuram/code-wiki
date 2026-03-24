@@ -22,6 +22,20 @@ class AgentOutput(BaseModel):
     confidence: float = 1.0
 
 
+class AgentResponse(BaseModel):
+    """Uniform wrapper for any agent's analysis output.
+
+    Every agent writes one or more AgentResponse objects to the Dossier.
+    Tags are predetermined per agent and enable cross-agent querying
+    (e.g. by_tag("security") spans security_sentinel + auth_flow_tracer).
+    """
+    agent_name: str
+    tags: list[str] = Field(default_factory=list)
+    confidence: float = 1.0
+    output: dict[str, Any] = Field(default_factory=dict)
+    output_type: str = ""  # class name for typed reconstruction
+
+
 def _new_id() -> str:
     return str(uuid.uuid4())
 
@@ -300,8 +314,9 @@ _SECTION_REGISTRY: dict[str, type["AgentOutput"]] = {
 class Dossier(BaseModel):
     """Shared blackboard for the entire analysis pipeline.
 
-    This IS the LangGraph TypedDict state (adapted to Pydantic for validation).
-    Agents read from and write to sections of this object only.
+    Primary storage is the `responses` list — a flat log of AgentResponse objects
+    queryable by tag or agent name. Legacy fields (sections, security, conflicts)
+    are populated via dual-write during migration and will be removed in Phase 5.
     """
 
     # Repository identification
@@ -309,26 +324,51 @@ class Dossier(BaseModel):
     repository_url: Optional[str] = None
     commit_hash: Optional[str] = None
 
-    # Layer 1 findings — dynamic section registry (one entry per facet agent)
+    # ── Primary storage (tag-based) ──────────────────────────────────────────
+    responses: list[AgentResponse] = Field(default_factory=list)
+
+    # ── Legacy storage (Phase 5 removal) ─────────────────────────────────────
     sections: dict[str, Any] = Field(default_factory=dict)
-
-    # Security findings (append-only list — not a single AgentOutput)
     security: list[SecurityFinding] = Field(default_factory=list)
-
-    # Cross-facet conflicts (produced by ConflictSynthesizer)
     conflicts: list[ConflictAnalysis] = Field(default_factory=list)
-
-    # Emitted tags for downstream routing (e.g. "risk:sql-injection")
     emitted_tags: list[str] = Field(default_factory=list)
 
     # Execution metadata
     agents_completed: list[str] = Field(default_factory=list)
     agents_failed: list[str] = Field(default_factory=list)
-    extra: dict[str, Any] = Field(default_factory=dict)  # overflow / future fields
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+    # ── Query interface ──────────────────────────────────────────────────────
+
+    def by_tag(self, tag: str) -> list[AgentResponse]:
+        """Return all responses that carry the given tag."""
+        return [r for r in self.responses if tag in r.tags]
+
+    def by_agent(self, name: str) -> list[AgentResponse]:
+        """Return all responses from a specific agent."""
+        return [r for r in self.responses if r.agent_name == name]
+
+    def by_tags(self, tags: list[str]) -> list[AgentResponse]:
+        """Return responses matching ANY of the given tags (union)."""
+        tag_set = set(tags)
+        return [r for r in self.responses if tag_set & set(r.tags)]
+
+    def all_tags(self) -> set[str]:
+        """Return the set of all tags across all responses."""
+        return {t for r in self.responses for t in r.tags}
+
+    def latest_by_tag(self, tag: str) -> Optional[AgentResponse]:
+        """Return the most recent response with the given tag, or None."""
+        matches = self.by_tag(tag)
+        return matches[-1] if matches else None
+
+    # ── Serialization ────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a plain dict with sections serialized for downstream consumers."""
-        d = self.model_dump(exclude={"sections"})
+        """Return a plain dict with both responses and legacy sections serialized."""
+        d = self.model_dump(exclude={"sections", "responses"})
+        d["responses"] = [r.model_dump() for r in self.responses]
+        # Legacy sections (kept during migration)
         d["sections"] = {
             key: (val.model_dump() if isinstance(val, AgentOutput) else val)
             for key, val in self.sections.items()

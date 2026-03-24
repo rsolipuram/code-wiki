@@ -10,12 +10,13 @@ from typing import Optional
 
 from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
-from src.dossier.schema import DataFlowAnalysis, DataFlowEdge
+from src.dossier.schema import AgentResponse, DataFlowAnalysis, DataFlowEdge
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "data_flow_tracer"
+TAGS = ["data-flow", "integration"]
 MAX_STEPS = 25
 TIME_LIMIT = 240
 
@@ -60,10 +61,14 @@ def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> Non
         candidate_files = list({r["file"] for r in entry_files})
 
     if not candidate_files:
-        dossier_manager.write_section(
-            "data_flow",
-            DataFlowAnalysis(agent_name=AGENT_NAME),
-        )
+        analysis = DataFlowAnalysis(agent_name=AGENT_NAME)
+        dossier_manager.write_response(AgentResponse(
+            agent_name=AGENT_NAME,
+            tags=TAGS,
+            confidence=0.0,
+            output=analysis.model_dump(),
+            output_type="DataFlowAnalysis",
+        ))
         dossier_manager.mark_agent_complete(AGENT_NAME)
         return
 
@@ -113,13 +118,17 @@ def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> Non
             data_type=f.get("transform", ""),
         ))
 
-    dossier_manager.write_section(
-        "data_flow",
-        DataFlowAnalysis(
-            agent_name=AGENT_NAME,
-            flows=edges,
-        ),
+    analysis = DataFlowAnalysis(
+        agent_name=AGENT_NAME,
+        flows=edges,
     )
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=1.0,
+        output=analysis.model_dump(),
+        output_type="DataFlowAnalysis",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("DataFlowTracer: %d flows found in %d steps", len(raw_flows), steps)
 

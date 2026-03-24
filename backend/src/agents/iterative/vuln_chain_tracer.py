@@ -8,12 +8,13 @@ import time
 
 from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
-from src.dossier.schema import SecurityFinding, Severity
+from src.dossier.schema import AgentResponse, SecurityFinding, Severity
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "vuln_chain_tracer"
+TAGS = ["security", "vulnerability"]
 TRIGGER_TAGS = {"risk:sql-injection", "risk:xss", "risk:command-injection", "risk:path-traversal"}
 MAX_STEPS = 15
 TIME_LIMIT = 150
@@ -64,7 +65,13 @@ def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> Non
                     evidence_lines=[file_rel],
                     tags=[risk_tag],
                 )
-                dossier_manager.write_security_finding(finding)
+                dossier_manager.write_response(AgentResponse(
+                    agent_name=AGENT_NAME,
+                    tags=TAGS + [risk_tag],
+                    confidence=1.0,
+                    output=finding.model_dump(),
+                    output_type="SecurityFinding",
+                ))
 
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("VulnChainTracer: completed in %d steps", steps)

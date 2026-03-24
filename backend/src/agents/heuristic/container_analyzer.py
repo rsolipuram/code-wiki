@@ -7,11 +7,12 @@ from pathlib import Path
 import yaml  # PyYAML
 
 from src.dossier.manager import DossierManager
-from src.dossier.schema import ContainerService, ContainerTopology
+from src.dossier.schema import AgentResponse, ContainerService, ContainerTopology
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "container_analyzer"
+TAGS = ["infrastructure", "containers"]
 
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__"}
 
@@ -81,6 +82,12 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
         base_images=list(set(base_images)),
         is_multi_stage=is_multi_stage,
     )
-    dossier_manager.write_section("container_topology", topology)
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=1.0,
+        output=topology.model_dump(),
+        output_type="ContainerTopology",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("ContainerAnalyzer: %d services, %d base images", len(topology.services), len(topology.base_images))

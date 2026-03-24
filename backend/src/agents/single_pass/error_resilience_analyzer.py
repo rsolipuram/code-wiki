@@ -5,12 +5,13 @@ import logging
 
 from src.agents.primitives.tools import search_code
 from src.dossier.manager import DossierManager
-from src.dossier.schema import ErrorResilienceProfile
+from src.dossier.schema import AgentResponse, ErrorResilienceProfile
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "error_resilience_analyzer"
+TAGS = ["resilience", "error-handling"]
 
 
 def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> None:
@@ -55,7 +56,13 @@ Return JSON only:
             silent_failures=[r["file"] for r in bare_except[:5]],
         )
 
-    dossier_manager.write_section("error_resilience", profile)
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=profile.confidence,
+        output=profile.model_dump(),
+        output_type="ErrorResilienceProfile",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
 
 

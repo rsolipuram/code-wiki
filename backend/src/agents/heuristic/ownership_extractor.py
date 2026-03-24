@@ -5,11 +5,12 @@ import re
 from pathlib import Path
 
 from src.dossier.manager import DossierManager
-from src.dossier.schema import FileOwnership, OwnershipMap
+from src.dossier.schema import AgentResponse, FileOwnership, OwnershipMap
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "ownership_extractor"
+TAGS = ["ownership", "governance"]
 
 
 def run(repo_path: str, dossier_manager: DossierManager) -> None:
@@ -38,13 +39,17 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
 
     unique_owners = list({fo.owner for fo in ownerships})
 
-    dossier_manager.write_section(
-        "ownership",
-        OwnershipMap(
-            agent_name=AGENT_NAME,
-            owners=ownerships,
-            owner_count=len(unique_owners),
-        ),
+    ownership_map = OwnershipMap(
+        agent_name=AGENT_NAME,
+        owners=ownerships,
+        owner_count=len(unique_owners),
     )
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=1.0,
+        output=ownership_map.model_dump(),
+        output_type="OwnershipMap",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("OwnershipExtractor: %d ownership patterns", len(ownerships))

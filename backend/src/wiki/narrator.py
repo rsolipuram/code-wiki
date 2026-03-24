@@ -40,12 +40,14 @@ def generate_system_narrative(
 
     # Build architecture context from dossier
     arch_context = ""
-    arch = dossier.sections.get("architecture") if dossier else None
-    if arch:
-        arch_context = (
-            f"\nArchitecture: {arch.primary_style} "
-            f"(patterns: {', '.join(arch.patterns_detected[:5])})"
-        )
+    if dossier:
+        arch_resp = dossier.latest_by_tag("architecture")
+        if arch_resp:
+            arch = arch_resp.output
+            arch_context = (
+                f"\nArchitecture: {arch.get('primary_style', '')} "
+                f"(patterns: {', '.join(arch.get('patterns_detected', [])[:5])})"
+            )
 
     prompt = f"""Write a comprehensive technical overview of this codebase (1000-2000 words).
 This will be the introduction to the wiki documentation.
@@ -379,32 +381,39 @@ def _get_dossier_context(section: WikiSectionPlan, dossier) -> str:
 
     # Security findings relevant to section files
     relevant_files = set(section.all_relevant_files)
-    if dossier.security:
-        for finding in dossier.security[:5]:
-            if relevant_files & set(finding.related_files):
-                parts.append(
-                    f"Security ({finding.severity.value}): {finding.description}"
-                )
+    security_responses = dossier.by_tag("security") if dossier else []
+    for resp in security_responses[:5]:
+        out = resp.output
+        related = set(out.get("related_files", []))
+        if relevant_files & related:
+            sev = out.get("severity", "unknown")
+            if isinstance(sev, dict):
+                sev = sev.get("value", sev)
+            parts.append(f"Security ({sev}): {out.get('description', '')}")
 
     # Architecture info
-    arch = dossier.sections.get("architecture")
-    if arch:
-        parts.append(
-            f"Architecture: {arch.primary_style}, "
-            f"patterns: {', '.join(arch.patterns_detected[:3])}"
-        )
+    if dossier:
+        arch_resp = dossier.latest_by_tag("architecture")
+        if arch_resp:
+            arch = arch_resp.output
+            parts.append(
+                f"Architecture: {arch.get('primary_style', '')}, "
+                f"patterns: {', '.join(arch.get('patterns_detected', [])[:3])}"
+            )
 
     # Technical debt
-    tech_debt = dossier.sections.get("technical_debt")
-    if tech_debt:
-        relevant_debt = [
-            item for item in tech_debt.items
-            if item.file_path in relevant_files
-        ]
-        if relevant_debt:
-            parts.append(
-                f"Technical debt: {len(relevant_debt)} items in these files"
-            )
+    if dossier:
+        debt_resp = dossier.latest_by_tag("technical-debt")
+        if debt_resp:
+            items = debt_resp.output.get("items", [])
+            relevant_debt = [
+                item for item in items
+                if item.get("file_path") in relevant_files
+            ]
+            if relevant_debt:
+                parts.append(
+                    f"Technical debt: {len(relevant_debt)} items in these files"
+                )
 
     return "\n".join(parts)
 

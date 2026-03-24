@@ -234,7 +234,8 @@ def _build_structural_report(scored: list[ScoredEntity], all_entities: list[Pars
 
 def _format_dossier_context(findings: list[dict], dossier: Optional[Dossier]) -> str:
     """Format Dossier RAG results for Agent 3 prompt."""
-    if not findings and (dossier is None or not dossier.security):
+    has_security = dossier and dossier.by_tag("security") if dossier else False
+    if not findings and not has_security:
         return "No Dossier context available."
 
     parts = []
@@ -243,9 +244,10 @@ def _format_dossier_context(findings: list[dict], dossier: Optional[Dossier]) ->
         desc = f.get("description", str(f)[:100])
         parts.append(f"[{section}] {desc}")
 
-    arch = dossier.sections.get("architecture") if dossier else None
-    if arch:
-        parts.append(f"[architecture] style={arch.primary_style}")
+    if dossier:
+        arch_resp = dossier.latest_by_tag("architecture")
+        if arch_resp:
+            parts.append(f"[architecture] style={arch_resp.output.get('primary_style', '')}")
 
     return "\n".join(parts)
 

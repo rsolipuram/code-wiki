@@ -9,12 +9,13 @@ from typing import Optional
 
 from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
-from src.dossier.schema import AuthFlow, AuthFlowAnalysis
+from src.dossier.schema import AgentResponse, AuthFlow, AuthFlowAnalysis
 from src.llm.client import chat
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "auth_flow_tracer"
+TAGS = ["auth", "security", "identity"]
 TRIGGER_TAGS = {"pattern:jwt-auth", "pattern:session-auth", "pattern:oauth"}
 MAX_STEPS = 20
 TIME_LIMIT = 180
@@ -89,13 +90,17 @@ def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> Non
         # Files exist but LLM found no structured flows — still record an unknown pattern
         detected_patterns.append(AuthFlow(pattern="unknown"))
 
-    dossier_manager.write_section(
-        "auth_flow",
-        AuthFlowAnalysis(
-            agent_name=AGENT_NAME,
-            flows=detected_patterns,
-        ),
+    analysis = AuthFlowAnalysis(
+        agent_name=AGENT_NAME,
+        flows=detected_patterns,
     )
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=1.0,
+        output=analysis.model_dump(),
+        output_type="AuthFlowAnalysis",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("AuthFlowTracer: %d flow steps found", len(raw_flows))
 

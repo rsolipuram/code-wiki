@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from src.dossier.manager import DossierManager
-from src.dossier.schema import SecurityFinding, Severity
+from src.dossier.schema import AgentResponse, SecurityFinding, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -88,26 +88,30 @@ def search_code(
 
 
 def query_dossier(dossier_manager: DossierManager, section: str, query: Optional[str] = None) -> Any:
-    """Read a section of the Dossier.
+    """Query Dossier by tag (or legacy section name).
 
     Args:
         dossier_manager: The shared DossierManager.
-        section: Section name (e.g. "security", "dependencies").
+        section: Tag or section name (e.g. "security", "dependencies").
         query: Optional filter string (matched against descriptions).
 
     Returns:
-        Section value, filtered if query provided.
+        List of matching response outputs, filtered if query provided.
     """
-    value = dossier_manager.get_section(section)
-    if value is None:
-        return None
-    if query and isinstance(value, list):
+    responses = dossier_manager.dossier.by_tag(section)
+    if not responses:
+        # Fallback to legacy get_section for backward compat
+        value = dossier_manager.get_section(section)
+        return value
+
+    outputs = [r.output for r in responses]
+    if query:
         query_lower = query.lower()
         return [
-            item for item in value
-            if query_lower in str(getattr(item, "description", "") or "").lower()
+            out for out in outputs
+            if query_lower in str(out.get("description", "")).lower()
         ]
-    return value
+    return outputs if len(outputs) > 1 else outputs[0]
 
 
 def write_finding(dossier_manager: DossierManager, finding: SecurityFinding) -> str:
@@ -120,7 +124,12 @@ def write_finding(dossier_manager: DossierManager, finding: SecurityFinding) -> 
     Returns:
         "OK: <finding.id>" on success.
     """
-    dossier_manager.write_security_finding(finding)
+    dossier_manager.write_response(AgentResponse(
+        agent_name="tool_write_finding",
+        tags=["security"] + finding.tags,
+        output=finding.model_dump(),
+        output_type="SecurityFinding",
+    ))
     return f"OK: {finding.id}"
 
 

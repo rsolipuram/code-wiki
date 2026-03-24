@@ -5,10 +5,12 @@ import re
 from pathlib import Path
 
 from src.dossier.manager import DossierManager
+from src.dossier.schema import AgentResponse
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "api_contract_extractor"
+TAGS = ["api-contracts", "integration"]
 
 
 def run(repo_path: str, dossier_manager: DossierManager) -> None:
@@ -39,7 +41,12 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
     if proto_files:
         contracts["grpc"] = proto_files
 
-    extra = dossier_manager.get_section("extra") or {}
-    dossier_manager.write_section("extra", {**extra, "api_contracts": contracts})
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=1.0,
+        output={"openapi": contracts.get("openapi", []), "graphql": contracts.get("graphql", []), "grpc": contracts.get("grpc", [])},
+        output_type="APIContracts",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("APIContractExtractor: found %s contract types", list(contracts.keys()))

@@ -4,11 +4,12 @@ import logging
 from pathlib import Path
 
 from src.dossier.manager import DossierManager
-from src.dossier.schema import IaCAnalysis, IaCResource
+from src.dossier.schema import AgentResponse, IaCAnalysis, IaCResource
 
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "iac_analyzer"
+TAGS = ["infrastructure", "iac"]
 
 _IaC_PATTERNS = {
     "terraform": ["*.tf", "*.tfvars"],
@@ -46,13 +47,17 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
                 provider=tool,
             ))
 
-    dossier_manager.write_section(
-        "iac",
-        IaCAnalysis(
-            agent_name=AGENT_NAME,
-            provider=primary_provider,
-            resources=resources,
-        ),
+    iac_analysis = IaCAnalysis(
+        agent_name=AGENT_NAME,
+        provider=primary_provider,
+        resources=resources,
     )
+    dossier_manager.write_response(AgentResponse(
+        agent_name=AGENT_NAME,
+        tags=TAGS,
+        confidence=1.0,
+        output=iac_analysis.model_dump(),
+        output_type="IaCAnalysis",
+    ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("IaCAnalyzer: detected tools %s", list(findings.keys()))
