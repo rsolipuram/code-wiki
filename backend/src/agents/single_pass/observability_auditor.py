@@ -7,6 +7,7 @@ from src.agents.primitives.tools import search_code
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, ObservabilityProfile
 from src.llm.client import chat
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -68,3 +69,12 @@ Return JSON only:
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("ObservabilityAuditor: logging=%s metrics=%s tracing=%s",
                 profile.has_logging, profile.has_metrics, profile.has_tracing)
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="observability_auditor",
+    tags=TAGS,
+    tier="single_pass",
+    run=run,
+    needs_compressed=True,
+)

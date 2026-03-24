@@ -10,6 +10,7 @@ import logging
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, ConflictAnalysis
 from src.llm.client import chat
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -107,3 +108,11 @@ If no contradiction, return:
 
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("ConflictSynthesizer: %d conflicts written", conflicts_written)
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="conflict_synthesizer",
+    tags=TAGS,
+    tier="synthesis",
+    run=run,
+)

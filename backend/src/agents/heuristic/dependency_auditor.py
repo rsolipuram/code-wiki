@@ -18,6 +18,7 @@ from src.dossier.schema import (
     DependencyVulnerability,
     Severity,
 )
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -162,3 +163,11 @@ def _parse_cargo_toml(root: Path) -> list[DependencyEntry]:
         except OSError:
             pass
     return entries
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="dependency_auditor",
+    tags=TAGS,
+    tier="heuristic",
+    run=run,
+)

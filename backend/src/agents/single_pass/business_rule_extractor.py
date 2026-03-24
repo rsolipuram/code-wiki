@@ -9,6 +9,7 @@ from src.agents.primitives.tools import search_code
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, BusinessRule, DomainModel
 from src.llm.client import chat
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -101,3 +102,12 @@ Return JSON only:
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("BusinessRuleExtractor: %d entities, %d rules",
                 len(model.entities), len(model.business_rules))
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="business_rule_extractor",
+    tags=TAGS,
+    tier="single_pass",
+    run=run,
+    needs_compressed=True,
+)

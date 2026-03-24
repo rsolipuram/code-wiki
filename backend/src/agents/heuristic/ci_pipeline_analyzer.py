@@ -8,6 +8,7 @@ import yaml
 
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, CIJob, CIPipeline, CIStep
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -111,3 +112,11 @@ def _parse_jenkinsfile(root: Path) -> CIPipeline | None:
         )
     except OSError:
         return None
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="ci_pipeline_analyzer",
+    tags=TAGS,
+    tier="heuristic",
+    run=run,
+)

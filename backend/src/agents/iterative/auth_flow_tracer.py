@@ -11,6 +11,7 @@ from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, AuthFlow, AuthFlowAnalysis
 from src.llm.client import chat
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -112,3 +113,12 @@ def _extract_auth_flows(response: str) -> list[dict]:
     for match in pattern.finditer(response):
         flows.append({"step": match.group(1), "file": match.group(2), "function": match.group(3)})
     return flows
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="auth_flow_tracer",
+    tags=TAGS,
+    tier="react",
+    run=run,
+    needs_compressed=True,
+)

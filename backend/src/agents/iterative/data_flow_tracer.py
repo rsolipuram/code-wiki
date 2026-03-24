@@ -12,6 +12,7 @@ from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, DataFlowAnalysis, DataFlowEdge
 from src.llm.client import chat
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -144,3 +145,12 @@ def _extract_flows(response: str) -> list[dict]:
             "destination": match.group(3),
         })
     return flows
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="data_flow_tracer",
+    tags=TAGS,
+    tier="react",
+    run=run,
+    needs_compressed=True,
+)

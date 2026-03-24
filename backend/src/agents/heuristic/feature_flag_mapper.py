@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, FeatureFlag, FeatureFlagInventory
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -62,3 +63,11 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
     ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("FeatureFlagMapper: %d flags detected", len(flags))
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="feature_flag_mapper",
+    tags=TAGS,
+    tier="heuristic",
+    run=run,
+)

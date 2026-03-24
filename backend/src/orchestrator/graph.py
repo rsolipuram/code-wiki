@@ -6,12 +6,16 @@ Execution order:
   Layer 2: Wiki generation pipeline
 
 Dossier IS the shared state. Agents read from / write to it via DossierManager.
+
+Agent discovery is descriptor-driven: each agent module exports a DESCRIPTOR
+(AgentDescriptor) that declares its name, tier, tags, and resource needs.
+The orchestrator collects these at import time — no hardcoded dicts.
 """
 
 import concurrent.futures
 import logging
 import time
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from src.agents import conflict_synthesizer
 from src.agents.heuristic import (
@@ -41,38 +45,31 @@ from src.dossier.manager import DossierManager
 from src.dossier.rag_index import index_dossier
 from src.dossier.schema import Dossier
 from src.dossier.serializer import dossier_output_path, serialize_dossier
+from src.orchestrator.descriptor import AgentDescriptor
 from src.recon import repo_recon
 from src.recon.fingerprint import RepoFingerprint
 from src.wiki.v2_types import CompressedCodebase
 
 logger = logging.getLogger(__name__)
 
-# Maps agent name → callable (repo_path, dossier_manager) → None
-_HEURISTIC_AGENTS = {
-    "dependency_auditor": dependency_auditor.run,
-    "container_analyzer": container_analyzer.run,
-    "ci_pipeline_analyzer": ci_pipeline_analyzer.run,
-    "iac_analyzer": iac_analyzer.run,
-    "api_contract_extractor": api_contract_extractor.run,
-    "ownership_extractor": ownership_extractor.run,
-    "feature_flag_mapper": feature_flag_mapper.run,
-}
+# ── Agent registry: collected from module DESCRIPTOR exports ──────────────
+_ALL_AGENT_MODULES = [
+    dependency_auditor, container_analyzer, ci_pipeline_analyzer,
+    iac_analyzer, api_contract_extractor, ownership_extractor,
+    feature_flag_mapper,
+    security_sentinel, data_flow_tracer, auth_flow_tracer, vuln_chain_tracer,
+    architectural_classifier, business_rule_extractor, observability_auditor,
+    error_resilience_analyzer, technical_debt_assessor,
+    performance_hotspot_scanner,
+    conflict_synthesizer,
+]
 
-_REACT_AGENTS = {
-    "security_sentinel": security_sentinel.run,
-    "data_flow_tracer": data_flow_tracer.run,
-    "auth_flow_tracer": auth_flow_tracer.run,
-    "vuln_chain_tracer": vuln_chain_tracer.run,
-}
+ALL_DESCRIPTORS: list[AgentDescriptor] = [
+    m.DESCRIPTOR for m in _ALL_AGENT_MODULES
+]
 
-_SINGLE_PASS_AGENTS = {
-    "architectural_classifier": architectural_classifier.run,
-    "business_rule_extractor": business_rule_extractor.run,
-    "observability_auditor": observability_auditor.run,
-    "error_resilience_analyzer": error_resilience_analyzer.run,
-    "technical_debt_assessor": technical_debt_assessor.run,
-    "performance_hotspot_scanner": performance_hotspot_scanner.run,
-}
+def _descriptors_by_tier(tier: str) -> list[AgentDescriptor]:
+    return [d for d in ALL_DESCRIPTORS if d.tier == tier]
 
 
 class AnalysisPipeline:
@@ -81,8 +78,8 @@ class AnalysisPipeline:
     Not using the full LangGraph StateGraph API here to keep dependencies minimal;
     the orchestration logic matches the LangGraph conceptual model:
     - Dossier is the shared state
-    - Agents are nodes
-    - TAG_TRIGGERS provides conditional edges
+    - Agents are nodes discovered via DESCRIPTOR exports
+    - Tiers define execution order and parallelism
     """
 
     def __init__(
@@ -135,40 +132,46 @@ class AnalysisPipeline:
                 "call_graph_summary": self.compressed.call_graph_summary,
             }
 
-        # ── Layer 1a: Heuristic agents (parallel) ────────────────────────
-        heuristic_to_run = _HEURISTIC_AGENTS
-        react_to_run = list(_REACT_AGENTS.keys())
-        single_to_run = _SINGLE_PASS_AGENTS
+        # ── Collect descriptors by tier ───────────────────────────────────────
+        heuristic = _descriptors_by_tier("heuristic")
+        react = _descriptors_by_tier("react")
+        single_pass = _descriptors_by_tier("single_pass")
+        synthesis = _descriptors_by_tier("synthesis")
 
-        # Compute total agent count for progress reporting
-        self._agents_total = len(_HEURISTIC_AGENTS) + len(_REACT_AGENTS) + len(_SINGLE_PASS_AGENTS)
+        self._agents_total = len(heuristic) + len(react) + len(single_pass)
         self._agents_completed = 0
 
-        logger.info("[Layer 1a] Running %d heuristic agents in parallel", len(heuristic_to_run))
-        self._run_parallel(heuristic_to_run)
+        # ── Layer 1a: Heuristic agents (parallel) ────────────────────────────
+        logger.info("[Layer 1a] Running %d heuristic agents in parallel", len(heuristic))
+        self._run_tier(heuristic, parallel=True)
 
-        # ── Layer 1b: ReAct agents (sequential) ─────────────────────────────
-        logger.info("[Layer 1b] Running %d ReAct agents", len(react_to_run))
-        self._run_react_agents(react_to_run, fingerprint)
+        # ── Layer 1b: ReAct agents (sequential — they share Dossier state) ───
+        logger.info("[Layer 1b] Running %d ReAct agents", len(react))
+        self._run_tier(react, parallel=False)
 
-        # ── Layer 1c: Single-pass agents (parallel) ───────────────────────────
-        logger.info("[Layer 1c] Running %d single-pass agents", len(single_to_run))
-        self._run_single_pass(single_to_run, fingerprint)
+        # ── Layer 1c: Single-pass agents (parallel) ──────────────────────────
+        logger.info("[Layer 1c] Running %d single-pass agents", len(single_pass))
+        self._run_tier(single_pass, parallel=True)
 
         # ── Dossier summary after Layer 1 ────────────────────────────────────
         dossier = self.dossier_manager.dossier
         logger.info(
-            "[Layer 1 summary] security_findings=%d, agents_completed=%d, emitted_tags=%d",
-            len(dossier.security),
+            "[Layer 1 summary] responses=%d, agents_completed=%d, tags=%s",
+            len(dossier.responses),
             len(dossier.agents_completed),
-            len(dossier.emitted_tags),
+            sorted(dossier.all_tags()),
         )
         layer1_elapsed = time.monotonic() - layer1_start
         logger.info("[Layer 1] Total elapsed: %.1fs", layer1_elapsed)
 
         # ── Conflict synthesis ────────────────────────────────────────────────
-        logger.info("[Conflict] Running ConflictSynthesizer")
-        conflict_synthesizer.run(self.dossier_manager)
+        for desc in synthesis:
+            logger.info("[Synthesis] Running %s", desc.name)
+            try:
+                desc.run(self.dossier_manager)
+            except Exception as exc:
+                logger.error("Synthesis agent %s failed: %s", desc.name, exc)
+                self.dossier_manager.mark_agent_failed(desc.name)
 
         # ── Serialize Dossier to disk for inspection ──────────────────────────
         try:
@@ -187,68 +190,59 @@ class AnalysisPipeline:
 
         return self.dossier_manager.dossier
 
-    def _run_parallel(self, agents: dict) -> None:
-        """Run heuristic agents in parallel using ThreadPoolExecutor."""
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            futures = {
-                executor.submit(fn, self.repo_path, self.dossier_manager): name
-                for name, fn in agents.items()
-            }
+    def _run_tier(self, descriptors: list[AgentDescriptor], *, parallel: bool) -> None:
+        """Run a tier of agents, building args from each descriptor's needs."""
+        if parallel:
+            self._run_tier_parallel(descriptors)
+        else:
+            self._run_tier_sequential(descriptors)
+
+    def _build_args(self, desc: AgentDescriptor) -> tuple:
+        """Build positional args for an agent based on its descriptor flags."""
+        args: list = [self.repo_path, self.dossier_manager]
+        if desc.needs_fingerprint:
+            args.append(self.fingerprint)
+        if desc.needs_compressed:
+            args.append(self.compressed)
+        return tuple(args)
+
+    def _run_tier_parallel(self, descriptors: list[AgentDescriptor]) -> None:
+        """Run agents in parallel using ThreadPoolExecutor."""
+        max_workers = min(4, len(descriptors)) or 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            for desc in descriptors:
+                args = self._build_args(desc)
+                futures[executor.submit(desc.run, *args)] = desc.name
+
             for future in concurrent.futures.as_completed(futures):
                 agent_name = futures[future]
                 try:
                     future.result()
-                    logger.info("[Heuristic] Agent %s completed", agent_name)
+                    logger.info("[%s] Agent %s completed", descriptors[0].tier, agent_name)
                     self._report_agent_progress(agent_name)
                 except Exception as exc:
-                    logger.error("Heuristic agent %s failed: %s", agent_name, exc)
+                    logger.error("Agent %s failed: %s", agent_name, exc)
                     self.dossier_manager.mark_agent_failed(agent_name)
                     self._report_agent_progress(agent_name)
 
-    def _run_react_agents(self, agent_names: list[str], fingerprint: RepoFingerprint) -> None:
-        """Run ReAct agents sequentially (they share Dossier state)."""
-        for name in agent_names:
-            if name not in _REACT_AGENTS:
-                continue
-            if name in self.dossier_manager.dossier.agents_completed:
+    def _run_tier_sequential(self, descriptors: list[AgentDescriptor]) -> None:
+        """Run agents sequentially (for tiers that share Dossier state)."""
+        for desc in descriptors:
+            if desc.name in self.dossier_manager.dossier.agents_completed:
                 continue
             t0 = time.monotonic()
-            logger.info("[ReAct] Starting agent %s", name)
+            logger.info("[%s] Starting agent %s", desc.tier, desc.name)
             try:
-                _REACT_AGENTS[name](self.repo_path, self.dossier_manager, self.compressed)
+                args = self._build_args(desc)
+                desc.run(*args)
                 elapsed = time.monotonic() - t0
-                logger.info("[ReAct] Agent %s completed (%.1fs)", name, elapsed)
-                self._report_agent_progress(name)
-                # Log any tags emitted by this agent
-                tags = self.dossier_manager.dossier.emitted_tags
-                if tags:
-                    logger.debug("[ReAct] Tags after %s: %s", name, tags)
+                logger.info("[%s] Agent %s completed (%.1fs)", desc.tier, desc.name, elapsed)
+                self._report_agent_progress(desc.name)
             except Exception as exc:
-                logger.error("ReAct agent %s failed: %s", name, exc)
-                self.dossier_manager.mark_agent_failed(name)
-                self._report_agent_progress(name)
-
-    def _run_single_pass(self, agents: dict, fingerprint: RepoFingerprint) -> None:
-        """Run single-pass agents (architectural_classifier also gets fingerprint; all get compressed)."""
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            futures = {}
-            for name, fn in agents.items():
-                if name == "architectural_classifier":
-                    future = executor.submit(fn, self.repo_path, self.dossier_manager, fingerprint, self.compressed)
-                else:
-                    future = executor.submit(fn, self.repo_path, self.dossier_manager, self.compressed)
-                futures[future] = name
-
-            for future in concurrent.futures.as_completed(futures):
-                agent_name = futures[future]
-                try:
-                    future.result()
-                    logger.info("[SinglePass] Agent %s completed", agent_name)
-                    self._report_agent_progress(agent_name)
-                except Exception as exc:
-                    logger.error("Single-pass agent %s failed: %s", agent_name, exc)
-                    self.dossier_manager.mark_agent_failed(agent_name)
-                    self._report_agent_progress(agent_name)
+                logger.error("Agent %s failed: %s", desc.name, exc)
+                self.dossier_manager.mark_agent_failed(desc.name)
+                self._report_agent_progress(desc.name)
 
 
 def run_analysis(

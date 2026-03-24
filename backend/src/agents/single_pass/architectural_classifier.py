@@ -6,6 +6,7 @@ import logging
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, ArchitectureStyle
 from src.llm.client import chat
+from src.orchestrator.descriptor import AgentDescriptor
 from src.recon.fingerprint import RepoFingerprint
 
 logger = logging.getLogger(__name__)
@@ -67,3 +68,13 @@ def run(repo_path: str, dossier_manager: DossierManager, fingerprint: RepoFinger
     ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("ArchitecturalClassifier: %s (%.2f)", style.primary_style, style.confidence)
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="architectural_classifier",
+    tags=TAGS,
+    tier="single_pass",
+    run=run,
+    needs_fingerprint=True,
+    needs_compressed=True,
+)

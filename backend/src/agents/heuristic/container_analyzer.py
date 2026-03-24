@@ -8,6 +8,7 @@ import yaml  # PyYAML
 
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, ContainerService, ContainerTopology
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -91,3 +92,11 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
     ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("ContainerAnalyzer: %d services, %d base images", len(topology.services), len(topology.base_images))
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="container_analyzer",
+    tags=TAGS,
+    tier="heuristic",
+    run=run,
+)

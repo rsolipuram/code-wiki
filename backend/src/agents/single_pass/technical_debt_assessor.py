@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, Severity, TechnicalDebt, TechnicalDebtItem
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -72,3 +73,12 @@ def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> Non
     ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("TechnicalDebtAssessor: %d items (%.1f/kloc)", len(items), smell_density)
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="technical_debt_assessor",
+    tags=TAGS,
+    tier="single_pass",
+    run=run,
+    needs_compressed=True,
+)

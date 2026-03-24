@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, FileOwnership, OwnershipMap
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -53,3 +54,11 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
     ))
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("OwnershipExtractor: %d ownership patterns", len(ownerships))
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="ownership_extractor",
+    tags=TAGS,
+    tier="heuristic",
+    run=run,
+)

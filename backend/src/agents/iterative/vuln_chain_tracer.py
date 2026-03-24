@@ -10,6 +10,7 @@ from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, SecurityFinding, Severity
 from src.llm.client import chat
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -75,3 +76,12 @@ def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> Non
 
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("VulnChainTracer: completed in %d steps", steps)
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="vuln_chain_tracer",
+    tags=TAGS,
+    tier="react",
+    run=run,
+    needs_compressed=True,
+)

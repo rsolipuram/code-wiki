@@ -17,6 +17,7 @@ from src.agents.primitives.tools import read_file, search_code
 from src.dossier.manager import DossierManager
 from src.dossier.schema import AgentResponse, SecurityFinding, Severity
 from src.llm.client import chat
+from src.orchestrator.descriptor import AgentDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -170,3 +171,12 @@ def _extract_findings(response: str, file_path: str, dossier_manager: DossierMan
         ))
         count += 1
     return count
+
+
+DESCRIPTOR = AgentDescriptor(
+    name="security_sentinel",
+    tags=TAGS,
+    tier="react",
+    run=run,
+    needs_compressed=True,
+)
