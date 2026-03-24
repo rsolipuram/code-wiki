@@ -47,10 +47,11 @@ def run(repo_path: str, dossier_manager: DossierManager, fingerprint: RepoFinger
             cache_ttl=3600,
         )
         data = json.loads(response)
-        style = ArchitectureStyle(**data)
+        style = ArchitectureStyle(agent_name=AGENT_NAME, **data)
     except Exception as exc:
         logger.warning("ArchitecturalClassifier failed: %s", exc)
         style = ArchitectureStyle(
+            agent_name=AGENT_NAME,
             primary_style=fingerprint.system_type,
             confidence=0.3,
             rationale="Fallback from RepoFingerprint system_type",

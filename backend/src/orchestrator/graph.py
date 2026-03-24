@@ -125,6 +125,16 @@ class AnalysisPipeline:
             fingerprint = repo_recon.run(self.repo_path)
         self.dossier_manager.dossier.extra["fingerprint"] = fingerprint.to_dict()
 
+        # ── Embed compact compressor summary so it appears in _dossier.json ──
+        if self.compressed is not None:
+            self.dossier_manager.dossier.extra["compressor"] = {
+                "compression_level": self.compressed.compression_level,
+                "repo_summary": self.compressed.repo_summary,
+                "key_entity_count": len(self.compressed.key_entities),
+                "file_summary_count": len(self.compressed.file_summaries),
+                "call_graph_summary": self.compressed.call_graph_summary,
+            }
+
         # ── Layer 1a: Heuristic agents (parallel) ────────────────────────
         heuristic_to_run = _HEURISTIC_AGENTS
         react_to_run = list(_REACT_AGENTS.keys())

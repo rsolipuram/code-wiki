@@ -47,10 +47,11 @@ Return JSON only:
     try:
         response = chat(messages=[{"role": "user", "content": prompt}])
         data = json.loads(response)
-        profile = ObservabilityProfile(**data)
+        profile = ObservabilityProfile(agent_name=AGENT_NAME, **data)
     except Exception as exc:
         logger.warning("ObservabilityAuditor failed: %s", exc)
         profile = ObservabilityProfile(
+            agent_name=AGENT_NAME,
             has_logging=len(log_hits) > 0,
             has_metrics=len(metric_hits) > 0,
             has_tracing=len(trace_hits) > 0,

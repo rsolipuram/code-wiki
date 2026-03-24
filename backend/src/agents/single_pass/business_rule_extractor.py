@@ -51,7 +51,7 @@ def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> Non
                 pass
 
     if not samples:
-        dossier_manager.write_section("domain_model", DomainModel())
+        dossier_manager.write_section("domain_model", DomainModel(agent_name=AGENT_NAME))
         dossier_manager.mark_agent_complete(AGENT_NAME)
         return
 
@@ -74,13 +74,14 @@ Return JSON only:
         data = json.loads(response)
         rules = [BusinessRule(**r) for r in data.get("business_rules", [])]
         model = DomainModel(
+            agent_name=AGENT_NAME,
             entities=data.get("entities", []),
             business_rules=rules,
             ubiquitous_language=data.get("ubiquitous_language", []),
         )
     except Exception as exc:
         logger.warning("BusinessRuleExtractor failed: %s", exc)
-        model = DomainModel()
+        model = DomainModel(agent_name=AGENT_NAME)
 
     dossier_manager.write_section("domain_model", model)
     dossier_manager.mark_agent_complete(AGENT_NAME)

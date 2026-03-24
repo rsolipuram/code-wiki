@@ -21,7 +21,7 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
     if not pipeline:
         pipeline = _parse_jenkinsfile(root)
     if not pipeline:
-        pipeline = CIPipeline(provider="none")
+        pipeline = CIPipeline(agent_name=AGENT_NAME, provider="none")
 
     dossier_manager.write_section("ci_pipeline", pipeline)
     dossier_manager.mark_agent_complete(AGENT_NAME)
@@ -74,6 +74,7 @@ def _parse_github_actions(root: Path) -> CIPipeline | None:
             ))
 
     return CIPipeline(
+        agent_name=AGENT_NAME,
         provider="github_actions",
         triggers=list(set(triggers)),
         jobs=jobs,
@@ -94,6 +95,7 @@ def _parse_jenkinsfile(root: Path) -> CIPipeline | None:
         has_tests = any("test" in s.lower() for s in stage_names)
         has_deploy = any("deploy" in s.lower() for s in stage_names)
         return CIPipeline(
+            agent_name=AGENT_NAME,
             provider="jenkins",
             triggers=["push"],
             jobs=[CIJob(name="pipeline", steps=steps)],

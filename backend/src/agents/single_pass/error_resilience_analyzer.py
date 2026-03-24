@@ -45,10 +45,11 @@ Return JSON only:
     try:
         response = chat(messages=[{"role": "user", "content": prompt}])
         data = json.loads(response)
-        profile = ErrorResilienceProfile(**data)
+        profile = ErrorResilienceProfile(agent_name=AGENT_NAME, **data)
     except Exception as exc:
         logger.warning("ErrorResilienceAnalyzer failed: %s", exc)
         profile = ErrorResilienceProfile(
+            agent_name=AGENT_NAME,
             retry_patterns_detected=len(retry_hits) > 0,
             circuit_breaker_detected=len(circuit_hits) > 0,
             silent_failures=[r["file"] for r in bare_except[:5]],

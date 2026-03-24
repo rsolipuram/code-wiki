@@ -51,7 +51,7 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
                 else:
                     flags[name] = FeatureFlag(name=name, file_path=rel, usage_count=1)
 
-    inventory = FeatureFlagInventory(flags=list(flags.values()))
+    inventory = FeatureFlagInventory(agent_name=AGENT_NAME, flags=list(flags.values()))
     dossier_manager.write_section("feature_flags", inventory)
     dossier_manager.mark_agent_complete(AGENT_NAME)
     logger.info("FeatureFlagMapper: %d flags detected", len(flags))

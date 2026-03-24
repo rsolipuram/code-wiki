@@ -56,6 +56,7 @@ def run(repo_path: str, dossier_manager: DossierManager, compressed=None) -> Non
     smell_density = (len(items) / total_loc * 1000) if total_loc > 0 else 0.0
 
     debt = TechnicalDebt(
+        agent_name=AGENT_NAME,
         items=items,
         todo_count=todo_count,
         fixme_count=fixme_count,

@@ -13,15 +13,23 @@ logger = logging.getLogger(__name__)
 
 AGENT_NAME = "container_analyzer"
 
+_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__"}
+
+
+def _is_skipped(path: Path, root: Path) -> bool:
+    return any(part in _SKIP_DIRS for part in path.relative_to(root).parts)
+
 
 def run(repo_path: str, dossier_manager: DossierManager) -> None:
     root = Path(repo_path)
-    topology = ContainerTopology()
+    services: list[ContainerService] = []
     base_images: list[str] = []
     is_multi_stage = False
 
-    # Parse Dockerfiles
-    for dockerfile in list(root.glob("Dockerfile")) + list(root.glob("Dockerfile.*")):
+    # Parse Dockerfiles recursively
+    for dockerfile in root.rglob("Dockerfile"):
+        if _is_skipped(dockerfile, root):
+            continue
         try:
             content = dockerfile.read_text()
             froms = re.findall(r"^FROM\s+(\S+)", content, re.MULTILINE | re.IGNORECASE)
@@ -31,8 +39,23 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
         except OSError:
             pass
 
-    # Parse docker-compose files
-    for compose_file in list(root.glob("docker-compose*.yml")) + list(root.glob("docker-compose*.yaml")):
+    for dockerfile in root.rglob("Dockerfile.*"):
+        if _is_skipped(dockerfile, root):
+            continue
+        try:
+            content = dockerfile.read_text()
+            froms = re.findall(r"^FROM\s+(\S+)", content, re.MULTILINE | re.IGNORECASE)
+            if len(froms) > 1:
+                is_multi_stage = True
+            base_images.extend(froms)
+        except OSError:
+            pass
+
+    # Parse docker-compose files recursively
+    compose_files = list(root.rglob("docker-compose*.yml")) + list(root.rglob("docker-compose*.yaml"))
+    for compose_file in compose_files:
+        if _is_skipped(compose_file, root):
+            continue
         try:
             data = yaml.safe_load(compose_file.read_text()) or {}
             for svc_name, svc_config in (data.get("services") or {}).items():
@@ -42,7 +65,7 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
                 volumes = svc_config.get("volumes", [])
                 env = list((svc_config.get("environment") or {}).keys()) if isinstance(
                     svc_config.get("environment"), dict) else []
-                topology.services.append(ContainerService(
+                services.append(ContainerService(
                     name=svc_name,
                     image=svc_config.get("image"),
                     ports=[str(p) for p in ports],
@@ -53,7 +76,8 @@ def run(repo_path: str, dossier_manager: DossierManager) -> None:
             logger.debug("Could not parse %s: %s", compose_file, exc)
 
     topology = ContainerTopology(
-        services=topology.services,
+        agent_name=AGENT_NAME,
+        services=services,
         base_images=list(set(base_images)),
         is_multi_stage=is_multi_stage,
     )
