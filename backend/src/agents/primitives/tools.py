@@ -100,9 +100,7 @@ def query_dossier(dossier_manager: DossierManager, section: str, query: Optional
     """
     responses = dossier_manager.dossier.by_tag(section)
     if not responses:
-        # Fallback to legacy get_section for backward compat
-        value = dossier_manager.get_section(section)
-        return value
+        return None
 
     outputs = [r.output for r in responses]
     if query:

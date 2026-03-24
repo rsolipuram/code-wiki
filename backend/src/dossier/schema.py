@@ -289,34 +289,13 @@ class OwnershipMap(AgentOutput):
     owner_count: int = 0
 
 
-# ─── Section Registry ─────────────────────────────────────────────────────────
-
-_SECTION_REGISTRY: dict[str, type["AgentOutput"]] = {
-    "architecture": ArchitectureStyle,
-    "dependencies": DependencyAnalysis,
-    "container_topology": ContainerTopology,
-    "ci_pipeline": CIPipeline,
-    "domain_model": DomainModel,
-    "technical_debt": TechnicalDebt,
-    "observability": ObservabilityProfile,
-    "error_resilience": ErrorResilienceProfile,
-    "feature_flags": FeatureFlagInventory,
-    "auth_flow": AuthFlowAnalysis,
-    "data_flow": DataFlowAnalysis,
-    "performance": PerformanceProfile,
-    "iac": IaCAnalysis,
-    "ownership": OwnershipMap,
-}
-
-
 # ─── Root Dossier ─────────────────────────────────────────────────────────────
 
 class Dossier(BaseModel):
     """Shared blackboard for the entire analysis pipeline.
 
-    Primary storage is the `responses` list — a flat log of AgentResponse objects
-    queryable by tag or agent name. Legacy fields (sections, security, conflicts)
-    are populated via dual-write during migration and will be removed in Phase 5.
+    All agent outputs live in the `responses` list — a flat log of AgentResponse
+    objects queryable by tag or agent name.
     """
 
     # Repository identification
@@ -326,12 +305,6 @@ class Dossier(BaseModel):
 
     # ── Primary storage (tag-based) ──────────────────────────────────────────
     responses: list[AgentResponse] = Field(default_factory=list)
-
-    # ── Legacy storage (Phase 5 removal) ─────────────────────────────────────
-    sections: dict[str, Any] = Field(default_factory=dict)
-    security: list[SecurityFinding] = Field(default_factory=list)
-    conflicts: list[ConflictAnalysis] = Field(default_factory=list)
-    emitted_tags: list[str] = Field(default_factory=list)
 
     # Execution metadata
     agents_completed: list[str] = Field(default_factory=list)
@@ -365,12 +338,7 @@ class Dossier(BaseModel):
     # ── Serialization ────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a plain dict with both responses and legacy sections serialized."""
-        d = self.model_dump(exclude={"sections", "responses"})
+        """Return a plain dict with responses serialized."""
+        d = self.model_dump(exclude={"responses"})
         d["responses"] = [r.model_dump() for r in self.responses]
-        # Legacy sections (kept during migration)
-        d["sections"] = {
-            key: (val.model_dump() if isinstance(val, AgentOutput) else val)
-            for key, val in self.sections.items()
-        }
         return d

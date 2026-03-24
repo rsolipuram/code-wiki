@@ -43,11 +43,6 @@ def serialize_dossier(dossier: Dossier, output_path: str) -> str:
         "tag_distribution": tag_dist,
         "agents_completed": list(dossier.agents_completed),
         "agents_failed": list(dossier.agents_failed),
-        # Legacy fields (kept during migration)
-        "section_keys": list(dossier.sections.keys()),
-        "security_finding_count": len(dossier.security),
-        "conflict_count": len(dossier.conflicts),
-        "emitted_tags": list(dossier.emitted_tags),
         "serialized_at": datetime.now(timezone.utc).isoformat(),
     }
 
