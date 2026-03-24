@@ -161,34 +161,45 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             logger.info("[%s] Step 4 done (%.1fs)", repository_id, time.monotonic() - t0)
             _progress(4, "Persisting entities", f"Indexed {len(entities)} entities")
 
-            # ── Step 4.5: Compress codebase (shared by agents + wiki pipeline) ──
+            # ── Step 4b: Persist entities to Neo4j ───────────────────────────
+            _progress(4, "Building relationship graph", "Creating nodes and edges...")
+            t0 = time.monotonic()
+            logger.info("[%s] Step 4b: Writing to Neo4j", repository_id)
+            neo4j_stats = _write_neo4j(entities)
+            stats["neo4j_nodes"] = neo4j_stats["nodes"]
+            stats["neo4j_edges"] = neo4j_stats["edges"]
+            stats["neo4j_unresolved"] = neo4j_stats["unresolved"]
+            logger.info("[%s] Step 4b done (%.1fs)", repository_id, time.monotonic() - t0)
+            _progress(4, "Building relationship graph", f"{neo4j_stats['nodes']} nodes, {neo4j_stats['edges']} edges")
+
+            # ── Step 5: Compress codebase (shared by agents + wiki pipeline) ──
             _progress(5, "Compressing codebase", "Building code summaries...")
             t0 = time.monotonic()
-            logger.info("[%s] Step 4.5: Compressing codebase", repository_id)
+            logger.info("[%s] Step 5: Compressing codebase", repository_id)
             compressed = None
             try:
                 scored_entities = score_entities(entities)
                 compressor = CodebaseCompressor()
                 compressed = compressor.compress(str(local_path), entities, fingerprint, scored_entities)
                 logger.info(
-                    "[%s] Step 4.5 done (%.1fs): level=%s, %d key_entities, %d file_summaries",
+                    "[%s] Step 5 done (%.1fs): level=%s, %d key_entities, %d file_summaries",
                     repository_id, time.monotonic() - t0,
                     compressed.compression_level,
                     len(compressed.key_entities),
                     len(compressed.file_summaries),
                 )
             except Exception as exc:
-                logger.warning("[%s] Step 4.5: compressor failed (non-fatal, agents will run without): %s", repository_id, exc)
+                logger.warning("[%s] Step 5: compressor failed (non-fatal, agents will run without): %s", repository_id, exc)
 
-            # ── Step 5: Run facet analysis (orchestrator) ───────────────────
-            _progress(5, "Running AI analysis", "Starting agents...")
+            # ── Step 6: Run facet analysis (orchestrator) ───────────────────
+            _progress(6, "Running AI analysis", "Starting agents...")
             t0 = time.monotonic()
-            logger.info("[%s] Step 5: Running orchestrator", repository_id)
+            logger.info("[%s] Step 6: Running orchestrator", repository_id)
 
             def _agent_progress_callback(completed: int, total: int, agent_name: str) -> None:
                 stats["agents_completed"] = completed
                 stats["agents_total"] = total
-                _progress(5, "Running AI analysis", f"Agent {agent_name} complete ({completed}/{total})")
+                _progress(6, "Running AI analysis", f"Agent {agent_name} complete ({completed}/{total})")
 
             dossier = run_analysis(
                 str(local_path), repository_id,
@@ -197,18 +208,7 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                 compressed=compressed,
                 repo_name=repo.name or repo_url.split("/")[-1],
             )
-            logger.info("[%s] Step 5 done (%.1fs)", repository_id, time.monotonic() - t0)
-
-            # ── Step 6: Persist entities to Neo4j ──────────────────────────
-            _progress(6, "Building relationship graph", "Creating nodes and edges...")
-            t0 = time.monotonic()
-            logger.info("[%s] Step 6: Writing to Neo4j", repository_id)
-            neo4j_stats = _write_neo4j(entities)
-            stats["neo4j_nodes"] = neo4j_stats["nodes"]
-            stats["neo4j_edges"] = neo4j_stats["edges"]
-            stats["neo4j_unresolved"] = neo4j_stats["unresolved"]
             logger.info("[%s] Step 6 done (%.1fs)", repository_id, time.monotonic() - t0)
-            _progress(6, "Building relationship graph", f"{neo4j_stats['nodes']} nodes, {neo4j_stats['edges']} edges")
 
             # ── Step 7: Detect modules ──────────────────────────────────────
             _progress(7, "Detecting modules", "Analyzing structure...")
