@@ -2,7 +2,7 @@
 
 /**
  * Progress page — live pipeline telemetry for repository analysis.
- * Shows 9 real steps driven by backend progress, with live stats and elapsed time.
+ * Shows backend-aligned steps driven by live progress events.
  * Mock: specs/001-code-wiki/ux/docs-glassmorphism/progress.html
  */
 
@@ -19,10 +19,9 @@ const PIPELINE_STEPS = [
   { label: 'Cloning repository', icon: '\u{1F4E5}' },
   { label: 'Scanning file structure', icon: '\u{1F50D}' },
   { label: 'Parsing source files', icon: '\u2699\uFE0F' },
-  { label: 'Persisting entities', icon: '\u{1F4BE}' },
+  { label: 'Persisting entities + graph', icon: '\u{1F4BE}' },
+  { label: 'Compressing codebase', icon: '\u{1F5DC}\uFE0F' },
   { label: 'Running AI analysis', icon: '\u{1F9E0}' },
-  { label: 'Building relationship graph', icon: '\u{1F517}' },
-  { label: 'Detecting modules', icon: '\u{1F4E6}' },
   { label: 'Generating wiki pages', icon: '\u{1F4C4}' },
   { label: 'Finalizing', icon: '\u2728' },
 ];
@@ -55,29 +54,50 @@ interface StatItem {
   value: string;
 }
 
-const WIKI_AGENTS = [
-  { id: 'architect', label: 'Architect', desc: 'Analyzing codebase structure' },
-  { id: 'planner', label: 'Planner', desc: 'Planning wiki sections' },
-  { id: 'writer', label: 'Writer', desc: 'Writing technical prose' },
-  { id: 'annotator', label: 'Annotator', desc: 'Adding entity references' },
-  { id: 'diagrammer', label: 'Diagrammer', desc: 'Generating diagrams' },
-  { id: 'tabulator', label: 'Tabulator', desc: 'Building summary tables' },
-  { id: 'assembler', label: 'Assembler', desc: 'Assembling final pages' },
-];
+const V3_AGENT_DESCRIPTIONS: Record<string, { label: string; desc: string }> = {
+  v3_pipeline: { label: 'Pipeline', desc: 'Keeping wiki generation active' },
+  content_planner: { label: 'Content Planner', desc: 'Planning wiki structure' },
+  assembler: { label: 'Assembler', desc: 'Assembling generated sections' },
+  crosslink: { label: 'Cross-link Resolver', desc: 'Resolving cross-references' },
+  reference_builder: { label: 'Reference Builder', desc: 'Generating reference pages' },
+};
 
 type AgentState = { status: 'pending' | 'running' | 'complete'; detail: string };
 
 function getAgentStates(events: AgentProgressEvent[]): Record<string, AgentState> {
   const states: Record<string, AgentState> = {};
-  // Pre-initialize all agents to pending
-  for (const agent of WIKI_AGENTS) {
-    states[agent.id] = { status: 'pending', detail: '' };
-  }
   // Apply events in order (latest event for an agent wins)
   for (const e of events) {
     states[e.agent] = { status: e.status, detail: e.detail };
   }
   return states;
+}
+
+function mapBackendStepToUiIndex(currentStep?: number): number {
+  if (!currentStep || currentStep <= 1) return 0;
+  if (currentStep <= 6) return currentStep - 1;
+  if (currentStep === 8) return 6;
+  return 7;
+}
+
+function humanizeAgentId(agentId: string): { label: string; desc: string } {
+  if (V3_AGENT_DESCRIPTIONS[agentId]) return V3_AGENT_DESCRIPTIONS[agentId];
+  if (agentId.startsWith('section:')) {
+    const slug = agentId.slice('section:'.length);
+    const title = slug
+      .split(/[-_]/g)
+      .filter(Boolean)
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+      .join(' ');
+    return {
+      label: `Section: ${title || slug}`,
+      desc: 'Generating a wiki section',
+    };
+  }
+  return {
+    label: agentId,
+    desc: 'Agent activity',
+  };
 }
 
 function buildLiveStats(stats?: PipelineProgress['stats']): StatItem[] {
@@ -243,7 +263,7 @@ export default function ProgressPage() {
       ? PIPELINE_STEPS.length
       : repoStatus === 'pending'
         ? 0
-        : (progress?.current_step ?? 1) - 1 // backend is 1-indexed, UI is 0-indexed
+        : mapBackendStepToUiIndex(progress?.current_step)
     : done
       ? PIPELINE_STEPS.length
       : demoStep;
@@ -252,7 +272,11 @@ export default function ProgressPage() {
 
   // Derive agent states for sub-stepper
   const agentStates = getAgentStates(agentEvents);
-  const completedAgents = Object.values(agentStates).filter((a) => a.status === 'complete').length;
+  const agentEntries = Object.entries(agentStates)
+    .filter(([id]) => id !== 'v3_pipeline')
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  const completedAgents = agentEntries.filter(([, a]) => a.status === 'complete').length;
+  const runningAgents = agentEntries.filter(([, a]) => a.status === 'running').length;
 
   // Interpolate progress bar within the active step using sub-progress data
   const pct = (() => {
@@ -263,18 +287,18 @@ export default function ProgressPage() {
     let subProgress = 0.5; // default: assume halfway through active step
     const s = progress?.stats;
     if (s) {
-      if (activeStep === 4 && s.agents_total && s.agents_total > 0) {
-        // Step 5 (0-indexed 4): facet agent progress
+      if (activeStep === 5 && s.agents_total && s.agents_total > 0) {
+        // Step 6 (0-indexed 5): facet agent progress
         subProgress = (s.agents_completed ?? 0) / s.agents_total;
-      } else if (activeStep === 7) {
-        // Step 8 (0-indexed 7): wiki agent progress
-        if (completedAgents > 0 || Object.values(agentStates).some(a => a.status === 'running')) {
-          subProgress = completedAgents / WIKI_AGENTS.length;
+      } else if (activeStep === 6) {
+        // Step 8 (0-indexed 6): wiki generation progress
+        if (agentEntries.length > 0) {
+          subProgress = (completedAgents + runningAgents * 0.4) / agentEntries.length;
         } else if (s.pages_total && s.pages_total > 0) {
           // Fallback: page generation progress
           subProgress = (s.pages_generated ?? 0) / s.pages_total;
         } else {
-          subProgress = 0.05; // Starting Step 8
+          subProgress = 0.05; // Starting wiki generation
         }
       }
     }
@@ -283,6 +307,11 @@ export default function ProgressPage() {
   const displayName = repo?.name ?? name;
   const displayUrl = repo?.url ?? `github.com/${owner}/${name}`;
   const liveStats = buildLiveStats(progress?.stats);
+  const failedUiStepIndex = progress?.current_step != null
+    ? mapBackendStepToUiIndex(progress.current_step)
+    : null;
+  const failedUiStepNumber = failedUiStepIndex != null ? failedUiStepIndex + 1 : null;
+  const failedUiStepLabel = failedUiStepIndex != null ? PIPELINE_STEPS[failedUiStepIndex]?.label : null;
 
   // ─── Error state ────────────────────────────────────────────────────────────
   if (repoStatus === 'error') {
@@ -367,7 +396,8 @@ export default function ProgressPage() {
             {/* Show which step failed */}
             {progress?.step_label && (
               <p style={{ fontSize: 14, color: 'var(--text-tertiary)', marginBottom: 8 }}>
-                Failed at step {progress.current_step}: {progress.step_label}
+                Failed at step {failedUiStepNumber ?? progress.current_step}
+                {failedUiStepLabel ? `: ${failedUiStepLabel}` : `: ${progress.step_label}`}
               </p>
             )}
 
@@ -729,7 +759,7 @@ export default function ProgressPage() {
             {displayUrl}
           </div>
 
-          {/* Vertical stepper — 9 real steps */}
+          {/* Vertical stepper — backend-aligned steps */}
           <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 40, position: 'relative' }}>
             {PIPELINE_STEPS.map((step, i) => {
               const state = stepStates[i];
@@ -852,8 +882,8 @@ export default function ProgressPage() {
                         : 'Pending'}
                     </div>
 
-                    {/* Agent sub-stepper for Step 8 (wiki generation) */}
-                    {i === 7 && (isActive || state === 'complete') && (
+                    {/* Agent sub-stepper for wiki generation step */}
+                    {i === 6 && (isActive || state === 'complete') && (
                       <div
                         style={{
                           display: 'flex',
@@ -862,8 +892,8 @@ export default function ProgressPage() {
                           marginTop: 10,
                         }}
                       >
-                        {WIKI_AGENTS.map((agent) => {
-                          const as = agentStates[agent.id];
+                        {agentEntries.map(([agentId, as]) => {
+                          const agent = humanizeAgentId(agentId);
                           const agentStatus = as?.status ?? 'pending';
                           const bg =
                             agentStatus === 'complete'
@@ -886,7 +916,7 @@ export default function ProgressPage() {
 
                           return (
                             <span
-                              key={agent.id}
+                              key={agentId}
                               title={as?.detail || agent.desc}
                               style={{
                                 display: 'inline-flex',

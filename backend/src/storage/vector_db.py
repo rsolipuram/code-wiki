@@ -14,8 +14,16 @@ from qdrant_client.models import (
 
 from src.config import get_settings
 
-# Embedding dimension — nomic-embed-text-v1.5 via LM Studio produces 768-dim vectors
-EMBEDDING_DIM = 768
+# Embedding dimension — varies by model:
+#   nomic-embed-text-v1.5 (LM Studio): 768
+#   text-embedding-3-small (OpenAI):    1536
+def _get_embedding_dim() -> int:
+    settings = get_settings()
+    if "nomic" in settings.embedding_model.lower():
+        return 768
+    return 1536  # OpenAI default
+
+EMBEDDING_DIM = _get_embedding_dim()
 
 COLLECTION_CODE_ENTITIES = "code_entities"
 COLLECTION_DOSSIER_FINDINGS = "dossier_findings"

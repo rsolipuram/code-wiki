@@ -34,7 +34,7 @@ from src.storage.repo_cache import clone, get_commit_hash, list_files
 from src.wiki.compressor import CodebaseCompressor
 from src.wiki.interestingness import score_entities
 from src.wiki.orchestrator import generate_module_wiki
-from src.wiki.v2_pipeline import generate_wiki_v2
+from src.wiki.v3_pipeline import generate_wiki_v3
 from src.dossier.rag_index import index_entities
 from src.wiki.page_builders.home_page import build_home_page
 from src.wiki.page_builders.module_page import build_module_page, slugify
@@ -155,11 +155,27 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             t0 = time.monotonic()
             logger.info("[%s] Step 4: Persisting entities to PostgreSQL", repository_id)
             module_id = _get_or_create_wiki(session, repository_id)
-            _progress(4, "Persisting entities", f"Saved {len(entities)} entities; indexing vectors...")
-            logger.info("[%s] Step 4: Indexing %d entities into Qdrant", repository_id, len(entities))
-            index_entities(entities, str(repo.id))
+
+            # Skip vector indexing when embedding and LLM share the same LM Studio
+            # instance — loading the embedding model would evict the LLM.
+            settings = get_settings()
+            same_endpoint = (
+                settings.embedding_base_url.rstrip("/").replace("/v1", "")
+                == settings.llm_base_url.rstrip("/").replace("/v1", "")
+            )
+            if same_endpoint:
+                logger.info("[%s] Skipping vector index — embedding and LLM share endpoint", repository_id)
+                _progress(4, "Persisting entities", f"Saved {len(entities)} entities (vector index deferred)")
+            else:
+                _progress(4, "Persisting entities", f"Saved {len(entities)} entities; indexing vectors...")
+                logger.info("[%s] Step 4: Indexing %d entities into Qdrant", repository_id, len(entities))
+                try:
+                    index_entities(entities, str(repo.id))
+                    _progress(4, "Persisting entities", f"Indexed {len(entities)} entities")
+                except Exception as vec_exc:
+                    logger.warning("[%s] Vector indexing failed (non-fatal): %s", repository_id, vec_exc)
+                    _progress(4, "Persisting entities", f"Saved {len(entities)} entities (vector index skipped)")
             logger.info("[%s] Step 4 done (%.1fs)", repository_id, time.monotonic() - t0)
-            _progress(4, "Persisting entities", f"Indexed {len(entities)} entities")
 
             # ── Step 4b: Persist entities to Neo4j ───────────────────────────
             _progress(4, "Building relationship graph", "Creating nodes and edges...")
@@ -210,86 +226,49 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             )
             logger.info("[%s] Step 6 done (%.1fs)", repository_id, time.monotonic() - t0)
 
-            # ── Step 7: Detect modules ──────────────────────────────────────
-            _progress(7, "Detecting modules", "Analyzing structure...")
-            t0 = time.monotonic()
-            logger.info("[%s] Step 7: Detecting modules", repository_id)
-            modules_data = _detect_modules(local_path, entities, fingerprint)
-            mod_names = [m["name"] for m in modules_data]
-            stats["modules_detected"] = len(modules_data)
-            logger.info("[%s] Step 7 done (%.1fs): %d modules — %s", repository_id, time.monotonic() - t0, len(modules_data), mod_names)
-            _progress(7, "Detecting modules", f"Found {len(modules_data)} modules")
+            # ── Step 7: Detect modules ── (now handled by V3 planner — skip) ──
+            # V3 pipeline creates Module records directly from the WikiNav sections.
+            stats["modules_detected"] = 0  # updated after wiki gen
 
             # ── Step 8: Generate wiki pages ─────────────────────────────────
             _progress(8, "Generating wiki pages", "Generating...")
             t0 = time.monotonic()
-            logger.info("[%s] Step 8: Generating wiki pages", repository_id)
+            logger.info("[%s] Step 8: Generating wiki pages (V3)", repository_id)
             wiki = session.query(Wiki).filter_by(repository_id=repository_id).first()
             if not wiki:
                 wiki = Wiki(repository_id=repository_id)
                 session.add(wiki)
                 session.flush()
 
-            # Compute total pages (modules + special pages)
-            total_pages = len(modules_data) + 5  # home + getting-started + function-index + glossary + api-reference
             stats["pages_generated"] = 0
-            stats["pages_total"] = total_pages
+            stats["pages_total"] = 0
 
             def _page_progress_callback(pages_done: int, page_name: str) -> None:
                 stats["pages_generated"] = pages_done
-                # If we are in the initial phase (pages_done == 0), don't show the fraction
                 if pages_done == 0:
-                    _progress(8, "Generating wiki pages", f"AI Analysis: {page_name}")
+                    _progress(8, "Generating wiki pages", f"AI: {page_name}")
                 else:
-                    _progress(8, "Generating wiki pages", f"Page {pages_done}/{total_pages}: {page_name}")
+                    _progress(8, "Generating wiki pages", f"Page {pages_done}: {page_name}")
 
-            if settings.wiki_v2_enabled:
-                logger.info("[%s] Step 8: Using V2 wiki pipeline", repository_id)
-                v2_result = generate_wiki_v2(
-                    session=session,
-                    wiki=wiki,
-                    entities=entities,
-                    modules_data=modules_data,
-                    repo_name=repo.name or repo_url.split("/")[-1],
-                    repo_url=repo_url,
-                    repo_path=str(local_path),
-                    repository_id=repository_id,
-                    fingerprint=fingerprint,
-                    dossier=dossier,
-                    commit_hash=commit_hash,
-                    page_progress_callback=_page_progress_callback,
-                    compressed=compressed,
-                )
-                if isinstance(v2_result, dict):
-                    pages_created = int(v2_result.get("pages_created", 0))
-                    generation_warnings = v2_result.get("generation_warnings", []) or []
-                    quality_metrics = v2_result.get("quality_metrics", {}) or {}
-                else:
-                    pages_created = int(v2_result)
-                    generation_warnings = []
-                    quality_metrics = {}
-            else:
-                # V1 fallback: persist modules then generate pages
-                _persist_modules_and_entities(session, wiki.id, modules_data, local_path)
-                pages_created = _generate_all_pages_v1(
-                    session=session,
-                    wiki=wiki,
-                    entities=entities,
-                    modules_data=modules_data,
-                    repo_name=repo.name or repo_url.split("/")[-1],
-                    repo_url=repo_url,
-                    repo_path=str(local_path),
-                    repository_id=repository_id,
-                    fingerprint=fingerprint,
-                    dossier=dossier,
-                    commit_hash=commit_hash,
-                    page_progress_callback=_page_progress_callback,
-                )
-                generation_warnings = []
-                quality_metrics = {}
+            v3_result = generate_wiki_v3(
+                session=session,
+                wiki=wiki,
+                entities=entities,
+                repo_name=repo.name or repo_url.split("/")[-1],
+                repo_url=repo_url,
+                repo_path=str(local_path),
+                repository_id=repository_id,
+                fingerprint=fingerprint,
+                dossier=dossier,
+                commit_hash=commit_hash,
+                page_progress_callback=_page_progress_callback,
+                compressed=compressed,
+            )
+            pages_created = int(v3_result.get("pages_created", 0))
+            generation_warnings = v3_result.get("generation_warnings", []) or []
+            quality_metrics = v3_result.get("quality_metrics", {}) or {}
 
-            wiki.page_count = pages_created
-            wiki.module_count = len(modules_data)
+            stats["modules_detected"] = quality_metrics.get("sections_planned", 0)
             stats["pages_generated"] = pages_created
             stats["pages_total"] = pages_created
             if generation_warnings:
@@ -337,7 +316,7 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             total_elapsed = time.monotonic() - pipeline_start
             logger.info(
                 "[%s] Analysis complete in %.1fs: %d pages, %d modules, %d entities",
-                repository_id, total_elapsed, pages_created, len(modules_data), len(entities),
+                repository_id, total_elapsed, pages_created, stats.get("modules_detected", 0), len(entities),
             )
 
             # Publish terminal SSE event
@@ -356,7 +335,7 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             return {
                 "status": "completed",
                 "pages_created": pages_created,
-                "modules": len(modules_data),
+                "modules": stats.get("modules_detected", 0),
                 "entities": len(entities),
                 "commit_hash": commit_hash,
                 "warning_count": len(generation_warnings) if generation_warnings else 0,
@@ -364,6 +343,7 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
 
         except Exception as exc:
             logger.error("[%s] Analysis failed: %s", repository_id, exc)
+            session.rollback()
             repo.status = RepositoryStatus.error
             repo.error_message = str(exc)
             # Keep progress at the step that failed, with error detail

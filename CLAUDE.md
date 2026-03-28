@@ -99,6 +99,7 @@ open http://localhost:3000          # Frontend
 ## Key Specs & Docs
 
 - Setup guide: `specs/001-code-wiki/quickstart.md`
+- Data reset runbook: `specs/001-code-wiki/reset-app-data.md`
 - Full spec: `specs/001-code-wiki/spec.md`
 - Tech decisions: `specs/001-code-wiki/research.md`
 - API contract: `specs/001-code-wiki/contracts/openapi.yaml`

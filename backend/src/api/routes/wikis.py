@@ -129,7 +129,7 @@ async def list_modules(
 ) -> list[ModuleResponse]:
     """List detected modules for a repository."""
     wiki = _get_wiki_for_repo(db, repository_id)
-    modules = db.query(Module).filter_by(wiki_id=wiki.id).order_by(Module.name).all()
+    modules = db.query(Module).filter_by(wiki_id=wiki.id).order_by(Module.sort_order).all()
     return [_module_to_response(m) for m in modules]
 
 

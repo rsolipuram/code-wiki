@@ -23,6 +23,8 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { CodeBlock } from "@/components/ui/CodeBlock";
+import { Callout } from "./Callout";
+import { CrossRefLink } from "./CrossRefLink";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -34,7 +36,9 @@ export type ProseSegment = {
     | "section_link"
     | "heading"
     | "diagram"
-    | "table";
+    | "table"
+    | "callout"
+    | "cross-ref";
   content?: string;
   name?: string;
   url?: string;
@@ -42,6 +46,7 @@ export type ProseSegment = {
   language?: string;
   file_path?: string;
   start_line?: number;
+  validated?: boolean;   // false when code block file/lines couldn't be verified
   slug?: string;
   title?: string;
   level?: number;
@@ -50,6 +55,11 @@ export type ProseSegment = {
   caption?: string;
   headers?: string[];
   rows?: string[][];
+  // callout fields
+  callout_type?: "warning" | "info" | "tip";
+  // cross-ref fields
+  section_title?: string;
+  section_slug?: string;
 };
 
 export type DiagramData = {
@@ -857,6 +867,30 @@ export function ProseRenderer({
           />,
         );
         break;
+      case "callout":
+        // BLOCK: rendered as a callout box
+        fullMarkdown += `\n\n${id}\n\n`;
+        diagramMap.set(
+          id,
+          <Callout key={i} type={seg.callout_type ?? "info"}>
+            {seg.content || ""}
+          </Callout>,
+        );
+        break;
+      case "cross-ref":
+        // INLINE: rendered as an annotated link
+        fullMarkdown += `[xref](${id})`;
+        chipMap.set(
+          id,
+          <CrossRefLink
+            key={i}
+            text={seg.text || seg.section_title || ""}
+            sectionTitle={seg.section_title || ""}
+            sectionSlug={seg.section_slug || ""}
+            unresolved={seg.section_slug ? false : true}
+          />,
+        );
+        break;
     }
   });
 
@@ -1017,7 +1051,8 @@ export function ProseRenderer({
                   return <>{diagramMap.get(href)}</>;
                 // Source link chips
                 if (seg.type === "source_link") return <>{chipMap.get(href)}</>;
-                // Section links
+                // Cross-references
+                if (seg.type === "cross-ref") return <>{chipMap.get(href)}</>;                // Section links
                 if (seg.type === "section_link" && seg.slug) {
                   return (
                     <Link

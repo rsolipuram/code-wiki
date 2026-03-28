@@ -33,6 +33,7 @@ class Module(Base, TimestampMixin):
     detection_confidence: Mapped[float] = mapped_column(Float, default=1.0)
     file_paths: Mapped[Optional[list[str]]] = mapped_column(JSONB)
     file_count: Mapped[int] = mapped_column(Integer, default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
     line_count: Mapped[int] = mapped_column(Integer, default=0)
     # IDs of modules this module depends on
     dependency_module_ids: Mapped[Optional[list[str]]] = mapped_column(JSONB)

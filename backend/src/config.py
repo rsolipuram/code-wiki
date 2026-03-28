@@ -45,8 +45,12 @@ class Settings(BaseSettings):
     max_concurrent_parses: int = Field(default=5, alias="MAX_CONCURRENT_PARSES")
     parse_timeout_seconds: int = Field(default=900, alias="PARSE_TIMEOUT_SECONDS")
     wiki_agent_invoke_timeout_seconds: int = Field(
-        default=900,
+        default=0,
         alias="WIKI_AGENT_INVOKE_TIMEOUT_SECONDS",
+    )
+    wiki_agent_idle_timeout_seconds: int = Field(
+        default=300,
+        alias="WIKI_AGENT_IDLE_TIMEOUT_SECONDS",
     )
     wiki_agent_heartbeat_seconds: int = Field(
         default=15,
@@ -60,7 +64,7 @@ class Settings(BaseSettings):
     # Feature flags
     enable_chat: bool = Field(default=True, alias="ENABLE_CHAT")
     enable_diagrams: bool = Field(default=False, alias="ENABLE_DIAGRAMS")
-    wiki_v2_enabled: bool = Field(default=True, alias="WIKI_V2_ENABLED")
+    wiki_critic_enabled: bool = Field(default=True, alias="WIKI_CRITIC_ENABLED")
     wiki_auto_entity_linking_enabled: bool = Field(
         default=False,
         alias="WIKI_AUTO_ENTITY_LINKING_ENABLED",

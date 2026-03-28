@@ -8,6 +8,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from rq import Queue
+from rq.job import Job
+from rq.exceptions import NoSuchJobError
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_db, get_job_queue
@@ -249,15 +251,28 @@ async def refresh_repository(
     )
     db.add(event)
     repo.status = RepositoryStatus.pending
+    repo.error_message = None
+    repo.progress = {}
     db.commit()
     db.refresh(event)
 
     queue.enqueue(
         "src.jobs.analyze.analyze_repository",
         str(repository_id),
-        job_id=f"analyze-{repository_id}-refresh",
+        repo.branch or "main",
+        job_id=f"analyze-{repository_id}-refresh-{event.id}",
         job_timeout=-1,  # No timeout
     )
+    # Best-effort cleanup of legacy stuck refresh job IDs from previous runs.
+    # They can block queue accounting and cause confusing "busy" worker state.
+    legacy_job_id = f"analyze-{repository_id}-refresh"
+    try:
+        legacy_job = Job.fetch(legacy_job_id, connection=queue.connection)  # type: ignore[arg-type]
+        if legacy_job and legacy_job.get_status(refresh=True) == "started":
+            legacy_job.cancel()
+            legacy_job.delete()
+    except NoSuchJobError:
+        pass
 
     return UpdateEventResponse(
         id=UUID(event.id),

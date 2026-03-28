@@ -19,11 +19,13 @@ def get_wiki_model(
 ) -> ChatOpenAI:
     """Create LM Studio-backed chat model for wiki agents."""
     settings = get_settings()
+    # Local models are slower — use generous timeout
+    timeout = 300.0 if settings.llm_provider == "lmstudio" else 120.0
     return ChatOpenAI(
         base_url=settings.llm_base_url,
         api_key=settings.llm_api_key,
         model=settings.llm_model,
         temperature=temperature,
         max_tokens=max_tokens,
-        timeout=120.0,
+        timeout=timeout,
     )

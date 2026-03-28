@@ -51,9 +51,9 @@ export function TableOfContents({ entries, items }: TableOfContentsProps) {
     <nav className={styles.tocNav}>
       <h4 className={styles.tocTitle}>On This Page</h4>
       <div className={styles.tocList}>
-        {resolvedEntries.map(({ id, label, level = 2 }) => (
+        {resolvedEntries.map(({ id, label, level = 2 }, idx) => (
           <a
-            key={id}
+            key={`${id}-${idx}`}
             href={`#${id}`}
             className={`${styles.tocItem} ${level === 3 ? styles.level3 : ''} ${
               activeId === id ? styles.active : ''

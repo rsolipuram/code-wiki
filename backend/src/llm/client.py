@@ -25,7 +25,7 @@ def get_client() -> OpenAI:
         _client = OpenAI(
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
-            timeout=120.0,
+            timeout=180.0,
         )
     return _client
 
@@ -43,18 +43,30 @@ def _call_llm(
 ) -> tuple[str, int]:
     """Raw LLM call with bounded retry. Returns content and retry count."""
     settings = get_settings()
+    resolved_model = model or settings.llm_model
     last_exc: Exception | None = None
     delay_seconds = 2
+
+    # Qwen3 thinking models may consume extra tokens for internal reasoning.
+    # When thinking is enabled, scale up max_tokens to leave room for both the
+    # reasoning chain and the actual answer.  When thinking is off the multiplier
+    # is harmless but wastes budget — keep it at 1x in that case.
+    effective_max_tokens = max_tokens
+    msgs = messages
 
     for attempt in range(1, 4):
         try:
             response = get_client().chat.completions.create(
-                model=model or settings.llm_model,
-                messages=messages,  # type: ignore[arg-type]
+                model=resolved_model,
+                messages=msgs,  # type: ignore[arg-type]
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=effective_max_tokens,
             )
-            content = response.choices[0].message.content or ""
+            msg = response.choices[0].message
+            content = msg.content or ""
+            # Qwen3 thinking mode puts output in reasoning_content
+            if not content.strip():
+                content = getattr(msg, "reasoning_content", "") or ""
             if not content.strip():
                 raise ValueError("empty_response")
             return content, attempt - 1
