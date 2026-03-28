@@ -1,4 +1,4 @@
-"""LangGraph StateGraph for the V3 wiki pipeline.
+"""LangGraph StateGraph for the V3/V4 wiki pipeline.
 
 Execution flow:
   content_planner → fan_out_sections (Send per section, max 2 concurrent)
@@ -9,9 +9,14 @@ Execution flow:
 
 Each deep content agent section is dispatched via Send() and appends
 its V3Section dict to deep_sections (Annotated[list, add]).
+
+V4 mode (WIKI_PIPELINE_VERSION=v4): deep_section_node runs a 3-phase
+subgraph (Writer → parallel(Diagrammer, Code Embedder) → Assembler)
+instead of the monolithic deep_content agent.
 """
 
 import logging
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
@@ -24,6 +29,9 @@ from src.wiki.agents.graph import configure_progress_reporting, report_agent_pro
 from src.wiki.v3_types import V3WikiState, WikiNav
 
 logger = logging.getLogger(__name__)
+
+# Pipeline version: "v3" (default) or "v4" (separated agents)
+_PIPELINE_VERSION = os.environ.get("WIKI_PIPELINE_VERSION", "v3").lower()
 
 # Shared semaphore enforcing max 2 concurrent deep content agents
 _concurrency_sem = threading.Semaphore(2)
@@ -52,6 +60,7 @@ def fan_out_sections(state: V3WikiState) -> list[Send]:
         "compressed": state.get("compressed") or {},
         "repo_path": state.get("repo_path", ""),
         "repo_name": state.get("repo_name", ""),
+        "repository_id": state.get("repository_id", ""),
         "wiki_nav": wiki_nav_dict,
     }
 
@@ -59,7 +68,8 @@ def fan_out_sections(state: V3WikiState) -> list[Send]:
     for spec_dict in sections:
         sends.append(Send("deep_section_node", {**shared, "section_spec": spec_dict}))
 
-    logger.info("Fan-out: %d section agents dispatched", len(sends))
+    version = _PIPELINE_VERSION
+    logger.info("Fan-out: %d section agents dispatched (pipeline=%s)", len(sends), version)
     return sends
 
 
@@ -69,14 +79,17 @@ def deep_section_node(state: V3WikiState) -> dict:
     """Wrapper node invoked once per section via Send().
 
     Merges section_spec from Send payload into state before calling agent.
+    In V4 mode, delegates to the V4 section subgraph instead of deep_content.
     """
-    from src.wiki.agents.deep_content import deep_content_node
-
-    # section_spec is injected by Send() into the state payload
     section_spec_dict = state.get("section_spec") or {}
 
     with _concurrency_sem:
-        return deep_content_node(state, section_spec_dict)
+        if _PIPELINE_VERSION == "v4":
+            from src.wiki.v4_section_graph import run_v4_section
+            return run_v4_section(state)
+        else:
+            from src.wiki.agents.deep_content import deep_content_node
+            return deep_content_node(state, section_spec_dict)
 
 
 # ── Node: assemble all sections ──────────────────────────────────────────────
