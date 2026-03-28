@@ -1,26 +1,25 @@
 """Mermaid diagram validation and auto-fix utilities.
 
-Uses the LLM to fix syntax errors when mermaid-cli is unavailable.
-Max 3 fix attempts per diagram.
+Uses heuristic checks to catch common mermaid syntax errors, then
+calls the LLM to fix them.  Max 2 fix attempts per diagram.
+
+Also provides `fix_prose_diagrams()` for post-assembly validation
+on prose_segments (the final structured output stored in the DB).
 """
 
 import logging
 import re
-import subprocess
-import tempfile
-from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-MAX_FIX_ATTEMPTS = 3
+MAX_FIX_ATTEMPTS = 2
 
+
+# ── Public API ────────────────────────────────────────────────────────────────
 
 def validate_mermaid(source: str) -> Tuple[bool, str]:
-    """Validate Mermaid diagram syntax.
-
-    Tries npx @mermaid-js/mermaid-cli if available.
-    Falls back to simple structural heuristics.
+    """Validate Mermaid diagram syntax via structural heuristics.
 
     Returns:
         (is_valid, error_message)  — error_message is "" when valid.
@@ -29,34 +28,6 @@ def validate_mermaid(source: str) -> Tuple[bool, str]:
     if not source:
         return False, "Empty diagram source"
 
-    # Quick structural check — must start with a known diagram type keyword
-    first_line = source.splitlines()[0].strip().lower()
-    known_starters = (
-        "graph ", "graph\n", "flowchart ", "flowchart\n",
-        "sequencediagram", "classDiagram", "statediagram",
-        "erdiagram", "gantt", "pie", "mindmap", "timeline",
-        "gitgraph", "xychart", "block-beta", "architecture-beta",
-        "journey", "quadrantchart", "requirementdiagram",
-    )
-    has_valid_start = any(first_line.startswith(s.lower()) for s in known_starters)
-    if not has_valid_start:
-        # Also accept if it starts with a direction (LR, TD, etc.)
-        has_valid_start = bool(re.match(r"^(graph|flowchart)\s+(lr|rl|td|tb|bt|lrtb)\b", first_line))
-
-    if not has_valid_start:
-        return False, f"Diagram must start with a valid type keyword (got: {first_line[:60]!r})"
-
-    # Try mermaid-cli via npx if available
-    try:
-        result = _validate_via_cli(source)
-        return result
-    except FileNotFoundError:
-        # npx not available — use heuristic only
-        pass
-    except Exception as exc:
-        logger.debug("mermaid-cli validation failed: %s", exc)
-
-    # Heuristic: check for obvious syntax errors
     errors = _heuristic_check(source)
     if errors:
         return False, "; ".join(errors)
@@ -70,23 +41,17 @@ def fix_mermaid(
     llm_fn: Callable[[str, str], str],
     *,
     max_attempts: int = MAX_FIX_ATTEMPTS,
-) -> str:
+) -> Optional[str]:
     """Attempt to fix invalid Mermaid diagram syntax using LLM.
 
-    Args:
-        source: The invalid diagram source.
-        error: The validation error message.
-        llm_fn: Callable(system_prompt, user_prompt) → response_text.
-        max_attempts: Maximum fix iterations (default 3).
-
     Returns:
-        Fixed diagram source (best attempt, even if still invalid after max tries).
+        Fixed diagram source, or None if unfixable after max tries.
     """
     current = source
     current_error = error
 
     for attempt in range(1, max_attempts + 1):
-        logger.info("Mermaid fix attempt %d/%d: %s", attempt, max_attempts, current_error[:100])
+        logger.info("Mermaid fix attempt %d/%d: %s", attempt, max_attempts, current_error[:120])
 
         fixed = _call_llm_fix(current, current_error, llm_fn)
         fixed = _extract_mermaid_block(fixed) or fixed.strip()
@@ -99,65 +64,150 @@ def fix_mermaid(
         current = fixed
         current_error = new_error
 
-    logger.warning("Mermaid diagram could not be fixed after %d attempts", max_attempts)
-    return current  # best-effort: return last attempt
+    logger.warning("Mermaid diagram unfixable after %d attempts — will drop", max_attempts)
+    return None
+
+
+def fix_prose_diagrams(
+    prose_segments: list[dict],
+    llm_fn: Callable[[str, str], str],
+) -> list[dict]:
+    """Validate and fix diagram segments in assembled prose_segments.
+
+    Invalid diagrams that can't be fixed are replaced with an info callout.
+    Returns a new list (does not mutate the input).
+    """
+    result: list[dict] = []
+    for seg in prose_segments:
+        if seg.get("type") != "diagram":
+            result.append(seg)
+            continue
+
+        source = (seg.get("mermaid_source") or "").strip()
+        if not source:
+            result.append(seg)
+            continue
+
+        is_valid, error = validate_mermaid(source)
+        if is_valid:
+            result.append(seg)
+            continue
+
+        caption = seg.get("caption", "Diagram")
+        logger.info("Invalid mermaid in prose_segments (%s): %s", caption, error[:120])
+
+        fixed = fix_mermaid(source, error, llm_fn)
+        if fixed:
+            result.append({**seg, "mermaid_source": fixed})
+        else:
+            # Replace unfixable diagram with a text callout
+            result.append({
+                "type": "callout",
+                "callout_type": "info",
+                "content": f"[Diagram: {caption}] — could not be rendered.",
+            })
+
+    return result
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────
 
-def _validate_via_cli(source: str) -> Tuple[bool, str]:
-    """Validate using npx @mermaid-js/mermaid-cli."""
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".mmd", delete=False, encoding="utf-8"
-    ) as f:
-        f.write(source)
-        tmp_in = f.name
-
-    tmp_out = tmp_in.replace(".mmd", ".svg")
-    try:
-        result = subprocess.run(
-            ["npx", "--yes", "-q", "@mermaid-js/mermaid-cli", "-i", tmp_in, "-o", tmp_out],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode == 0:
-            return True, ""
-        stderr = (result.stderr or result.stdout or "").strip()
-        # Extract relevant error line
-        error_lines = [l for l in stderr.splitlines() if "error" in l.lower() or "parse" in l.lower()]
-        error_msg = error_lines[0] if error_lines else stderr[:200]
-        return False, error_msg
-    finally:
-        Path(tmp_in).unlink(missing_ok=True)
-        Path(tmp_out).unlink(missing_ok=True)
+_VALID_STARTERS = {
+    "graph", "flowchart", "sequencediagram", "classdiagram",
+    "statediagram", "statediagram-v2", "erdiagram", "gantt", "pie",
+    "mindmap", "timeline", "gitgraph", "xychart-beta",
+    "block-beta", "architecture-beta", "journey", "quadrantchart",
+    "requirementdiagram", "c4context", "c4container", "c4component",
+    "c4deployment", "sankey-beta", "packet-beta",
+}
 
 
 def _heuristic_check(source: str) -> list[str]:
     """Return list of detected syntax issues."""
-    errors = []
+    errors: list[str] = []
+    lines = source.splitlines()
 
-    # Unmatched brackets/braces
-    for open_c, close_c in [("(", ")"), ("[", "]"), ("{", "}")]:
-        opens = source.count(open_c)
-        closes = source.count(close_c)
-        if opens != closes:
-            errors.append(f"Unmatched {open_c!r}: {opens} open vs {closes} close")
+    # 1. Must start with a known diagram type keyword
+    first_token = lines[0].strip().split()[0].lower() if lines else ""
+    if first_token not in _VALID_STARTERS:
+        errors.append(f"Must start with a diagram type keyword (got: {first_token!r})")
+        return errors  # can't do further checks if type is unknown
 
-    # Empty node IDs like []  or ()
+    # 2. Unmatched brackets / braces / parens (ignoring strings)
+    stripped = _strip_quoted(source)
+    for open_c, close_c, name in [("(", ")", "parentheses"), ("[", "]", "brackets"), ("{", "}", "braces")]:
+        diff = stripped.count(open_c) - stripped.count(close_c)
+        if diff != 0:
+            errors.append(f"Unmatched {name}: {'+' if diff > 0 else ''}{diff}")
+
+    # 3. Unmatched subgraph/end
+    if first_token in ("graph", "flowchart"):
+        sub_count = len(re.findall(r"^\s*subgraph\b", source, re.MULTILINE))
+        end_count = len(re.findall(r"^\s*end\b", source, re.MULTILINE))
+        if sub_count != end_count:
+            errors.append(f"Unmatched subgraph/end: {sub_count} subgraph vs {end_count} end")
+
+    # 4. Arrow syntax — common LLM mistakes
+    # Double arrows with no target: A -->
+    if re.search(r"-->\s*$", source, re.MULTILINE):
+        errors.append("Arrow with no target (line ends with -->)")
+
+    # Arrow to empty node: --> [] or --> ()
     if re.search(r"-->\s*\[\s*\]", source) or re.search(r"-->\s*\(\s*\)", source):
         errors.append("Arrow points to empty node definition")
 
+    # 5. Unmatched quotes in node labels
+    for i, line in enumerate(lines, 1):
+        dq = line.count('"')
+        if dq % 2 != 0:
+            errors.append(f"Unmatched double quote on line {i}")
+            break  # one is enough
+
+    # 6. Parentheses inside square-bracket node labels (must be quoted)
+    #    e.g. A[Frontend (React)] → mermaid v11 interprets (React) as a shape
+    #    Fix: A["Frontend (React)"]
+    if first_token in ("graph", "flowchart"):
+        for i, line in enumerate(lines, 1):
+            # Match unquoted bracket labels containing parens: ID[...(...)]
+            if re.search(r'\w\[(?!")[^"\]]*\([^)]*\)[^"\]]*\]', line):
+                errors.append(
+                    f"Line {i}: parentheses inside [...] node label must be quoted — "
+                    f'use ["label (detail)"] instead of [label (detail)]'
+                )
+                break
+
+    # 7. Sequence diagram specific: missing colon after participant
+    if first_token == "sequencediagram":
+        for i, line in enumerate(lines[1:], 2):
+            stripped_line = line.strip()
+            if stripped_line and not stripped_line.startswith("%%"):
+                # Messages need ->> or -->> with colon
+                if ("->>" in stripped_line or "-->>" in stripped_line) and ":" not in stripped_line:
+                    errors.append(f"Sequence message on line {i} missing colon separator")
+                    break
+
+    # 8. Detect HTML-style tags that mermaid doesn't support
+    if re.search(r"<(?!br|sub|sup|b|i|em|strong)[a-zA-Z]+[^>]*>", stripped):
+        errors.append("Contains unsupported HTML tags in node labels")
+
     return errors
+
+
+def _strip_quoted(source: str) -> str:
+    """Remove content inside double-quoted strings to avoid false positives."""
+    return re.sub(r'"[^"]*"', '""', source)
 
 
 def _call_llm_fix(source: str, error: str, llm_fn: Callable[[str, str], str]) -> str:
     system = (
         "You are a Mermaid diagram syntax expert. "
-        "Fix the provided diagram so it renders without errors. "
-        "Return ONLY the corrected Mermaid source code — no markdown fences, no explanation."
+        "Fix the provided diagram so it renders without errors in Mermaid v11. "
+        "Common issues: unmatched brackets/quotes, missing 'end' for subgraph, "
+        "special characters in node labels need quoting with double quotes. "
+        "Return ONLY the corrected Mermaid source code — no markdown fences, "
+        "no explanation, no surrounding text."
     )
-    user = f"Error: {error}\n\nDiagram to fix:\n{source}"
+    user = f"Validation error: {error}\n\nBroken diagram:\n```\n{source}\n```"
     try:
         return llm_fn(system, user)
     except Exception as exc:

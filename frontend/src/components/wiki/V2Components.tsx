@@ -450,6 +450,7 @@ export function MermaidDiagram({
         const mermaid = (await import("mermaid")).default;
         mermaid.initialize({
           startOnLoad: false,
+          suppressErrorRendering: true,
           theme: "base",
           themeVariables: {
             background: "#2d2d2d",
@@ -527,6 +528,8 @@ export function MermaidDiagram({
         if (!cancelled) {
           const reason = err instanceof Error ? err.message : String(err);
           setError(`Diagram rendering failed. ${reason}`);
+          // Clean up mermaid error SVGs that may have leaked into the DOM
+          document.querySelectorAll('[id^="dmermaid-"]').forEach(el => el.remove());
         }
       }
     }

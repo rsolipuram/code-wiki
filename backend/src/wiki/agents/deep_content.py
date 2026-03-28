@@ -21,7 +21,7 @@ from typing import Any, Optional
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from src.wiki.agents.diagram_validator import fix_mermaid, validate_mermaid
+from src.wiki.agents.diagram_validator import fix_mermaid, fix_prose_diagrams, validate_mermaid
 from src.wiki.agents.graph import report_agent_progress
 from src.wiki.agents.model import get_wiki_model
 from src.wiki.agents.tag_assembler import assemble
@@ -180,6 +180,16 @@ def deep_content_node(state: V3WikiState, section_spec_dict: dict) -> dict:
 
     # Assemble prose segments
     prose_segments = assemble(raw_markdown, repo_path)
+
+    # Validate and fix mermaid diagrams in assembled segments
+    def _llm_fix_fn(system: str, user: str) -> str:
+        resp = model.invoke([
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ])
+        return resp.content if hasattr(resp, "content") else str(resp)
+
+    prose_segments = fix_prose_diagrams(prose_segments, _llm_fix_fn)
 
     word_count = sum(
         len((seg.get("content") or seg.get("text") or "").split())
