@@ -83,8 +83,12 @@ context="What this code demonstrates"/>
 
 1. Use get_findings() and get_finding_detail() to gather analysis data — do NOT guess.
 2. Use graph tools to discover call chains and relationships.
-3. Place diagrams and code examples WHERE they enhance understanding — \
-interleaved with prose, not dumped at the bottom.
+3. **CRITICAL — Diagram and code placement**: Every <diagram/> and <code/> tag MUST \
+appear inline, immediately after the paragraph that introduces or explains it. \
+NEVER group diagrams together. NEVER place all diagrams at the end. \
+The pattern is: explanatory prose paragraph → <diagram/> or <code/> → next topic. \
+If your section has 3 subsections, each subsection should have its own diagram/code \
+placed right after the relevant explanation in that subsection.
 4. In <diagram/> context, include real entity/function names from your research.
 5. In <code/> tags, provide file path AND symbol name when possible.
 6. Do NOT cover topics listed in boundary_hint as out-of-scope.
