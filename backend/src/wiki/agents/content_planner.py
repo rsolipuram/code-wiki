@@ -16,7 +16,6 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Optional
 
 from src.wiki.agents.graph import report_agent_progress
 from src.wiki.agents.model import get_wiki_model
@@ -25,10 +24,12 @@ from src.wiki.v3_types import SectionSpec, V3WikiState, WikiNav
 logger = logging.getLogger(__name__)
 
 PLANNER_SYSTEM = """\
-You are a senior technical writer creating a conceptual wiki navigation for a software project.
+You are a wiki curator organizing pre-analyzed codebase findings into a \
+documentation table of contents.
 
-Your task is to design an intelligent, concept-driven table of contents — NOT a directory listing.
-Organize sections around WHAT THE CODE DOES and WHY, not where files live.
+Your job is to GROUP and ORGANIZE the analysis data below — NOT to invent \
+topics. Every section you create must be backed by actual dossier findings \
+and reference actual files that exist in the repository.
 
 Output ONLY valid JSON with this exact structure:
 {
@@ -36,7 +37,7 @@ Output ONLY valid JSON with this exact structure:
   "sections": [
     {
       "slug": "url-safe-slug",
-      "title": "Concept-Driven Title (e.g. 'The Routing Engine', 'Agent Orchestration')",
+      "title": "Clear Section Title",
       "type": "concept|architecture|workflow|reference|home",
       "one_liner": "One sentence describing what this section covers",
       "focus_tags": ["architecture", "dependencies"],
@@ -48,13 +49,16 @@ Output ONLY valid JSON with this exact structure:
 }
 
 Rules:
-- First section should be type="home" and provide an overview of the entire project
-- Section count is YOUR judgment — use as many or few as the project needs
-- seed_files should be 2-5 actual files the writing agent should start from
-- focus_tags should reference real dossier tags from the tag distribution provided
-- cross_refs should list slugs of sections this section is likely to reference
-- boundary_hint prevents agents from writing duplicate content across sections
-- Prefer 6-12 sections for most projects; fewer for simple projects, more for large ones
+- First section MUST be type="home" — an overview of the entire project.
+- ONLY create sections for topics that have actual dossier findings. \
+If a tag has 0 findings, do NOT create a section for it.
+- seed_files MUST be copied exactly from the file list provided. \
+Do NOT invent or guess file paths. If unsure, leave seed_files empty.
+- focus_tags MUST reference real dossier tags from the tag distribution.
+- Section count MUST match the project's actual complexity: \
+{section_cap}
+- boundary_hint prevents agents from writing duplicate content across sections.
+- cross_refs should list slugs of related sections.
 - Output ONLY the JSON object. No markdown fences, no explanation, no preamble.
 """
 
@@ -77,11 +81,24 @@ def content_planner_node(state: V3WikiState) -> dict:
     # Build compact prompt context
     context = _build_planner_context(dossier_dict, compressed, all_files, repo_path, repo_name)
 
+    # Derive section cap from repo size
+    n_files = len(all_files)
+    if n_files < 20:
+        section_cap = "max 3 sections (very small project)"
+    elif n_files < 50:
+        section_cap = "max 5 sections (small project)"
+    elif n_files < 200:
+        section_cap = "max 8 sections (medium project)"
+    else:
+        section_cap = "max 12 sections (large project)"
+
+    system_prompt = PLANNER_SYSTEM.replace("{section_cap}", section_cap)
+
     model = get_wiki_model(temperature=0.3, max_tokens=4096)
 
     try:
         response = model.invoke([
-            {"role": "system", "content": PLANNER_SYSTEM},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": context},
         ])
         raw = response.content if hasattr(response, "content") else str(response)
@@ -95,6 +112,9 @@ def content_planner_node(state: V3WikiState) -> dict:
         }
 
     wiki_nav = _parse_wiki_nav(raw, repo_name)
+
+    # Validate seed_files against actual repo files
+    wiki_nav = _validate_nav(wiki_nav, all_files)
 
     elapsed = time.monotonic() - t0
     logger.info(
@@ -125,12 +145,12 @@ def _build_planner_context(
     # Repo-level summary
     repo_summary = compressed.get("repo_summary", "")
     if repo_summary:
-        parts.append(f"## Repo Summary\n{repo_summary[:800]}\n")
+        parts.append(f"## Repo Summary\n{repo_summary[:1200]}\n")
 
     # Call graph summary
     call_graph_summary = compressed.get("call_graph_summary", "")
     if call_graph_summary:
-        parts.append(f"## Call Graph Overview\n{call_graph_summary[:400]}\n")
+        parts.append(f"## Call Graph Overview\n{call_graph_summary[:600]}\n")
 
     # Tag distribution (tells planner which dossier tags are populated)
     meta = dossier_dict.get("_meta", {})
@@ -140,14 +160,52 @@ def _build_planner_context(
         tag_summary = ", ".join(f"{t} ({n})" for t, n in sorted_tags[:20])
         parts.append(f"## Available Dossier Tags\n{tag_summary}\n")
 
-    # Key agent findings (architecture + patterns are most useful for planning)
-    findings = _summarize_responses(dossier_dict, max_per_tag=1, max_chars=1200)
+    # Key agent findings — expanded budget
+    findings = _summarize_responses(dossier_dict, max_per_tag=2, max_chars=3000)
     if findings:
         parts.append(f"## Key Agent Findings\n{findings}\n")
 
-    # File tree (depth-limited outline)
-    tree = _build_file_tree(all_files, repo_path, max_entries=60)
-    parts.append(f"## Repository Structure\n```\n{tree}\n```\n")
+    # Per-file summaries (entities, exports, deps) — from compressed data
+    file_summaries = compressed.get("file_summaries", {})
+    if file_summaries:
+        fs_lines = []
+        for fpath, fdata in list(file_summaries.items())[:50]:
+            entities = fdata.get("key_entities", [])
+            exports = fdata.get("exported_symbols", [])
+            lang = fdata.get("language", "")
+            summary = fdata.get("summary", "")
+            parts_list = [fpath]
+            if lang:
+                parts_list.append(f"({lang})")
+            if summary:
+                parts_list.append(f"— {summary[:100]}")
+            if entities:
+                parts_list.append(f"entities: {', '.join(entities[:5])}")
+            if exports:
+                parts_list.append(f"exports: {', '.join(exports[:5])}")
+            fs_lines.append(" ".join(parts_list))
+        if fs_lines:
+            parts.append("## File Summaries\n" + "\n".join(fs_lines) + "\n")
+
+    # Key entities — top code symbols
+    key_entities = compressed.get("key_entities", [])
+    if key_entities:
+        # key_entities can be list of strings or list of dicts
+        entity_names = []
+        for e in key_entities[:40]:
+            if isinstance(e, str):
+                entity_names.append(e)
+            elif isinstance(e, dict):
+                entity_names.append(e.get("name", str(e)))
+        if entity_names:
+            parts.append(f"## Key Code Entities\n{', '.join(entity_names)}\n")
+
+    # Full file list — the ONLY valid paths for seed_files
+    parts.append(
+        "## Complete File List (ONLY use these exact paths for seed_files)\n"
+        + "\n".join(all_files)
+        + "\n"
+    )
 
     # Directory summaries
     dir_summaries = compressed.get("directory_summaries", {})
@@ -236,6 +294,65 @@ def _first_dict_value(d: dict, max_chars: int) -> str:
         if isinstance(v, list) and v:
             return str(v[0])[:max_chars]
     return ""
+
+
+# ── Post-LLM validation ───────────────────────────────────────────────────────
+
+def _validate_nav(nav: WikiNav, all_files: list[str]) -> WikiNav:
+    """Validate and correct seed_files against real file list.
+
+    - Exact match → keep
+    - Fuzzy match (same filename, wrong dir) → correct to real path
+    - No match → drop
+    - Drop sections that have 0 valid seed_files AND 0 valid focus_tags
+      (unless it's the home section).
+    """
+    # Build lookup: filename → list of full paths
+    filename_to_paths: dict[str, list[str]] = {}
+    all_files_set = set(all_files)
+    for fp in all_files:
+        name = Path(fp).name
+        filename_to_paths.setdefault(name, []).append(fp)
+
+    valid_sections = []
+    for section in nav.sections:
+        validated_files = []
+        for seed in (section.seed_files or []):
+            if seed in all_files_set:
+                validated_files.append(seed)
+            else:
+                # Fuzzy: try matching just the filename
+                basename = Path(seed).name
+                matches = filename_to_paths.get(basename, [])
+                if len(matches) == 1:
+                    logger.info("seed_files fuzzy match: %r → %r", seed, matches[0])
+                    validated_files.append(matches[0])
+                elif matches:
+                    # Multiple matches — pick the shortest path (most likely correct)
+                    best = min(matches, key=len)
+                    logger.info("seed_files fuzzy match (ambiguous): %r → %r", seed, best)
+                    validated_files.append(best)
+                else:
+                    logger.warning("seed_files dropped (not found): %r", seed)
+
+        section.seed_files = validated_files
+
+        # Keep home sections unconditionally
+        if section.type == "home":
+            valid_sections.append(section)
+            continue
+
+        # Drop sections with no grounding at all
+        if not section.seed_files and not section.focus_tags:
+            logger.warning(
+                "Dropping section %r — no valid seed_files or focus_tags", section.slug
+            )
+            continue
+
+        valid_sections.append(section)
+
+    nav.sections = valid_sections
+    return nav
 
 
 # ── Response parsing ──────────────────────────────────────────────────────────

@@ -173,8 +173,24 @@ def generate_wiki_v3(
 
     # Create WikiPage records
     seen_page_slugs: set[str] = set()
+    skipped_empty = 0
     for section_dict in resolved_sections:
         raw_slug = section_dict.get("section_slug", "")
+
+        # Fix 5: Drop empty sections (but never home or reference pages)
+        segments = section_dict.get("prose_segments", [])
+        word_count = section_dict.get("word_count", 0)
+        if not segments or word_count < 50:
+            is_ref = section_dict.get("is_reference_page", False)
+            is_home = raw_slug in ("home", "overview", "introduction")
+            if not is_ref and not is_home:
+                logger.warning(
+                    "Dropping empty section %r (%d words, %d segments)",
+                    raw_slug, word_count, len(segments),
+                )
+                skipped_empty += 1
+                continue
+
         slug = _dedupe_slug(raw_slug, seen_page_slugs)
         title = section_dict.get("section_title", "")
         is_ref = section_dict.get("is_reference_page", False)
@@ -219,7 +235,14 @@ def generate_wiki_v3(
                 "detail": f"Quality check failed after {section_dict.get('critic_retries', 0)} retries",
             })
 
-    # Update wiki counters
+    # Update wiki counters — prune orphan modules (planned but page filtered out)
+    created_page_slugs = seen_page_slugs
+    for slug, mod in list(section_to_module.items()):
+        if slug not in created_page_slugs:
+            logger.info("Pruning orphan module %r (no page created)", slug)
+            session.delete(mod)
+            del section_to_module[slug]
+
     wiki.page_count = pages_created
     wiki.module_count = len(section_to_module)
 
@@ -227,8 +250,8 @@ def generate_wiki_v3(
 
     total_elapsed = time.monotonic() - t_total
     logger.info(
-        "V3 pipeline complete: %d pages, %d warnings (%.1fs)",
-        pages_created, len(generation_warnings), total_elapsed,
+        "V3 pipeline complete: %d pages, %d empty skipped, %d warnings (%.1fs)",
+        pages_created, skipped_empty, len(generation_warnings), total_elapsed,
     )
 
     return {

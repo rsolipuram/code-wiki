@@ -8,12 +8,14 @@ Does NOT generate mermaid syntax or raw code — only placement + context.
 """
 
 import logging
+import re
 import time
 from typing import Any, Optional
 
 from src.wiki.agents.model import get_wiki_model
 from src.wiki.agents.v4_placeholder_parser import parse_placeholders
 from src.wiki.v3_tools.dossier_tools import make_dossier_tools
+from src.wiki.v3_tools.file_tools import make_file_tools
 from src.wiki.v3_tools.graph_tools import make_graph_tools
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,11 @@ You have tools to query pre-analyzed project data:
 - get_imports(entity_name): What does this module import?
 - get_inheritance(entity_name): Parent and child classes
 - get_entity_neighborhood(entity_name): All relationships around an entity
+
+**File system (read actual source code):**
+- read_file(path, start_line?, end_line?): Read source code from a file
+- search_code(pattern, glob_pattern?): Search for text/regex across files
+- list_directory(path?): List files and directories
 
 ## Section brief
 {section_brief}
@@ -93,7 +100,11 @@ placed right after the relevant explanation in that subsection.
 5. In <code/> tags, provide file path AND symbol name when possible.
 6. Do NOT cover topics listed in boundary_hint as out-of-scope.
 7. Aim for 800-1500 words of substantive prose per section.
-8. Start by calling list_tags() and get_repo_summary() to orient yourself.
+8. Start by calling list_tags() and get_repo_summary() to orient yourself, \
+then use read_file() and search_code() to examine actual source code.
+9. Your output must be ONLY the wiki section content. Do NOT include \
+reasoning, planning, or notes like "I will now..." or "The files do not...". \
+Start directly with a ## heading.
 """
 
 
@@ -136,9 +147,9 @@ def _run_react_loop(
     messages = [{"role": "system", "content": system_prompt}]
 
     if seed_files:
-        files_hint = "Start by reading these files: " + ", ".join(seed_files[:5])
+        files_hint = "Start by using read_file() on these key files: " + ", ".join(seed_files[:5])
     else:
-        files_hint = "Explore the codebase to gather information."
+        files_hint = "Start by calling list_tags() and get_repo_summary() to discover what to explore."
 
     messages.append({
         "role": "user",
@@ -201,6 +212,29 @@ def _run_react_loop(
     return final_text or "", tool_calls_made
 
 
+def _strip_reasoning_preamble(text: str) -> str:
+    """Remove LLM reasoning preamble before the first markdown heading.
+
+    ReAct loops often emit chain-of-thought like "The requested files do not
+    exist... I will now write..." before the actual content. Strip it.
+    """
+    if not text:
+        return text
+
+    # Find first markdown heading (# or ##)
+    m = re.search(r'^#{1,3}\s+\S', text, re.MULTILINE)
+    if m and m.start() > 0:
+        stripped = text[:m.start()].strip()
+        if stripped:
+            logger.info(
+                "Stripped %d chars of reasoning preamble before first heading",
+                len(stripped),
+            )
+        return text[m.start():]
+
+    return text
+
+
 def v4_writer_node(state: dict) -> dict:
     """LangGraph node: Writer agent produces prose with XML placeholders.
 
@@ -211,6 +245,7 @@ def v4_writer_node(state: dict) -> dict:
     dossier_dict = state.get("dossier") or {}
     compressed_dict = state.get("compressed") or {}
     wiki_nav_dict = state.get("wiki_nav") or {}
+    repo_path = state.get("repo_path") or ""
 
     other_titles = [
         s.get("title", "")
@@ -221,8 +256,10 @@ def v4_writer_node(state: dict) -> dict:
     section_brief = _format_section_brief(section_spec, other_titles)
     system_prompt = WRITER_SYSTEM.format(section_brief=section_brief)
 
-    # Build tool set — dossier + graph only (NO file tools)
+    # Build tool set — dossier + graph + file tools
     all_tools = make_dossier_tools(dossier_dict, compressed_dict) + make_graph_tools()
+    if repo_path:
+        all_tools += make_file_tools(repo_path)
 
     model = get_wiki_model(temperature=0.4, max_tokens=8192)
     model_with_tools = model.bind_tools(all_tools)
@@ -235,6 +272,10 @@ def v4_writer_node(state: dict) -> dict:
         seed_files=section_spec.get("seed_files", []),
     )
     elapsed = time.monotonic() - t0
+
+    # Strip reasoning preamble — everything before the first markdown heading
+    raw_markdown = _strip_reasoning_preamble(raw_markdown)
+
     logger.info(
         "Writer for %r: %d chars, %d tool calls, %.1fs",
         section_spec.get("slug"), len(raw_markdown), tool_calls, elapsed,
