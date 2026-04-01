@@ -114,6 +114,7 @@ def index_entities(entities: list[Any], repo_id: str) -> None:
             "entity_type": e.entity_type,
             "file_path": e.file_path,
             "line_start": e.line_start,
+            "line_end": e.line_end,
             "signature": e.signature or "",
         })
 
