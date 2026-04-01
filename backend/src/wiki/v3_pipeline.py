@@ -197,14 +197,24 @@ def generate_wiki_v3(
 
         page_type = _slug_to_page_type(slug, is_ref)
 
-        content = {
-            "version": 2,
-            "prose_segments": section_dict.get("prose_segments", []),
-            "word_count": section_dict.get("word_count", 0),
-            "critic_passed": section_dict.get("critic_passed", True),
-            "section_type": "module",
-            "related_pages": [],
-        }
+        page_content = section_dict.get("page_content")
+        if isinstance(page_content, dict) and page_content:
+            content = dict(page_content)
+            content.setdefault("version", 2)
+            content.setdefault("prose_segments", section_dict.get("prose_segments", []))
+            content.setdefault("word_count", section_dict.get("word_count", 0))
+            content.setdefault("critic_passed", section_dict.get("critic_passed", True))
+            content.setdefault("section_type", "module")
+            content.setdefault("related_pages", [])
+        else:
+            content = {
+                "version": 2,
+                "prose_segments": section_dict.get("prose_segments", []),
+                "word_count": section_dict.get("word_count", 0),
+                "critic_passed": section_dict.get("critic_passed", True),
+                "section_type": "module",
+                "related_pages": [],
+            }
 
         page = WikiPage(
             wiki_id=wiki.id,
@@ -235,6 +245,8 @@ def generate_wiki_v3(
                 "detail": f"Quality check failed after {section_dict.get('critic_retries', 0)} retries",
             })
 
+    _validate_reference_pages(session, wiki.id, generation_warnings)
+
     # Update wiki counters — prune orphan modules (planned but page filtered out)
     created_page_slugs = seen_page_slugs
     for slug, mod in list(section_to_module.items()):
@@ -262,6 +274,39 @@ def generate_wiki_v3(
             "sections_written": len(resolved_sections),
         },
     }
+
+
+def _validate_reference_pages(session: Session, wiki_id: str, generation_warnings: list[dict]) -> None:
+    required_slugs = {
+        "getting-started": ("getting_started", "setup_steps"),
+        "api-reference": ("api_reference", "index"),
+        "function-index": ("function_index", "index"),
+        "glossary": ("glossary", "terms"),
+    }
+    pages = session.query(WikiPage).filter_by(wiki_id=wiki_id).all()
+    by_slug = {p.slug: p for p in pages}
+    for slug, (expected_type, required_key) in required_slugs.items():
+        page = by_slug.get(slug)
+        if not page:
+            generation_warnings.append({
+                "page": slug,
+                "reason": "missing_reference_page",
+                "detail": "Required reference page missing after persist",
+            })
+            continue
+        if str(page.page_type) != expected_type and getattr(page.page_type, "value", str(page.page_type)) != expected_type:
+            generation_warnings.append({
+                "page": slug,
+                "reason": "reference_page_type_mismatch",
+                "detail": f"Expected {expected_type}, got {page.page_type}",
+            })
+        content = page.content or {}
+        if required_key not in content:
+            generation_warnings.append({
+                "page": slug,
+                "reason": "reference_content_shape_mismatch",
+                "detail": f"Missing required key '{required_key}' in content",
+            })
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -306,6 +351,8 @@ def _slug_to_page_type(slug: str, is_ref: bool) -> PageType:
         return PageType.glossary
     if slug == "api-reference":
         return PageType.api_reference
+    if slug == "function-index":
+        return PageType.function_index
     if is_ref:
         return PageType.module
     # Home section → home type

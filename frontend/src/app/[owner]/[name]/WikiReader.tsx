@@ -7,7 +7,7 @@ import { TableOfContents, type TocEntry } from '@/components/layout/TableOfConte
 import { WikiSidebar } from '@/components/layout/WikiSidebar';
 import { api } from '@/services/api';
 import type { Module, Repository, WikiPage } from '@/services/api';
-import { V2SectionContent, V2HomeContent, GettingStartedContent, GlossaryContent, ApiReferenceContent, FunctionIndexContent } from '@/components/wiki/V2Components';
+import { V2SectionContent, V2HomeContent, GettingStartedContent, GlossaryContent, ApiReferenceContent, FunctionIndexContent, ProseRenderer, type ProseSegment } from '@/components/wiki/V2Components';
 
 interface WikiReaderProps {
   owner: string;
@@ -398,11 +398,20 @@ function SectionContent({
       case 'getting_started':
         return <GettingStartedContent content={content} />;
       case 'glossary':
-        return <GlossaryContent content={content} />;
+        if (Array.isArray(content.terms)) {
+          return <GlossaryContent content={content} />;
+        }
+        return <ProseRenderer segments={(content.prose_segments as ProseSegment[]) || []} base={base} />;
       case 'api_reference':
-        return <ApiReferenceContent content={content} repoUrl={repoUrl} pageCommitHash={activePage?.commit_hash} />;
+        if (content.index && typeof content.index === 'object') {
+          return <ApiReferenceContent content={content} repoUrl={repoUrl} pageCommitHash={activePage?.commit_hash} />;
+        }
+        return <ProseRenderer segments={(content.prose_segments as ProseSegment[]) || []} base={base} />;
       case 'function_index':
-        return <FunctionIndexContent content={content} repoUrl={repoUrl} pageCommitHash={activePage?.commit_hash} />;
+        if (content.index && typeof content.index === 'object') {
+          return <FunctionIndexContent content={content} repoUrl={repoUrl} pageCommitHash={activePage?.commit_hash} />;
+        }
+        return <ProseRenderer segments={(content.prose_segments as ProseSegment[]) || []} base={base} />;
       default:
         return <V2SectionContent content={content} base={base} name={name} activeModule={activeModule} allModules={allModules} />;
     }

@@ -135,7 +135,6 @@ def crosslink_node(state: V3WikiState) -> dict:
 
 def reference_node(state: V3WikiState) -> dict:
     """Generate fixed reference pages (Getting Started, Glossary, API Reference)."""
-    from src.wiki.agents.model import get_wiki_model
     from src.wiki.agents.reference_builder import build_reference_pages
 
     report_agent_progress("reference_builder", "running", "Building reference pages...")
@@ -145,15 +144,9 @@ def reference_node(state: V3WikiState) -> dict:
     fingerprint = state.get("fingerprint") or {}
     repo_name = state.get("repo_name") or "project"
     repo_url = state.get("repo_url") or ""
-
-    model = get_wiki_model(temperature=0.2, max_tokens=4096)
-
-    def _llm_fn(system: str, user: str) -> str:
-        response = model.invoke([
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ])
-        return response.content if hasattr(response, "content") else str(response)
+    entities = state.get("entities") or []
+    repo_path = state.get("repo_path") or ""
+    analysis_id = state.get("repository_id") or None
 
     ref_pages = build_reference_pages(
         dossier_dict=dossier_dict,
@@ -161,7 +154,9 @@ def reference_node(state: V3WikiState) -> dict:
         fingerprint=fingerprint,
         repo_name=repo_name,
         repo_url=repo_url,
-        llm_fn=_llm_fn,
+        entities=entities,
+        repo_path=repo_path,
+        analysis_id=analysis_id,
     )
 
     report_agent_progress("reference_builder", "complete", f"{len(ref_pages)} reference pages built")

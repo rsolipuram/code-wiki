@@ -114,6 +114,9 @@ class V3Section:
     is_reference_page: bool = False
     # True for Getting Started, Glossary, API Reference
 
+    page_content: dict = field(default_factory=dict)
+    # Optional pre-assembled page payload for structured special pages.
+
     def to_dict(self) -> dict:
         return {
             "section_slug": self.section_slug,
@@ -124,6 +127,7 @@ class V3Section:
             "critic_passed": self.critic_passed,
             "critic_retries": self.critic_retries,
             "is_reference_page": self.is_reference_page,
+            "page_content": self.page_content,
         }
 
     @classmethod
@@ -137,6 +141,7 @@ class V3Section:
             critic_passed=d.get("critic_passed", True),
             critic_retries=d.get("critic_retries", 0),
             is_reference_page=d.get("is_reference_page", False),
+            page_content=d.get("page_content", {}),
         )
 
 
