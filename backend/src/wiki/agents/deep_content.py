@@ -151,7 +151,7 @@ def deep_content_node(state: V3WikiState, section_spec_dict: dict) -> dict:
 
     system_prompt = DEEP_AGENT_SYSTEM.format(section_brief=section_brief)
 
-    model = get_wiki_model(temperature=0.4, max_tokens=32768)
+    model = get_wiki_model(temperature=0.4)
     model_with_tools = model.bind_tools(all_tools)
 
     with _concurrency_sem:

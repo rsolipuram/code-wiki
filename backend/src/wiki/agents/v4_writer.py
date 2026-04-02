@@ -271,7 +271,7 @@ def v4_writer_node(state: dict) -> dict:
     if repo_path:
         all_tools += make_file_tools(repo_path)
 
-    model = get_wiki_model(temperature=0.4, max_tokens=32768)
+    model = get_wiki_model(temperature=0.4)
     model_with_tools = model.bind_tools(all_tools)
 
     t0 = time.monotonic()

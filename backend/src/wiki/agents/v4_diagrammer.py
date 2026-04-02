@@ -118,7 +118,7 @@ def _generate_diagrams_batch(
         return []
 
     all_tools = make_dossier_tools(dossier_dict, compressed_dict) + make_graph_tools()
-    model = get_wiki_model(temperature=0.2, max_tokens=4096)
+    model = get_wiki_model(temperature=0.2)
     model_with_tools = model.bind_tools(all_tools)
     tool_map = {t.name: t for t in all_tools}
 

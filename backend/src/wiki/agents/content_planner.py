@@ -108,7 +108,7 @@ def content_planner_node(state: V3WikiState) -> dict:
 
     system_prompt = PLANNER_SYSTEM.replace("{section_cap}", section_cap)
 
-    model = get_wiki_model(temperature=0.3, max_tokens=4096)
+    model = get_wiki_model(temperature=0.3)
 
     try:
         response = model.invoke([
