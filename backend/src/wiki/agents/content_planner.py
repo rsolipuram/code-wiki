@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 PLANNER_SYSTEM = """\
 You are a wiki curator organizing pre-analyzed codebase findings into a \
-documentation table of contents.
+hierarchical, grouped documentation table of contents.
 
 Your job is to GROUP and ORGANIZE the analysis data below — NOT to invent \
 topics. Every section you create must be backed by actual dossier findings \
@@ -44,14 +44,33 @@ Output ONLY valid JSON with this exact structure:
       "seed_files": ["src/relevant/file.py", "another/key/file.ts"],
       "boundary_hint": "Focus on X and Y; skip Z (covered in section 'Other Section')",
       "cross_refs": ["slug-of-related-section"],
-      "menu_group": "Backend",
-      "menu_label": "Agent Architecture"
+      "menu_group": "Architecture",
+      "menu_label": "System Overview"
     }
   ]
 }
 
-Rules:
-- First section MUST be type="home" — an overview of the entire project.
+Navigation structure rules:
+- First section MUST be type="home" with NO menu_group (it stands alone at the top).
+- ALL other sections MUST have a menu_group. Group related sections under a \
+shared parent label. Use as many groups as makes sense for the project size — \
+small projects may need only 1-2 groups, large projects may need 5-7. \
+Each group should have at least 2 sections; if a group would have only 1, \
+merge that section into the closest related group instead.
+- menu_label is the SHORT child label shown under the group. Do NOT repeat the \
+group name in menu_label (e.g. group="API" → label="Endpoints", not "API Endpoints").
+- CONSOLIDATE aggressively: merge topics that cover the same subsystem. \
+For example, do NOT create separate sections for "UI Structure", "UI Layout", \
+"UI Components", and "UI Core Components" — combine them into 1-2 sections \
+under a "Frontend" or "UI" group.
+- Each group should represent a distinct architectural concern (e.g. \
+"Architecture", "Backend", "Frontend", "Data", "DevOps"). Avoid groups with \
+only 1 section — merge that section into the closest related group.
+- Implementation details like CORS config, streaming responses, or individual \
+utility files should be subsections within a broader section, NOT standalone \
+sections.
+
+Content rules:
 - ONLY create sections for topics that have actual dossier findings. \
 If a tag has 0 findings, do NOT create a section for it.
 - seed_files MUST be copied exactly from the file list provided. \
@@ -61,10 +80,6 @@ Do NOT invent or guess file paths. If unsure, leave seed_files empty.
 {section_cap}
 - boundary_hint prevents agents from writing duplicate content across sections.
 - cross_refs should list slugs of related sections.
-- menu_group is optional. Use it only when multiple sections naturally belong
-  under one submenu (example: Backend).
-- menu_label is optional. If menu_group is present, set a short child label
-  (without repeating the group prefix).
 - Output ONLY the JSON object. No markdown fences, no explanation, no preamble.
 """
 
