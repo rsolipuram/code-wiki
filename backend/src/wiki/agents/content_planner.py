@@ -43,7 +43,9 @@ Output ONLY valid JSON with this exact structure:
       "focus_tags": ["architecture", "dependencies"],
       "seed_files": ["src/relevant/file.py", "another/key/file.ts"],
       "boundary_hint": "Focus on X and Y; skip Z (covered in section 'Other Section')",
-      "cross_refs": ["slug-of-related-section"]
+      "cross_refs": ["slug-of-related-section"],
+      "menu_group": "Backend",
+      "menu_label": "Agent Architecture"
     }
   ]
 }
@@ -59,6 +61,10 @@ Do NOT invent or guess file paths. If unsure, leave seed_files empty.
 {section_cap}
 - boundary_hint prevents agents from writing duplicate content across sections.
 - cross_refs should list slugs of related sections.
+- menu_group is optional. Use it only when multiple sections naturally belong
+  under one submenu (example: Backend).
+- menu_label is optional. If menu_group is present, set a short child label
+  (without repeating the group prefix).
 - Output ONLY the JSON object. No markdown fences, no explanation, no preamble.
 """
 
@@ -348,6 +354,10 @@ def _validate_nav(nav: WikiNav, all_files: list[str]) -> WikiNav:
                 "Dropping section %r — no valid seed_files or focus_tags", section.slug
             )
             continue
+
+        if section.menu_group and not section.menu_label:
+            # Safe default: derive child label from title when group is present.
+            section.menu_label = section.title
 
         valid_sections.append(section)
 

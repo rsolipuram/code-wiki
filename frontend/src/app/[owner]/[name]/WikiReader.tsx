@@ -15,6 +15,33 @@ interface WikiReaderProps {
   slug?: string; // undefined = overview/home
 }
 
+type SidebarLeafItem = {
+  label: string;
+  href: string;
+  active: boolean;
+  badge?: string;
+  hint?: string;
+  menuGroup?: string;
+  menuLabel?: string;
+};
+
+type SidebarGroupItem = {
+  label: string;
+  active: boolean;
+  children: SidebarLeafItem[];
+};
+
+type SidebarItem = SidebarLeafItem | SidebarGroupItem;
+
+type SidebarSection = {
+  label: string;
+  items: SidebarItem[];
+};
+
+function isSidebarGroupItem(item: SidebarItem): item is SidebarGroupItem {
+  return 'children' in item;
+}
+
 function Breadcrumbs({ crumbs }: { crumbs: { label: string; href?: string }[] }) {
   return (
     <div
@@ -528,20 +555,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
   const [activeModule, setActiveModule] = useState<Module | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const pageType = activePage?.page_type as string | undefined;
-
-  useEffect(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem('wiki-theme') as 'dark' | 'light' | null : null;
-    if (saved) setTheme(saved);
-  }, []);
-
-  useEffect(() => {
-    if (typeof document !== 'undefined') {
-      document.documentElement.setAttribute('data-theme', theme);
-      localStorage.setItem('wiki-theme', theme);
-    }
-  }, [theme]);
 
   useEffect(() => {
     const load = async () => {
@@ -593,7 +607,9 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
 
   // Deduplicate modules by slug
   const uniqueModules = modules.filter(
-    (m, i, arr) => arr.findIndex((x) => x.slug === m.slug) === i
+    (m, i, arr) =>
+      arr.findIndex((x) => x.slug === m.slug) === i &&
+      (m.slug || '').toLowerCase() !== 'home'
   );
 
   // Derive reading order from home page section_summaries (pipeline order)
@@ -617,8 +633,156 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
     });
   }, [uniqueModules, readingOrder]);
 
+  const learningPathItems: SidebarLeafItem[] = React.useMemo(() => {
+    const homeContent = homePage?.content as Record<string, unknown> | null;
+    const summaries = Array.isArray(homeContent?.section_summaries)
+      ? (homeContent?.section_summaries as Array<Record<string, unknown>>)
+      : [];
+    const summaryById = new Map(summaries.map((s) => [String(s.id || ''), s]));
+    return orderedModules.map((m, i) => {
+      const summary = summaryById.get(m.slug);
+      const menuGroup = summary && typeof summary.menu_group === 'string' ? summary.menu_group : '';
+      const menuLabel = summary && typeof summary.menu_label === 'string' ? summary.menu_label : '';
+      return {
+        label: m.name || m.slug || '/',
+        href: m.slug,
+        active: slug === m.slug,
+        badge: readingOrder.length > 0 ? String(i + 1) : undefined,
+        hint: i === 0 ? 'Start here' : undefined,
+        menuGroup: menuGroup || undefined,
+        menuLabel: menuLabel || undefined,
+      };
+    });
+  }, [orderedModules, readingOrder, slug, homePage]);
+
+  // Planner-driven grouping via home.content.section_summaries[].menu_group.
+  // Falls back to flat list when no groups are provided.
+  const groupedLearningPathItems: SidebarItem[] = React.useMemo(() => {
+    const groupMeta = new Map<string, { firstIndex: number; children: SidebarLeafItem[] }>();
+    const flatItems: SidebarLeafItem[] = [];
+
+    learningPathItems.forEach((item, index) => {
+      if (item.menuGroup) {
+        const current = groupMeta.get(item.menuGroup);
+        const child = {
+          ...item,
+          label: item.menuLabel || item.label,
+        };
+        if (current) {
+          current.children.push(child);
+        } else {
+          groupMeta.set(item.menuGroup, { firstIndex: index, children: [child] });
+        }
+      } else {
+        flatItems.push(item);
+      }
+    });
+
+    if (groupMeta.size === 0) return learningPathItems;
+
+    const groups = Array.from(groupMeta.entries()).sort((a, b) => a[1].firstIndex - b[1].firstIndex);
+    const items: SidebarItem[] = [];
+    let flatCursor = 0;
+
+    for (const [groupLabel, data] of groups) {
+      while (
+        flatCursor < flatItems.length &&
+        learningPathItems.findIndex((item) => item.href === flatItems[flatCursor].href) < data.firstIndex
+      ) {
+        items.push(flatItems[flatCursor]);
+        flatCursor += 1;
+      }
+      items.push({
+        label: groupLabel,
+        active: data.children.some((child) => child.active),
+        children: data.children,
+      });
+    }
+
+    while (flatCursor < flatItems.length) {
+      items.push(flatItems[flatCursor]);
+      flatCursor += 1;
+    }
+ 
+    const seen = new Set<string>();
+    return items.filter((it) => {
+      const key = isSidebarGroupItem(it) ? `group:${it.label}` : `leaf:${it.href}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [learningPathItems]);
+
+  const renderSidebarLeafItem = (item: SidebarLeafItem, paddingLeft = 20) => (
+    <Link
+      key={item.href}
+      href={item.href ? `${base}/${item.href}` : base}
+      aria-current={item.active ? 'page' : undefined}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: `8px 20px 8px ${paddingLeft}px`,
+        fontSize: 14,
+        fontWeight: 500,
+        textDecoration: 'none',
+        color: item.active ? 'var(--primary-light)' : 'var(--text-secondary)',
+        background: item.active
+          ? 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(6,182,212,0.1))'
+          : 'transparent',
+        borderLeft: item.active
+          ? '3px solid var(--primary)'
+          : '3px solid transparent',
+        transition: 'all 0.2s',
+      }}
+    >
+      {item.badge && (
+        <span style={{
+          minWidth: 20, height: 20, borderRadius: '50%',
+          background: item.active ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
+          color: item.active ? '#fff' : 'var(--text-tertiary)',
+          fontSize: 10, fontWeight: 700,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>{item.badge}</span>
+      )}
+      <span
+        title={item.label}
+        style={{
+          overflow: 'hidden',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          lineHeight: 1.2,
+          flex: 1,
+          minWidth: 0,
+        }}
+      >
+        {item.label}
+      </span>
+      {item.hint && (
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: '0.4px',
+            color: 'var(--primary-light)',
+            background: 'rgba(139,92,246,0.15)',
+            border: '1px solid rgba(139,92,246,0.25)',
+            borderRadius: 999,
+            padding: '2px 6px',
+            flexShrink: 0,
+          }}
+        >
+          {item.hint}
+        </span>
+      )}
+    </Link>
+  );
+
   // Build sidebar sections
-  const sidebarSections = [
+  const sidebarSections: SidebarSection[] = [
     {
       label: 'Overview',
       items: [
@@ -630,13 +794,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
       ? [
           {
             label: 'Learning Path',
-            items: orderedModules.map((m, i) => ({
-              label: m.name || m.slug || '/',
-              href: m.slug,
-              active: slug === m.slug,
-              badge: readingOrder.length > 0 ? String(i + 1) : undefined,
-              hint: i === 0 ? 'Start here' : undefined,
-            })),
+            items: groupedLearningPathItems,
           },
         ]
       : []),
@@ -794,73 +952,27 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
                 {section.label}
               </div>
               <div>
-                {section.items.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href ? `${base}/${item.href}` : base}
-                    aria-current={item.active ? 'page' : undefined}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '8px 20px',
-                      fontSize: 14,
-                      fontWeight: 500,
-                      textDecoration: 'none',
-                      color: item.active ? 'var(--primary-light)' : 'var(--text-secondary)',
-                      background: item.active
-                        ? 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(6,182,212,0.1))'
-                        : 'transparent',
-                      borderLeft: item.active
-                        ? '3px solid var(--primary)'
-                        : '3px solid transparent',
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    {item.badge && (
-                      <span style={{
-                        minWidth: 20, height: 20, borderRadius: '50%',
-                        background: item.active ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
-                        color: item.active ? '#fff' : 'var(--text-tertiary)',
-                        fontSize: 10, fontWeight: 700,
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        flexShrink: 0,
-                      }}>{item.badge}</span>
-                    )}
-                    <span
-                      title={item.label}
-                      style={{
-                        overflow: 'hidden',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        lineHeight: 1.2,
-                        flex: 1,
-                        minWidth: 0,
-                      }}
-                    >
-                      {item.label}
-                    </span>
-                    {(item as { hint?: string }).hint && (
-                      <span
+                {section.items.map((item) =>
+                  isSidebarGroupItem(item) ? (
+                    <div key={`group-${item.label}`} style={{ margin: '4px 0 8px' }}>
+                      <div
                         style={{
-                          fontSize: 10,
+                          padding: '8px 20px 8px 32px',
+                          fontSize: 12,
                           fontWeight: 700,
                           textTransform: 'uppercase',
-                          letterSpacing: '0.4px',
-                          color: 'var(--primary-light)',
-                          background: 'rgba(139,92,246,0.15)',
-                          border: '1px solid rgba(139,92,246,0.25)',
-                          borderRadius: 999,
-                          padding: '2px 6px',
-                          flexShrink: 0,
+                          letterSpacing: '0.6px',
+                          color: item.active ? 'var(--primary-light)' : 'var(--text-tertiary)',
                         }}
                       >
-                        {(item as { hint?: string }).hint}
-                      </span>
-                    )}
-                  </Link>
-                ))}
+                        {item.label}
+                      </div>
+                      {item.children.map((child) => renderSidebarLeafItem(child, 44))}
+                    </div>
+                  ) : (
+                    renderSidebarLeafItem(item, 20)
+                  )
+                )}
               </div>
             </div>
           ))}
@@ -889,23 +1001,6 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
                 {link.label}
               </Link>
             ))}
-            {/* Theme toggle */}
-            <button
-              onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                width: '100%', padding: '8px 20px',
-                background: 'none', border: 'none',
-                cursor: 'pointer', fontSize: 14, fontWeight: 500,
-                color: 'var(--text-secondary)', textAlign: 'left',
-                fontFamily: "'Outfit', sans-serif",
-                transition: 'color 0.2s',
-              }}
-              onMouseOver={e => e.currentTarget.style.color = 'var(--text-primary)'}
-              onMouseOut={e => e.currentTarget.style.color = 'var(--text-secondary)'}
-            >
-              {theme === 'dark' ? '☀️ Light mode' : '🌙 Dark mode'}
-            </button>
           </div>
         </WikiSidebar>
 
@@ -960,7 +1055,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
 
       <style jsx global>{`
         .wiki-layout {
-          background: #0a0a12;
+          background: var(--bg-dark);
           color: var(--text-primary);
         }
         .v2-prose h2, .v2-prose h3 {

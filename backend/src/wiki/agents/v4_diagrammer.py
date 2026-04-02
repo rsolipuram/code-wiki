@@ -54,7 +54,7 @@ You have tools to query real code relationships:
 
 4. Use double quotes, not single quotes, inside brackets.
 
-5. Keep diagrams focused: **max 15 nodes**. Simplify if needed.
+5. Keep diagrams focused: **max 12 nodes**. Simplify aggressively if needed.
 
 6. No raw HTML tags in labels (no `<br>`, `<b>`, etc.).
 
@@ -63,6 +63,11 @@ You have tools to query real code relationships:
 8. Arrow syntax: `-->`, `==>`, `-.->`, `--text-->`. No dangling arrows.
 
 9. Use real entity names from your tool results, not invented ones.
+10. For the first/top architecture diagram in a section: show only major building \
+blocks and top-level flows (no low-level classes/functions).
+11. If more detail is needed, split into multiple diagrams by concern \
+(e.g., request path, orchestration, data stores) instead of one dense diagram.
+12. Prioritize readability over completeness in a single image.
 
 ## Your task
 

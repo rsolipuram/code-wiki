@@ -23,6 +23,7 @@ from src.storage import graph_db
 from src.wiki.page_builders.diagrams import build_diagrams
 
 router = APIRouter(prefix="/wikis", tags=["wikis"])
+_NON_MODULE_SLUGS = {"home", "overview", "introduction"}
 
 
 def _wiki_to_response(wiki: Wiki) -> WikiResponse:
@@ -129,7 +130,13 @@ async def list_modules(
 ) -> list[ModuleResponse]:
     """List detected modules for a repository."""
     wiki = _get_wiki_for_repo(db, repository_id)
-    modules = db.query(Module).filter_by(wiki_id=wiki.id).order_by(Module.sort_order).all()
+    modules = (
+        db.query(Module)
+        .filter_by(wiki_id=wiki.id)
+        .order_by(Module.sort_order)
+        .all()
+    )
+    modules = [m for m in modules if (m.slug or "").strip().lower() not in _NON_MODULE_SLUGS]
     return [_module_to_response(m) for m in modules]
 
 
@@ -140,6 +147,8 @@ async def get_module(
     db: Session = Depends(get_db),
 ) -> ModuleResponse:
     """Get module details."""
+    if module_slug.strip().lower() in _NON_MODULE_SLUGS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
     wiki = _get_wiki_for_repo(db, repository_id)
     module = db.query(Module).filter_by(wiki_id=wiki.id, slug=module_slug).first()
     if not module:

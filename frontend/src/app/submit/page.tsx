@@ -512,7 +512,7 @@ export default function SubmitPage() {
         <GlassCard
           style={{
             padding: '36px 30px',
-            background: 'rgba(10,10,20,0.6)',
+            background: 'var(--panel-strong-bg)',
             position: 'sticky',
             top: 24,
           }}
@@ -579,7 +579,7 @@ export default function SubmitPage() {
                   borderRadius: 8,
                   fontSize: 12,
                   fontWeight: 600,
-                  background: 'rgba(255,255,255,0.06)',
+                  background: 'var(--panel-soft-bg)',
                   border: '1px solid var(--glass-border)',
                   color: 'var(--text-secondary)',
                 }}

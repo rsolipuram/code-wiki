@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Outfit, Fira_Code } from "next/font/google";
 import "./globals.css";
+import { ThemeProvider } from "@/components/theme/ThemeProvider";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 const outfit = Outfit({
   variable: "--font-outfit",
@@ -26,9 +28,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="dark">
       <body className={`${outfit.variable} ${firaCode.variable}`}>
-        {children}
+        <ThemeProvider>
+          {children}
+          <div
+            style={{
+              position: "fixed",
+              top: 16,
+              right: 16,
+              zIndex: 9999,
+            }}
+          >
+            <ThemeToggle />
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );

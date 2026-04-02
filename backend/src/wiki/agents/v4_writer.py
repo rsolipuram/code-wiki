@@ -96,13 +96,22 @@ NEVER group diagrams together. NEVER place all diagrams at the end. \
 The pattern is: explanatory prose paragraph → <diagram/> or <code/> → next topic. \
 If your section has 3 subsections, each subsection should have its own diagram/code \
 placed right after the relevant explanation in that subsection.
-4. In <diagram/> context, include real entity/function names from your research.
-5. In <code/> tags, provide file path AND symbol name when possible.
-6. Do NOT cover topics listed in boundary_hint as out-of-scope.
-7. Aim for 800-1500 words of substantive prose per section.
-8. Start by calling list_tags() and get_repo_summary() to orient yourself, \
+4. **Top-of-section architecture diagram**: Place one high-level architecture or \
+system-context <diagram/> near the top of the section (immediately after the first \
+introductory paragraph under the first ## heading), before deep-dive subsections. \
+This diagram should summarize the main components and their relationships.
+5. **Progressive disclosure for diagrams**: Keep the top diagram simple (about 5-8 \
+major nodes, major flows only). If details are needed, add additional focused \
+<diagram/> tags below, each covering one subsystem or flow.
+6. **Do not cram details**: Avoid listing every class/function in a single diagram. \
+Prefer multiple readable diagrams over one dense graph.
+7. In <diagram/> context, include real entity/function names from your research.
+8. In <code/> tags, provide file path AND symbol name when possible.
+9. Do NOT cover topics listed in boundary_hint as out-of-scope.
+10. Aim for 800-1500 words of substantive prose per section.
+11. Start by calling list_tags() and get_repo_summary() to orient yourself, \
 then use read_file() and search_code() to examine actual source code.
-9. Your output must be ONLY the wiki section content. Do NOT include \
+12. Your output must be ONLY the wiki section content. Do NOT include \
 reasoning, planning, or notes like "I will now..." or "The files do not...". \
 Start directly with a ## heading.
 """

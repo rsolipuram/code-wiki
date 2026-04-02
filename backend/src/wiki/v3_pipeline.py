@@ -128,6 +128,23 @@ def generate_wiki_v3(
     wiki_nav_dict = final_state.get("wiki_nav") or {}
     wiki_nav = WikiNav.from_dict(wiki_nav_dict)
     resolved_sections: list[dict] = final_state.get("resolved_sections") or []
+    words_by_slug = {
+        str(s.get("section_slug", "")): int(s.get("word_count", 0) or 0)
+        for s in (final_state.get("deep_sections") or [])
+    }
+    planned_section_summaries = [
+        {
+            "id": spec.slug,
+            "title": spec.title,
+            "word_count": words_by_slug.get(spec.slug, 0),
+            "diagram_count": 0,
+            "menu_group": spec.menu_group or "",
+            "menu_label": spec.menu_label or spec.title,
+        }
+        for spec in wiki_nav.sections
+        if spec.type != "home"
+    ]
+    planned_reading_order = [s["id"] for s in planned_section_summaries]
 
     # Fall back to deep_sections if crosslink resolver wasn't called
     if not resolved_sections:
@@ -152,9 +169,11 @@ def generate_wiki_v3(
     session.query(Module).filter_by(wiki_id=wiki.id).delete()
     session.flush()
 
-    # Create Module records from WikiNav sections
+    # Create Module records from WikiNav sections (exclude non-module pages like home)
     section_to_module: dict[str, Module] = {}
     for i, spec in enumerate(wiki_nav.sections):
+        if spec.type == "home":
+            continue
         mod = Module(
             wiki_id=wiki.id,
             name=spec.title,
@@ -215,6 +234,12 @@ def generate_wiki_v3(
                 "section_type": "module",
                 "related_pages": [],
             }
+
+        # Planner-defined menu structure lives on home page content so frontend
+        # can build grouped Learning Path without hardcoded title heuristics.
+        if page_type == PageType.home:
+            content["section_summaries"] = planned_section_summaries
+            content["suggested_reading_order"] = planned_reading_order
 
         page = WikiPage(
             wiki_id=wiki.id,

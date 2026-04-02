@@ -29,6 +29,7 @@ from src.wiki.orchestrator import partial_regenerate
 from src.wiki.page_builders.module_page import build_module_page, slugify
 
 logger = logging.getLogger(__name__)
+_NON_MODULE_SLUGS = {"home", "overview", "introduction"}
 
 
 def run_sync(event_id: str) -> dict[str, Any]:
@@ -172,7 +173,11 @@ def _find_affected_modules(
 
     Falls back to all modules when changed_files is empty (e.g. manual refresh).
     """
-    all_modules = session.query(Module).filter_by(wiki_id=wiki_id).all()
+    all_modules = [
+        m
+        for m in session.query(Module).filter_by(wiki_id=wiki_id).all()
+        if (m.slug or "").strip().lower() not in _NON_MODULE_SLUGS
+    ]
 
     if not changed_files:
         return all_modules
@@ -207,6 +212,10 @@ def _regenerate_module(
     commit_hash: str,
 ) -> None:
     """Run partial wiki regen for one module and update the WikiPage in DB."""
+    if (module.slug or "").strip().lower() in _NON_MODULE_SLUGS:
+        logger.info("Skipping non-module slug in sync regeneration: %s", module.slug)
+        return
+
     # Filter entities relevant to this module's file paths
     module_file_set = set(module.file_paths or [])
     local_path = Path(repo_path)
@@ -243,6 +252,9 @@ def _regenerate_module(
     # Update or create the WikiPage
     slug = module.slug or slugify(module.name)
     page = session.query(WikiPage).filter_by(wiki_id=wiki.id, slug=slug).first()
+    if page and getattr(page.page_type, "value", str(page.page_type)) == "home":
+        logger.warning("Refusing to overwrite home page from module sync: slug=%s", slug)
+        return
     if page:
         page.content = page_content
         page.commit_hash = commit_hash

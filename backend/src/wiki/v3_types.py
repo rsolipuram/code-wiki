@@ -39,6 +39,12 @@ class SectionSpec:
     cross_refs: list[str] = field(default_factory=list)
     # Section slugs this section is likely to reference
 
+    menu_group: str = ""
+    # Optional sidebar group label for submenu rendering
+
+    menu_label: str = ""
+    # Optional child label shown inside menu_group
+
     def to_dict(self) -> dict:
         return {
             "slug": self.slug,
@@ -49,6 +55,8 @@ class SectionSpec:
             "seed_files": self.seed_files,
             "boundary_hint": self.boundary_hint,
             "cross_refs": self.cross_refs,
+            "menu_group": self.menu_group,
+            "menu_label": self.menu_label,
         }
 
     @classmethod
@@ -62,6 +70,8 @@ class SectionSpec:
             seed_files=d.get("seed_files", []),
             boundary_hint=d.get("boundary_hint", ""),
             cross_refs=d.get("cross_refs", []),
+            menu_group=d.get("menu_group", ""),
+            menu_label=d.get("menu_label", ""),
         )
 
 

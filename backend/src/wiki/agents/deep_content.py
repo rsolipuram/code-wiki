@@ -83,6 +83,9 @@ Important rules:
 - Use graph tools to discover call chains and dependencies for architecture diagrams
 - For code snippets in <code> tags, reference file paths and line ranges from file summaries
 - Mermaid diagrams must use valid syntax (flowchart LR, sequenceDiagram, classDiagram, etc.)
+- Use progressive disclosure for diagrams: first diagram should be high-level and easy to read
+- Keep each diagram to major components only (roughly <= 8-12 nodes), and add follow-up diagrams for detailed subcomponents
+- Do not put all entities into one diagram; prefer multiple focused diagrams by concern
 - Do NOT cover topics listed in boundary_hint as out-of-scope
 - Start by calling list_tags() and get_repo_summary() to orient yourself
 """

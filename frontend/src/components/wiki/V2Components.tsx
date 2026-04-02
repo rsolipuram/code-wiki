@@ -897,6 +897,43 @@ export function ProseRenderer({
     }
   });
 
+  const renderComponentPlaceholder = (
+    id: string,
+    children?: React.ReactNode,
+  ): React.ReactNode | null => {
+    if (codeBlockMap.has(id)) return codeBlockMap.get(id) ?? null;
+    if (diagramMap.has(id)) return diagramMap.get(id) ?? null;
+    if (chipMap.has(id)) return chipMap.get(id) ?? null;
+
+    const segIdx = parseInt(id.replace(/COMPIDV2X(\d+)/, "$1"), 10);
+    const seg = segments[segIdx];
+    if (!seg) return null;
+
+    if (seg.type === "code_block") return codeBlockMap.get(id) ?? null;
+    if (seg.type === "diagram" || seg.type === "table" || seg.type === "callout") {
+      return diagramMap.get(id) ?? null;
+    }
+    if (seg.type === "source_link" || seg.type === "cross-ref") {
+      return chipMap.get(id) ?? null;
+    }
+    if (seg.type === "section_link" && seg.slug) {
+      return (
+        <Link
+          href={`${base}/${seg.slug}`}
+          style={{
+            color: "var(--primary-light)",
+            textDecoration: "underline",
+            textDecorationColor: "rgba(139,92,246,0.3)",
+            textUnderlineOffset: 3,
+          }}
+        >
+          {children}
+        </Link>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="v2-prose" style={{ lineHeight: 1.8 }}>
       <ReactMarkdown
@@ -928,6 +965,11 @@ export function ProseRenderer({
           },
           code: ({ children, className, inline, ...props }: any) => {
             const content = React.Children.toArray(children).join("").trim();
+
+            // Guard against leaked render marker IDs (e.g. COMPIDV2X5) inside inline code.
+            if (/^COMPIDV2X\d+$/.test(content)) {
+              return <>{renderComponentPlaceholder(content, children)}</>;
+            }
 
             // Handle inline chip placeholders (direct match)
             if (chipMap.has(content)) return <>{chipMap.get(content)}</>;
@@ -1044,35 +1086,7 @@ export function ProseRenderer({
           li: ({ children }) => <li style={{ marginBottom: 8 }}>{children}</li>,
           a: ({ href, children }) => {
             if (href && href.startsWith("COMPIDV2X")) {
-              const segIdx = parseInt(href.replace(/COMPIDV2X(\d+)/, "$1"));
-              const seg = segments[segIdx];
-              if (seg) {
-                // Block components: return the pre-built React node
-                if (seg.type === "code_block")
-                  return <>{codeBlockMap.get(href)}</>;
-                if (seg.type === "diagram" || seg.type === "table")
-                  return <>{diagramMap.get(href)}</>;
-                // Source link chips
-                if (seg.type === "source_link") return <>{chipMap.get(href)}</>;
-                // Cross-references
-                if (seg.type === "cross-ref") return <>{chipMap.get(href)}</>;                // Section links
-                if (seg.type === "section_link" && seg.slug) {
-                  return (
-                    <Link
-                      href={`${base}/${seg.slug}`}
-                      style={{
-                        color: "var(--primary-light)",
-                        textDecoration: "underline",
-                        textDecorationColor: "rgba(139,92,246,0.3)",
-                        textUnderlineOffset: 3,
-                      }}
-                    >
-                      {children}
-                    </Link>
-                  );
-                }
-              }
-              return null;
+              return <>{renderComponentPlaceholder(href, children)}</>;
             }
             return (
               <a

@@ -7,13 +7,32 @@ Also provides `fix_prose_diagrams()` for post-assembly validation
 on prose_segments (the final structured output stored in the DB).
 """
 
+import asyncio
+import base64
 import logging
+import os
 import re
+import shlex
+import shutil
+import tempfile
+import threading
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 MAX_FIX_ATTEMPTS = 2
+MERMAID_VALIDATE_TIMEOUT_SECONDS = 30
+
+
+@dataclass
+class MermaidValidationResult:
+    """Result of Mermaid CLI validation."""
+
+    is_valid: bool
+    error_message: Optional[str] = None
+    diagram_image: Optional[str] = None
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -32,7 +51,89 @@ def validate_mermaid(source: str) -> Tuple[bool, str]:
     if errors:
         return False, "; ".join(errors)
 
-    return True, ""
+    cli_result = _run_coroutine_sync(validate_mermaid_diagram(source, return_image=False))
+    if cli_result.is_valid:
+        return True, ""
+
+    return False, cli_result.error_message or "Mermaid CLI validation failed"
+
+
+async def validate_mermaid_diagram(
+    diagram_text: str,
+    return_image: bool = False,
+    *,
+    timeout_seconds: int = MERMAID_VALIDATE_TIMEOUT_SECONDS,
+) -> MermaidValidationResult:
+    """Validate Mermaid by invoking Mermaid CLI and optionally return PNG image."""
+    temp_input_path: Optional[str] = None
+    temp_output_path: Optional[str] = None
+    puppeteer_config_path: Optional[str] = None
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".mmd", mode="w", delete=False) as temp_input:
+            temp_input.write(diagram_text)
+            temp_input_path = temp_input.name
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_output:
+            temp_output_path = temp_output.name
+
+        with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as config_file:
+            config_file.write('{"args": ["--no-sandbox", "--disable-setuid-sandbox"]}')
+            puppeteer_config_path = config_file.name
+
+        cmd = _resolve_mermaid_cli_command() + [
+            "-i",
+            temp_input_path,
+            "-o",
+            temp_output_path,
+            "--puppeteerConfigFile",
+            puppeteer_config_path,
+        ]
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.communicate()
+            return MermaidValidationResult(
+                is_valid=False,
+                error_message=f"Mermaid CLI validation timed out after {timeout_seconds}s",
+                diagram_image=None,
+            )
+
+        if process.returncode == 0:
+            image_data: Optional[str] = None
+            if return_image and temp_output_path:
+                image_data = base64.b64encode(Path(temp_output_path).read_bytes()).decode("utf-8")
+            return MermaidValidationResult(is_valid=True, error_message=None, diagram_image=image_data)
+
+        stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
+        stdout = stdout_bytes.decode("utf-8", errors="replace").strip()
+        details = stderr or stdout or "Mermaid CLI returned non-zero exit status"
+        return MermaidValidationResult(
+            is_valid=False,
+            error_message=_truncate_error(f"Mermaid CLI validation failed: {details}"),
+            diagram_image=None,
+        )
+    except Exception as exc:
+        logger.warning("Mermaid CLI validation error: %s", exc)
+        return MermaidValidationResult(
+            is_valid=False,
+            error_message=_truncate_error(f"Error validating mermaid diagram: {exc}"),
+            diagram_image=None,
+        )
+    finally:
+        for file_path in (temp_input_path, temp_output_path, puppeteer_config_path):
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.unlink(file_path)
+                except OSError as exc:
+                    logger.warning("Failed to remove temporary mermaid file %s: %s", file_path, exc)
 
 
 def fix_mermaid(
@@ -176,6 +277,33 @@ def _heuristic_check(source: str) -> list[str]:
                 )
                 break
 
+    # 6b. Subgraph titles with special chars must be quoted or aliased.
+    #     Example invalid: subgraph Frontend UI (React/Next.js)
+    #     Valid forms:
+    #       subgraph "Frontend UI (React/Next.js)"
+    #       subgraph FE["Frontend UI (React/Next.js)"]
+    if first_token in ("graph", "flowchart"):
+        for i, line in enumerate(lines, 1):
+            m = re.match(r"^\s*subgraph\s+(.+?)\s*$", line)
+            if not m:
+                continue
+
+            subgraph_expr = m.group(1).strip()
+            # Explicitly quoted subgraph title
+            if re.match(r'^"[^"]+"$', subgraph_expr):
+                continue
+            # Aliased/labelled form: ID[Title]
+            if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*\[[^\]]+\]$", subgraph_expr):
+                continue
+
+            # Unquoted special chars in plain subgraph title frequently break mermaid parser.
+            if re.search(r"[(){}\[\]:/\\,.\-]", subgraph_expr):
+                errors.append(
+                    f"Line {i}: subgraph title with special characters must be quoted "
+                    f'(subgraph "Title (...)") or use alias syntax (subgraph ID["Title (...)"]).'
+                )
+                break
+
     # 7. Sequence diagram specific: missing colon after participant
     if first_token == "sequencediagram":
         for i, line in enumerate(lines[1:], 2):
@@ -221,3 +349,53 @@ def _extract_mermaid_block(text: str) -> Optional[str]:
     if m:
         return m.group(1).strip()
     return None
+
+
+def _truncate_error(message: str, *, limit: int = 2000) -> str:
+    message = message.strip()
+    if len(message) <= limit:
+        return message
+    return message[:limit] + "... [truncated]"
+
+
+def _resolve_mermaid_cli_command() -> list[str]:
+    configured = os.getenv("MERMAID_MMDC_CMD", "").strip()
+    if configured:
+        return shlex.split(configured)
+
+    mmdc = shutil.which("mmdc")
+    if mmdc:
+        return [mmdc]
+
+    for parent in Path(__file__).resolve().parents:
+        local_mmdc = parent / "node_modules" / ".bin" / "mmdc"
+        if local_mmdc.exists():
+            return [str(local_mmdc)]
+
+    # Fallback to npx package invocation.
+    return ["npx", "-y", "@mermaid-js/mermaid-cli@11.4.2"]
+
+
+def _run_coroutine_sync(coro: Any) -> Any:
+    """Run async validation from synchronous callers safely."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result: dict[str, Any] = {}
+    error: dict[str, BaseException] = {}
+
+    def _runner() -> None:
+        try:
+            result["value"] = asyncio.run(coro)
+        except BaseException as exc:  # propagate to caller after thread join
+            error["value"] = exc
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+
+    if "value" in error:
+        raise error["value"]
+    return result.get("value")
