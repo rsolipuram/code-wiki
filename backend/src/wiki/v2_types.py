@@ -21,6 +21,8 @@ class FileSummary:
     key_entities: list[str] = field(default_factory=list)  # qualified names
     exported_symbols: list[str] = field(default_factory=list)  # e.g. ["triage_agent", "cancel_flight"]
     dependencies: list[str] = field(default_factory=list)    # e.g. ["openai", "db_utils"]
+    nav_topic: str = ""   # wiki section this file belongs to (e.g. "Agent Architecture")
+    nav_role: str = ""    # "primary" | "supporting" | "config" | "test"
 
 
 @dataclass
@@ -30,6 +32,7 @@ class DirectorySummary:
     summary: str  # ~100 words
     child_files: list[str] = field(default_factory=list)
     key_entities: list[str] = field(default_factory=list)
+    nav_items: list[dict] = field(default_factory=list)  # [{section, subsections, importance, seed_files}]
 
 
 @dataclass
@@ -41,6 +44,7 @@ class CompressedCodebase:
     call_graph_summary: str = ""  # "A calls B, B calls C"
     import_graph_summary: str = ""  # "module X imports Y"
     compression_level: str = "none"  # "none" | "file_only" | "full_pyramid"
+    nav_plan: dict = field(default_factory=dict)  # consolidated navigation from compression
 
 
 @dataclass

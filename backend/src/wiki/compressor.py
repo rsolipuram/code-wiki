@@ -12,6 +12,8 @@ Within "flat", parallelism is tuned by file count:
 
 import json
 import logging
+import re
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
@@ -27,6 +29,34 @@ from src.wiki.v2_types import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_json_object(text: str) -> Optional[dict]:
+    """Extract first JSON object from LLM output.
+
+    Strips markdown fences, tries direct parse, falls back to regex extraction.
+    Reuses pattern from v4_code_embedder.py.
+    """
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = "\n".join(
+            line for line in raw.splitlines() if not line.strip().startswith("```")
+        ).strip()
+
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(0))
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
 
 
 class CodebaseCompressor:
@@ -118,6 +148,8 @@ class CodebaseCompressor:
                             key_entities=result.key_entities,  # scored, not positional
                             exported_symbols=fs.exported_symbols,
                             dependencies=fs.dependencies,
+                            nav_topic=result.nav_topic,
+                            nav_role=result.nav_role,
                         )
                 except Exception as exc:
                     logger.warning("LLM file summary failed for %s: %s", rel_path, exc)
@@ -151,6 +183,12 @@ class CodebaseCompressor:
         call_graph = self._build_call_graph_text(entities)
         import_graph = self._build_import_graph_text(entities, repo_path)
 
+        # ── Step 5: consolidate navigation from file/dir nav hints ────────────
+        nav_plan = self._consolidate_navigation(
+            file_summaries, directory_summaries, repo_summary,
+            fingerprint.project_name or "project",
+        )
+
         return CompressedCodebase(
             repo_summary=repo_summary,
             file_summaries=file_summaries,
@@ -159,6 +197,7 @@ class CodebaseCompressor:
             call_graph_summary=call_graph,
             import_graph_summary=import_graph,
             compression_level="flat",
+            nav_plan=nav_plan,
         )
 
     def _compress_pyramid(
@@ -225,6 +264,12 @@ class CodebaseCompressor:
         call_graph = self._build_call_graph_text(entities)
         import_graph = self._build_import_graph_text(entities, repo_path)
 
+        # Consolidate navigation from file/dir nav hints
+        nav_plan = self._consolidate_navigation(
+            file_summaries, dir_summaries, repo_summary,
+            fingerprint.project_name or "project",
+        )
+
         return CompressedCodebase(
             repo_summary=repo_summary,
             file_summaries=file_summaries,
@@ -233,6 +278,7 @@ class CodebaseCompressor:
             call_graph_summary=call_graph,
             import_graph_summary=import_graph,
             compression_level="pyramid",
+            nav_plan=nav_plan,
         )
 
     # ── Helpers ──────────────────────────────────────────────────────────────
@@ -394,23 +440,35 @@ class CodebaseCompressor:
         language = lang_map.get(ext, ext.lstrip(".") or "unknown")
 
         prompt = (
-            f"Summarize this {language} file in 100-150 words. "
-            f"Include: purpose, key design decisions, error handling approach, "
-            f"and how it integrates with other parts of the codebase.\n\n"
+            f"Analyze this {language} file. Return ONLY a JSON object:\n"
+            f'{{"summary": "<100-150 word summary: purpose, design decisions, '
+            f'error handling, integration>",\n'
+            f' "nav_topic": "<2-4 word wiki section this file belongs to, '
+            f'e.g. Agent Architecture, API Layer, Data Models>",\n'
+            f' "nav_role": "<primary|supporting|config|test>"}}\n\n'
             f"File: {file_path}\n"
             f"Entities:\n{entity_text}\n\n"
             f"Code preview:\n{file_preview[:3000]}"
         )
 
+        nav_topic = ""
+        nav_role = ""
         try:
-            summary = chat(
+            raw_response = chat(
                 [{"role": "user", "content": prompt}],
-                max_tokens=500,
+                max_tokens=600,
                 temperature=0.1,
             )
+            parsed = _extract_json_object(raw_response)
+            if parsed and "summary" in parsed:
+                summary = parsed["summary"]
+                nav_topic = parsed.get("nav_topic") or ""
+                nav_role = parsed.get("nav_role") or ""
+            else:
+                # Fallback: treat entire response as plain text summary
+                summary = raw_response
         except Exception as exc:
             logger.warning("LLM summary failed for %s: %s", file_path, exc)
-            # Fallback: use first entity's docstring
             summary = file_entities[0].docstring or "" if file_entities else ""
 
         # Key entities: top 5 by interestingness score, not positional order
@@ -446,6 +504,8 @@ class CodebaseCompressor:
             key_entities=key_ents,
             exported_symbols=exported_symbols[:30],
             dependencies=dependencies[:20],
+            nav_topic=nav_topic.strip(),
+            nav_role=nav_role.strip(),
         )
 
     def _summarize_directory(
@@ -454,29 +514,57 @@ class CodebaseCompressor:
         child_files: list[str],
         file_summaries: dict[str, FileSummary],
     ) -> Optional[DirectorySummary]:
-        """1 LLM call → ~250-word directory summary."""
+        """1 LLM call → directory summary + nav_items."""
         file_summary_lines = []
         all_key_entities: list[str] = []
         for fp in child_files:
             fs = file_summaries.get(fp)
             if fs:
-                file_summary_lines.append(f"  - {fp}: {fs.summary}")
+                nav_tag = f" [nav: {fs.nav_topic}]" if fs.nav_topic else ""
+                file_summary_lines.append(f"  - {fp}{nav_tag}: {fs.summary}")
                 all_key_entities.extend(fs.key_entities)
 
+        # Detect child subdirectories from file paths
+        child_dirs: set[str] = set()
+        prefix = dir_path.rstrip("/") + "/"
+        for fp in file_summaries:
+            if fp.startswith(prefix):
+                remainder = fp[len(prefix):]
+                if "/" in remainder:
+                    child_dirs.add(remainder.split("/")[0])
+
+        child_dir_note = ""
+        if child_dirs:
+            child_dir_note = f"\nSubdirectories: {', '.join(sorted(child_dirs))}\n"
+
         prompt = (
-            f"Summarize this directory's purpose in 200-250 words. "
-            f"Include: what this module/package does, its design patterns, "
-            f"how files relate to each other, and key integration points.\n\n"
+            f"Analyze this directory. Return ONLY a JSON object:\n"
+            f'{{"summary": "<200-250 word summary: purpose, patterns, '
+            f'file relationships, integration points>",\n'
+            f' "nav_items": [{{"section": "<proposed wiki section title>", '
+            f'"subsections": ["<sub1>", "<sub2>"], '
+            f'"importance": "<core|supporting|peripheral>", '
+            f'"seed_files": ["<top file1>", "<top file2>"]}}]}}\n\n'
             f"Directory: {dir_path}\n"
+            f"{child_dir_note}"
             f"Files:\n" + "\n".join(file_summary_lines)
         )
 
+        nav_items: list[dict] = []
         try:
-            summary = chat(
+            raw_response = chat(
                 [{"role": "user", "content": prompt}],
-                max_tokens=800,
+                max_tokens=1000,
                 temperature=0.1,
             )
+            parsed = _extract_json_object(raw_response)
+            if parsed and "summary" in parsed:
+                summary = parsed["summary"] or raw_response
+                nav_items = parsed.get("nav_items") or []
+                if not isinstance(nav_items, list):
+                    nav_items = []
+            else:
+                summary = raw_response
         except Exception as exc:
             logger.warning("LLM dir summary failed for %s: %s", dir_path, exc)
             summary = f"Contains {len(child_files)} files."
@@ -487,6 +575,7 @@ class CodebaseCompressor:
             summary=summary.strip(),
             child_files=child_files,
             key_entities=all_key_entities[:10],
+            nav_items=nav_items,
         )
 
     def _generate_repo_summary(
@@ -612,3 +701,103 @@ class CodebaseCompressor:
                 "score": se.score,
             })
         return result
+
+    def _consolidate_navigation(
+        self,
+        file_summaries: dict[str, FileSummary],
+        directory_summaries: dict[str, DirectorySummary],
+        repo_summary: str,
+        repo_name: str,
+    ) -> dict:
+        """One LLM call: merge all nav hints into a consolidated navigation plan.
+
+        Input: all dir nav_items + file topic distribution.
+        Output: dict with sections for WikiNav consumption.
+        """
+        # Build topic distribution from file nav_topics
+        topic_counter: Counter = Counter()
+        for fs in file_summaries.values():
+            if fs.nav_topic:
+                topic_counter[fs.nav_topic] += 1
+
+        topic_lines = [
+            f"- {topic}: {count} files"
+            for topic, count in topic_counter.most_common(40)
+        ]
+
+        # Collect dir nav_items (sanitize LLM output)
+        dir_nav_lines: list[str] = []
+        for dp in sorted(directory_summaries):
+            ds = directory_summaries[dp]
+            for item in ds.nav_items:
+                if not isinstance(item, dict):
+                    continue
+                section = item.get("section", "")
+                if not section:
+                    continue
+                raw_subs = item.get("subsections") or []
+                subs = ", ".join(str(s) for s in raw_subs if s) if isinstance(raw_subs, list) else ""
+                importance = item.get("importance", "supporting")
+                raw_seeds = item.get("seed_files") or []
+                seeds = ", ".join(str(s) for s in raw_seeds[:5]) if isinstance(raw_seeds, list) else ""
+                dir_nav_lines.append(
+                    f"- {dp}/ ({importance}): \"{section}\" → [{subs}] "
+                    f"(seeds: {seeds})"
+                )
+
+        # Build file tree for hierarchy reconstruction
+        all_dirs: set[str] = set()
+        for fp in file_summaries:
+            parts = Path(fp).parts
+            for i in range(1, len(parts)):
+                all_dirs.add("/".join(parts[:i]))
+        tree_lines = [f"  {d}/" for d in sorted(all_dirs)]
+
+        if not dir_nav_lines and not topic_lines:
+            logger.info("No nav hints collected — skipping consolidation")
+            return {}
+
+        prompt = (
+            f"You are organizing a code wiki's navigation. Below are navigation "
+            f"items extracted from every directory and file in the repository.\n"
+            f"Produce the FINAL navigation structure: merge duplicates, establish "
+            f"hierarchy, remove peripheral topics.\n\n"
+            f"## Repository: {repo_name}\n\n"
+            f"## Summary\n{repo_summary[:500]}\n\n"
+            f"## Directory Tree\n" + "\n".join(tree_lines[:80]) + "\n\n"
+            f"## Directory Navigation Proposals\n"
+            + "\n".join(dir_nav_lines) + "\n\n"
+            f"## File Topic Distribution\n"
+            + "\n".join(topic_lines) + "\n\n"
+            f"## Instructions\n"
+            f"1. Merge overlapping sections from different directories\n"
+            f"2. Nest subsections under parent sections using path hierarchy\n"
+            f"3. Drop peripheral topics with <2 files (unless architecturally significant)\n"
+            f"4. Order for learning: overview → architecture → core → supporting → reference\n"
+            f"5. Every section needs at least 2 seed_files\n"
+            f"6. First section MUST be type=home (project overview)\n\n"
+            f"Return ONLY JSON:\n"
+            f'{{"sections": [{{"slug": "url-slug", "title": "Section Title", '
+            f'"type": "concept|architecture|workflow|reference|home", '
+            f'"subsections": ["Sub 1"], "seed_files": ["path/file.py"], '
+            f'"importance": "core|supporting"}}]}}'
+        )
+
+        try:
+            raw = chat(
+                [{"role": "user", "content": prompt}],
+                max_tokens=4000,
+                temperature=0.2,
+            )
+            parsed = _extract_json_object(raw)
+            if parsed and "sections" in parsed:
+                logger.info(
+                    "Nav consolidation produced %d sections",
+                    len(parsed["sections"]),
+                )
+                return parsed
+            logger.warning("Nav consolidation returned invalid JSON, skipping")
+            return {}
+        except Exception as exc:
+            logger.warning("Nav consolidation LLM call failed: %s", exc)
+            return {}

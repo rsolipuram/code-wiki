@@ -349,6 +349,8 @@ def _serialize_compressed(compressed: CompressedCodebase) -> dict:
                 "key_entities": v.key_entities,
                 "exported_symbols": v.exported_symbols,
                 "dependencies": v.dependencies,
+                "nav_topic": v.nav_topic,
+                "nav_role": v.nav_role,
             }
             for k, v in compressed.file_summaries.items()
         },
@@ -359,6 +361,7 @@ def _serialize_compressed(compressed: CompressedCodebase) -> dict:
                 "summary": v.summary,
                 "child_files": v.child_files,
                 "key_entities": v.key_entities,
+                "nav_items": v.nav_items,
             }
             for k, v in compressed.directory_summaries.items()
         },
@@ -366,6 +369,7 @@ def _serialize_compressed(compressed: CompressedCodebase) -> dict:
         "call_graph_summary": compressed.call_graph_summary,
         "import_graph_summary": compressed.import_graph_summary,
         "compression_level": compressed.compression_level,
+        "nav_plan": compressed.nav_plan,
     }
 
 

@@ -148,15 +148,28 @@ def _build_planner_context(
 ) -> str:
     parts: list[str] = [f"# Codebase: {repo_name}\n"]
 
-    # Repo-level summary
+    # ── Nav plan from compression (primary skeleton) ─────────────────────
+    nav_plan = compressed.get("nav_plan", {})
+    if nav_plan and nav_plan.get("sections"):
+        import json as _json
+        parts.append(
+            "## Pre-Computed Navigation Skeleton (from compression analysis)\n"
+            "Use this as your STARTING POINT. Refine, merge, or split sections "
+            "based on dossier findings below. Do NOT discard this skeleton — "
+            "it was built from every file and directory in the repo.\n"
+            + _json.dumps(nav_plan, indent=2)
+            + "\n"
+        )
+
+    # Repo-level summary (no longer truncated — nav_plan provides structure)
     repo_summary = compressed.get("repo_summary", "")
     if repo_summary:
-        parts.append(f"## Repo Summary\n{repo_summary[:1200]}\n")
+        parts.append(f"## Repo Summary\n{repo_summary}\n")
 
     # Call graph summary
     call_graph_summary = compressed.get("call_graph_summary", "")
     if call_graph_summary:
-        parts.append(f"## Call Graph Overview\n{call_graph_summary[:600]}\n")
+        parts.append(f"## Call Graph Overview\n{call_graph_summary}\n")
 
     # Tag distribution (tells planner which dossier tags are populated)
     meta = dossier_dict.get("_meta", {})
@@ -171,18 +184,27 @@ def _build_planner_context(
     if findings:
         parts.append(f"## Key Agent Findings\n{findings}\n")
 
-    # Per-file summaries (entities, exports, deps) — from compressed data
+    # File tree structure
+    file_tree = _build_file_tree(all_files, repo_path)
+    if file_tree:
+        parts.append(f"## File Tree\n{file_tree}\n")
+
+    # Per-file summaries — no longer capped at 50 when nav_plan exists
     file_summaries = compressed.get("file_summaries", {})
     if file_summaries:
+        cap = len(file_summaries) if nav_plan else 50
         fs_lines = []
-        for fpath, fdata in list(file_summaries.items())[:50]:
+        for fpath, fdata in list(file_summaries.items())[:cap]:
             entities = fdata.get("key_entities", [])
             exports = fdata.get("exported_symbols", [])
             lang = fdata.get("language", "")
             summary = fdata.get("summary", "")
+            nav_topic = fdata.get("nav_topic", "")
             parts_list = [fpath]
             if lang:
                 parts_list.append(f"({lang})")
+            if nav_topic:
+                parts_list.append(f"[nav: {nav_topic}]")
             if summary:
                 parts_list.append(f"— {summary[:100]}")
             if entities:
@@ -196,7 +218,6 @@ def _build_planner_context(
     # Key entities — top code symbols
     key_entities = compressed.get("key_entities", [])
     if key_entities:
-        # key_entities can be list of strings or list of dicts
         entity_names = []
         for e in key_entities[:40]:
             if isinstance(e, str):
@@ -213,14 +234,14 @@ def _build_planner_context(
         + "\n"
     )
 
-    # Directory summaries
+    # Directory summaries — no longer capped at 15
     dir_summaries = compressed.get("directory_summaries", {})
     if dir_summaries:
         dir_lines = []
-        for dir_path, summary in list(dir_summaries.items())[:15]:
+        for dir_path, summary in sorted(dir_summaries.items()):
             s = summary.get("summary", "") if isinstance(summary, dict) else ""
             if s:
-                dir_lines.append(f"- {dir_path}: {s[:120]}")
+                dir_lines.append(f"- {dir_path}: {s[:200]}")
         if dir_lines:
             parts.append("## Directory Context\n" + "\n".join(dir_lines) + "\n")
 
