@@ -108,7 +108,8 @@ Prefer multiple readable diagrams over one dense graph.
 7. In <diagram/> context, include real entity/function names from your research.
 8. In <code/> tags, provide file path AND symbol name when possible.
 9. Do NOT cover topics listed in boundary_hint as out-of-scope.
-10. Aim for 800-1500 words of substantive prose per section.
+10. Write thorough, in-depth content — cover every relevant aspect of the topic. \
+Do not artificially limit length. Let the complexity of the subject determine how much you write.
 11. Start by calling list_tags() and get_repo_summary() to orient yourself, \
 then use read_file() and search_code() to examine actual source code.
 12. Your output must be ONLY the wiki section content. Do NOT include \
@@ -204,7 +205,7 @@ def _run_react_loop(
                     tool_result = f"Tool error: {exc}"
 
             result_str = str(tool_result)
-            if len(result_str) > 8000:
+            if len(result_str) > 24000:
                 result_str = result_str[:24000] + "\n... [truncated]"
 
             messages.append({

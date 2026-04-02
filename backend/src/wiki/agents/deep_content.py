@@ -76,7 +76,8 @@ Your output format:
 - Use callouts for important notes: <callout type="warning|info|tip">...message...</callout>
 - Cross-reference related sections: <cross-ref section="Exact Section Title">descriptive text</cross-ref>
 - Use ## and ### headings to structure content
-- Aim for comprehensive coverage — depth over breadth
+- Write thorough, in-depth content — cover every relevant aspect of the topic. \
+Do not artificially limit length. Let the complexity of the subject determine how much you write
 
 Important rules:
 - Use get_findings() and get_finding_detail() to gather analysis data — do NOT guess
@@ -302,7 +303,7 @@ def _run_react_loop(
 
             # Truncate large tool results to avoid context explosion
             tool_result_str = str(tool_result)
-            if len(tool_result_str) > 8000:
+            if len(tool_result_str) > 24000:
                 tool_result_str = tool_result_str[:24000] + "\n... [truncated]"
 
             messages.append({
@@ -370,7 +371,7 @@ def _run_critic(raw_markdown: str, section_brief: str, model: Any) -> dict:
             {"role": "system", "content": CRITIC_SYSTEM},
             {"role": "user", "content": (
                 f"Section brief:\n{section_brief}\n\n"
-                f"Draft content:\n{raw_markdown[:3000]}"
+                f"Draft content:\n{raw_markdown[:12000]}"
             )},
         ])
         content = response.content if hasattr(response, "content") else str(response)
