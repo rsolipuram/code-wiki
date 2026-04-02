@@ -87,16 +87,24 @@ def content_planner_node(state: V3WikiState) -> dict:
     # Build compact prompt context
     context = _build_planner_context(dossier_dict, compressed, all_files, repo_path, repo_name)
 
-    # Derive section cap from repo size
-    n_files = len(all_files)
-    if n_files < 20:
-        section_cap = "max 3 sections (very small project)"
-    elif n_files < 50:
-        section_cap = "max 5 sections (small project)"
-    elif n_files < 200:
-        section_cap = "max 8 sections (medium project)"
+    # Derive section guidance — uncapped when nav_plan provides a skeleton
+    nav_plan = compressed.get("nav_plan", {})
+    if nav_plan and nav_plan.get("sections"):
+        nav_count = len(nav_plan["sections"])
+        section_cap = (
+            f"use the nav skeleton as your guide (~{nav_count} sections). "
+            "Merge thin sections, split overloaded ones — let content density decide."
+        )
     else:
-        section_cap = "max 12 sections (large project)"
+        n_files = len(all_files)
+        if n_files < 20:
+            section_cap = "max 3 sections (very small project)"
+        elif n_files < 50:
+            section_cap = "max 5 sections (small project)"
+        elif n_files < 200:
+            section_cap = "max 8 sections (medium project)"
+        else:
+            section_cap = "max 12 sections (large project)"
 
     system_prompt = PLANNER_SYSTEM.replace("{section_cap}", section_cap)
 
