@@ -280,7 +280,7 @@ def v4_diagrammer_node(state: dict) -> dict:
     raw_results = _generate_diagrams_batch(diagram_specs, dossier_dict, compressed_dict)
 
     # Validate and fix each result
-    model = get_wiki_model(temperature=0.1, max_tokens=2048)
+    model = get_wiki_model(temperature=0.1)
     validated_results = [_validate_and_fix(r, model) for r in raw_results]
 
     elapsed = time.monotonic() - t0
