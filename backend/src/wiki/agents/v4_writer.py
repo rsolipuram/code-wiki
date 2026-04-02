@@ -156,7 +156,7 @@ def _run_react_loop(
     messages = [{"role": "system", "content": system_prompt}]
 
     if seed_files:
-        files_hint = "Start by using read_file() on these key files: " + ", ".join(seed_files[:5])
+        files_hint = "Start by using read_file() on these key files: " + ", ".join(seed_files[:10])
     else:
         files_hint = "Start by calling list_tags() and get_repo_summary() to discover what to explore."
 
@@ -205,7 +205,7 @@ def _run_react_loop(
 
             result_str = str(tool_result)
             if len(result_str) > 8000:
-                result_str = result_str[:8000] + "\n... [truncated]"
+                result_str = result_str[:24000] + "\n... [truncated]"
 
             messages.append({
                 "role": "tool",
@@ -270,7 +270,7 @@ def v4_writer_node(state: dict) -> dict:
     if repo_path:
         all_tools += make_file_tools(repo_path)
 
-    model = get_wiki_model(temperature=0.4, max_tokens=8192)
+    model = get_wiki_model(temperature=0.4, max_tokens=32768)
     model_with_tools = model.bind_tools(all_tools)
 
     t0 = time.monotonic()

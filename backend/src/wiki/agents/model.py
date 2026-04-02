@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def get_wiki_model(
     temperature: float = 0.2,
-    max_tokens: int = 4096,
+    max_tokens: int = 16384,
 ) -> ChatOpenAI:
     """Create LM Studio-backed chat model for wiki agents."""
     settings = get_settings()

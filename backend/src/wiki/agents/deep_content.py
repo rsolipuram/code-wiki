@@ -150,7 +150,7 @@ def deep_content_node(state: V3WikiState, section_spec_dict: dict) -> dict:
 
     system_prompt = DEEP_AGENT_SYSTEM.format(section_brief=section_brief)
 
-    model = get_wiki_model(temperature=0.4, max_tokens=8192)
+    model = get_wiki_model(temperature=0.4, max_tokens=32768)
     model_with_tools = model.bind_tools(all_tools)
 
     with _concurrency_sem:
@@ -159,7 +159,7 @@ def deep_content_node(state: V3WikiState, section_spec_dict: dict) -> dict:
             model_with_tools=model_with_tools,
             tools=all_tools,
             seed_files=spec.seed_files,
-            max_steps=10,
+            max_steps=20,
         )
 
     # Validate and fix mermaid diagrams inline
@@ -245,7 +245,7 @@ def _run_react_loop(
 
     # Seed the conversation with a user turn that hints at starting files
     if seed_files:
-        files_hint = "Start by reading these files: " + ", ".join(seed_files[:5])
+        files_hint = "Start by reading these files: " + ", ".join(seed_files[:10])
     else:
         files_hint = "Explore the codebase to gather information."
 
@@ -303,7 +303,7 @@ def _run_react_loop(
             # Truncate large tool results to avoid context explosion
             tool_result_str = str(tool_result)
             if len(tool_result_str) > 8000:
-                tool_result_str = tool_result_str[:8000] + "\n... [truncated]"
+                tool_result_str = tool_result_str[:24000] + "\n... [truncated]"
 
             messages.append({
                 "role": "tool",
@@ -357,7 +357,7 @@ def _critic_loop(
             model_with_tools=model_with_tools,
             tools=tools,
             seed_files=spec.seed_files,
-            max_steps=15,
+            max_steps=20,
         )
 
     return raw_markdown, False, retries
