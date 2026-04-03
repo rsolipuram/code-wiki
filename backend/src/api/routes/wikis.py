@@ -118,6 +118,9 @@ async def get_wiki_page(
     """Get a wiki page by slug."""
     wiki = _get_wiki_for_repo(db, repository_id)
     page = db.query(WikiPage).filter_by(wiki_id=wiki.id, slug=page_slug).first()
+    # Frontend requests "home" but pipeline stores the home page as "overview"
+    if not page and page_slug == "home":
+        page = db.query(WikiPage).filter_by(wiki_id=wiki.id, page_type="home").first()
     if not page:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Page not found")
     return _page_to_response(page)
