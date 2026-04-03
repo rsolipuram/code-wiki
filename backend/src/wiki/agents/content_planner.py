@@ -70,6 +70,10 @@ MENU HIERARCHY RULES:
 concern or domain area.
 - menu_label is the SHORT child label shown under the group. Do NOT repeat the \
 group name in menu_label (e.g. group="API" → label="Endpoints", not "API Endpoints").
+- Aim for 3-5 sections per group. If a group would need more, make the extra \
+topics subsections within a broader page rather than separate pages. For example, \
+instead of separate pages for "UI Layout", "UI Components", "UI Subcomponents", \
+and "UI Primitives", create one "UI Components" page that covers all of them.
 - Every group SHOULD have 2+ sections. If a topic stands alone, merge it into \
 the closest related group rather than creating a single-item group.
 - Groups should be ordered by importance: Architecture/Core first, then \
@@ -455,15 +459,14 @@ def _ensure_menu_groups(nav: WikiNav) -> None:
 
 
 def _consolidate_sections(nav: WikiNav) -> None:
-    """Merge sections that share the same (menu_group, menu_label) into one.
+    """Smart consolidation of wiki sections into a clean sidebar taxonomy.
 
-    The LLM often splits a single nav slot into multiple sections (e.g. 4
-    sections all labeled "Backend Agents" under "Architecture"). This merges
-    them into a single richer section — combining seed_files, focus_tags,
-    and cross_refs while keeping the first section's slug and type.
-
-    Also merges singleton groups (groups with only 1 section) into the
-    nearest related group to keep the sidebar clean.
+    Three phases:
+    1. Merge sections sharing the exact same (menu_group, menu_label).
+    2. Within each group, merge sections whose title words are a subset of
+       another section's title (e.g. "UI Library" absorbs "UI Library API Layer").
+    3. Within each group, merge clusters of 3+ sections sharing the same
+       first significant word (e.g. 5 "UI *" sections → 1 combined section).
     """
     home = [s for s in nav.sections if s.type == "home"]
     others = [s for s in nav.sections if s.type != "home"]
@@ -481,78 +484,167 @@ def _consolidate_sections(nav: WikiNav) -> None:
     for (group, label), sections in slot_map.items():
         primary = sections[0]
         if len(sections) > 1:
-            # Combine titles into a broader title
-            sub_titles = [s.title for s in sections[1:]]
-            combined_subtitle = ", ".join(sub_titles)
-            primary.boundary_hint = (
-                (primary.boundary_hint or "")
-                + f" Also covers: {combined_subtitle}."
-            ).strip()
-            # Merge seed_files (deduplicated, preserving order)
-            seen_files: set[str] = set(primary.seed_files or [])
-            for s in sections[1:]:
-                for f in (s.seed_files or []):
-                    if f not in seen_files:
-                        primary.seed_files.append(f)
-                        seen_files.add(f)
-            # Merge focus_tags (deduplicated)
-            seen_tags: set[str] = set(primary.focus_tags or [])
-            for s in sections[1:]:
-                for t in (s.focus_tags or []):
-                    if t not in seen_tags:
-                        primary.focus_tags.append(t)
-                        seen_tags.add(t)
-            # Merge cross_refs
-            seen_refs: set[str] = set(primary.cross_refs or [])
-            for s in sections[1:]:
-                for r in (s.cross_refs or []):
-                    if r not in seen_refs:
-                        if not primary.cross_refs:
-                            primary.cross_refs = []
-                        primary.cross_refs.append(r)
-                        seen_refs.add(r)
-
+            _absorb_into(primary, sections[1:])
             logger.info(
-                "Consolidated %d sections under (%s / %s) → %r",
+                "Phase 1: merged %d sections under (%s / %s) → %r",
                 len(sections), group, label, primary.slug,
             )
         merged.append(primary)
 
-    before = len(others)
-    after = len(merged)
-    if before != after:
-        logger.info(
-            "Section consolidation: %d → %d sections (merged %d duplicates)",
-            before, after, before - after,
-        )
+    p1_count = len(merged)
+    if len(others) != p1_count:
+        logger.info("Phase 1: %d → %d sections", len(others), p1_count)
 
-    # Phase 2: merge singleton groups into nearest group
-    group_counts: dict[str, int] = {}
+    # Phase 2: within each group, merge by title containment
+    by_group: dict[str, list] = {}
     for s in merged:
-        g = s.menu_group or ""
-        group_counts[g] = group_counts.get(g, 0) + 1
+        by_group.setdefault(s.menu_group or "", []).append(s)
 
-    singletons = {g for g, c in group_counts.items() if c == 1}
-    if singletons and len(group_counts) > 1:
-        # Find the largest group as merge target
-        largest_group = max(
-            (g for g in group_counts if g not in singletons),
-            key=lambda g: group_counts[g],
-            default=None,
+    phase2: list = []
+    for group_name, group_sections in by_group.items():
+        consolidated = _merge_by_title_containment(group_sections)
+        phase2.extend(consolidated)
+
+    p2_count = len(phase2)
+    if p1_count != p2_count:
+        logger.info("Phase 2 (title containment): %d → %d sections", p1_count, p2_count)
+
+    # Phase 3: within each group, merge clusters sharing the same first word
+    by_group2: dict[str, list] = {}
+    for s in phase2:
+        by_group2.setdefault(s.menu_group or "", []).append(s)
+
+    final: list = []
+    for group_name, group_sections in by_group2.items():
+        consolidated = _merge_by_prefix_cluster(group_sections)
+        final.extend(consolidated)
+
+    p3_count = len(final)
+    if p2_count != p3_count:
+        logger.info("Phase 3 (prefix clustering): %d → %d sections", p2_count, p3_count)
+
+    total_before = len(others)
+    total_after = len(final)
+    if total_before != total_after:
+        logger.info(
+            "Consolidation complete: %d → %d sections (merged %d)",
+            total_before, total_after, total_before - total_after,
         )
-        if largest_group:
-            for section in merged:
-                if section.menu_group in singletons:
-                    old_group = section.menu_group
-                    section.menu_group = largest_group
-                    # Keep original group name as label hint
-                    section.menu_label = f"{old_group}: {section.menu_label or section.title}"
-                    logger.info(
-                        "Merged singleton group %r into %r for section %r",
-                        old_group, largest_group, section.slug,
-                    )
 
-    nav.sections = home + merged
+    nav.sections = home + final
+
+
+def _merge_by_title_containment(sections: list) -> list:
+    """Within a group, merge sections whose title is contained in another's.
+
+    "UI Library" absorbs "UI Library API Layer" because all words of the
+    shorter title appear in the longer one. Requires the shorter title to
+    have at least 2 words (prevents single-word titles from swallowing
+    everything).
+    """
+    if len(sections) <= 1:
+        return sections
+
+    def _title_words(title: str) -> set[str]:
+        stop = {"and", "the", "of", "for", "in", "a", "an", "&", "-", "–"}
+        return {w.lower() for w in title.split() if w.lower() not in stop}
+
+    # Sort by title word count ascending — shorter titles are "broader"
+    indexed = list(enumerate(sections))
+    absorbed: set[int] = set()
+
+    for i, section_a in indexed:
+        if i in absorbed:
+            continue
+        words_a = _title_words(section_a.title)
+        if len(words_a) < 2:
+            continue
+        for j, section_b in indexed:
+            if j in absorbed or j == i:
+                continue
+            words_b = _title_words(section_b.title)
+            # A's words are a proper subset of B's → B is a specialization of A
+            if words_a < words_b:
+                _absorb_into(section_a, [section_b])
+                absorbed.add(j)
+                logger.info(
+                    "Title containment: %r absorbed %r",
+                    section_a.slug, section_b.slug,
+                )
+
+    return [s for i, s in indexed if i not in absorbed]
+
+
+def _merge_by_prefix_cluster(sections: list) -> list:
+    """Within a group, merge clusters of 3+ sections sharing the same first word.
+
+    Handles cases where title containment can't merge because titles differ
+    in structure (e.g. "UI Architecture", "UI Layout", "UI Components",
+    "UI Subcomponents", "UI Library" all start with "UI").
+    """
+    if len(sections) <= 2:
+        return sections
+
+    stop = {"and", "the", "of", "for", "in", "a", "an", "&", "-", "–"}
+
+    def _first_significant_word(title: str) -> str:
+        for w in title.split():
+            if w.lower() not in stop:
+                return w.lower()
+        return title.split()[0].lower() if title.split() else ""
+
+    # Group by first significant word
+    clusters: dict[str, list] = {}
+    for section in sections:
+        fw = _first_significant_word(section.title)
+        clusters.setdefault(fw, []).append(section)
+
+    result: list = []
+    for first_word, cluster in clusters.items():
+        if len(cluster) >= 3:
+            primary = cluster[0]
+            _absorb_into(primary, cluster[1:])
+            result.append(primary)
+            logger.info(
+                "Prefix cluster '%s': merged %d sections → %r",
+                first_word, len(cluster), primary.slug,
+            )
+        else:
+            result.extend(cluster)
+
+    return result
+
+
+def _absorb_into(primary, others: list) -> None:
+    """Merge others' data into primary section."""
+    sub_titles = [s.title for s in others]
+    primary.boundary_hint = (
+        (primary.boundary_hint or "")
+        + f" Also covers: {', '.join(sub_titles)}."
+    ).strip()
+    # Merge seed_files
+    seen_files: set[str] = set(primary.seed_files or [])
+    for s in others:
+        for f in (s.seed_files or []):
+            if f not in seen_files:
+                primary.seed_files.append(f)
+                seen_files.add(f)
+    # Merge focus_tags
+    seen_tags: set[str] = set(primary.focus_tags or [])
+    for s in others:
+        for t in (s.focus_tags or []):
+            if t not in seen_tags:
+                primary.focus_tags.append(t)
+                seen_tags.add(t)
+    # Merge cross_refs
+    seen_refs: set[str] = set(primary.cross_refs or [])
+    for s in others:
+        for r in (s.cross_refs or []):
+            if r not in seen_refs:
+                if not primary.cross_refs:
+                    primary.cross_refs = []
+                primary.cross_refs.append(r)
+                seen_refs.add(r)
 
 
 # ── Response parsing ──────────────────────────────────────────────────────────
