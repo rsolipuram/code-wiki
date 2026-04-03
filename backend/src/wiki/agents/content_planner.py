@@ -89,6 +89,63 @@ files) belong inside broader sections, NOT as standalone sections.
 orchestration vs. API endpoints vs. frontend components) deserve their own \
 sections even if the project is small.
 
+EXAMPLES — study these carefully:
+
+❌ BAD navigation (too granular, singleton groups, flat):
+  menu_group="Architecture", menu_label="Agent Architecture"
+  menu_group="API", menu_label="API Layer"
+  menu_group="Frontend", menu_label="UI Architecture"
+  menu_group="Frontend", menu_label="Core UI Components"
+  menu_group="Frontend", menu_label="Agent Interface"
+  menu_group="Configuration", menu_label="Build & Config"
+Problems: Architecture, API, and Configuration are singleton groups (1 item each). \
+That produces a sidebar with 4 headings where 3 headings expand to show just 1 link — \
+poor UX. Frontend is the only real group.
+
+✅ GOOD navigation (same content, properly grouped):
+  menu_group="Architecture", menu_label="System Design"
+  menu_group="Architecture", menu_label="Agent Pipeline"
+  menu_group="Backend", menu_label="API Layer"
+  menu_group="Backend", menu_label="Configuration"
+  menu_group="Frontend", menu_label="UI Architecture"
+  menu_group="Frontend", menu_label="Components"
+  menu_group="Frontend", menu_label="Agent Interface"
+Why this works: No singleton groups. Architecture has 2 items (design + agents). \
+Backend has 2 items (API + config — both are server-side concerns). \
+Frontend has 3 items. Every group expands to reveal 2+ links.
+
+❌ BAD navigation (one-section-per-file anti-pattern):
+  menu_group="Core", menu_label="Main Entry"
+  menu_group="Core", menu_label="App Config"
+  menu_group="Core", menu_label="Constants"
+  menu_group="Core", menu_label="Utils"
+  menu_group="Core", menu_label="Types"
+  menu_group="Routing", menu_label="Router Setup"
+  menu_group="Routing", menu_label="Route Handlers"
+  menu_group="Routing", menu_label="Middleware"
+  menu_group="Data", menu_label="Database Client"
+  menu_group="Data", menu_label="Migrations"
+  menu_group="Data", menu_label="Models"
+  menu_group="Data", menu_label="Queries"
+Problems: 12 sections for what is probably 3-4 concerns. Constants, Utils, Types \
+are not worth standalone sections — fold them into broader pages.
+
+✅ GOOD navigation (same project, consolidated):
+  menu_group="Architecture", menu_label="System Overview"
+  menu_group="Architecture", menu_label="Core Modules"
+  menu_group="Backend", menu_label="API & Routing"
+  menu_group="Backend", menu_label="Middleware"
+  menu_group="Data Layer", menu_label="Models & Schema"
+  menu_group="Data Layer", menu_label="Queries & Migrations"
+Why this works: 6 sections in 3 groups. Each group has 2 items. \
+Utils/Types/Constants are covered inside "Core Modules". \
+Router + Handlers combined into "API & Routing". \
+Database + Models + Queries consolidated into 2 data pages.
+
+KEY TAKEAWAY: Every menu_group in your output MUST contain 2 or more sections. \
+If you find yourself creating a group with only 1 section, merge that section \
+into the closest related group instead.
+
 CONTENT RULES:
 - ONLY create sections for topics that have actual dossier findings. \
 If a tag has 0 findings, do NOT create a section for it.
