@@ -8,7 +8,7 @@ Single LLM call that reads:
 Outputs a WikiNav JSON: ordered section list where each section has
 title, slug, type, one_liner, focus_tags, seed_files, boundary_hint, cross_refs.
 
-Section count is entirely at the planner's discretion.
+Section count is entirely at the planner's discretion — no artificial caps.
 """
 
 import json
@@ -24,8 +24,10 @@ from src.wiki.v3_types import SectionSpec, V3WikiState, WikiNav
 logger = logging.getLogger(__name__)
 
 PLANNER_SYSTEM = """\
-You are a wiki curator organizing pre-analyzed codebase findings into a \
-hierarchical, grouped documentation table of contents.
+You are a NAVIGATION SPECIALIST designing the sidebar table-of-contents for \
+a code documentation wiki. Think like a senior technical writer organizing \
+a developer portal — the navigation should be intuitive, hierarchical, and \
+complete.
 
 Your job is to GROUP and ORGANIZE the analysis data below — NOT to invent \
 topics. Every section you create must be backed by actual dossier findings \
@@ -50,34 +52,45 @@ Output ONLY valid JSON with this exact structure:
   ]
 }
 
-Navigation structure rules:
+TAXONOMY DESIGN PRINCIPLES:
+- Design the navigation like a well-organized documentation sidebar. \
+A reader should be able to scan the menu groups and immediately understand \
+the project's architecture and find what they need.
+- Create as many sections as the content genuinely warrants. Do NOT \
+artificially limit or pad — let the project's actual complexity drive the \
+structure. A 10-file utility might need 3 sections; a 200-file framework \
+might need 15+.
+- {section_cap}
+
+MENU HIERARCHY RULES:
 - First section MUST be type="home" with NO menu_group (it stands alone at the top).
-- ALL other sections MUST have a menu_group. Group related sections under a \
-shared parent label. Use as many groups as makes sense for the project size — \
-small projects may need only 1-2 groups, large projects may need 5-7. \
-Each group should have at least 2 sections; if a group would have only 1, \
-merge that section into the closest related group instead.
+- ALL other sections MUST have a menu_group and menu_label.
+- menu_group is the parent heading (e.g. "Architecture", "Backend", "Frontend", \
+"Data Layer", "DevOps", "API"). Each group represents a distinct architectural \
+concern or domain area.
 - menu_label is the SHORT child label shown under the group. Do NOT repeat the \
 group name in menu_label (e.g. group="API" → label="Endpoints", not "API Endpoints").
-- CONSOLIDATE aggressively: merge topics that cover the same subsystem. \
-For example, do NOT create separate sections for "UI Structure", "UI Layout", \
-"UI Components", and "UI Core Components" — combine them into 1-2 sections \
-under a "Frontend" or "UI" group.
-- Each group should represent a distinct architectural concern (e.g. \
-"Architecture", "Backend", "Frontend", "Data", "DevOps"). Avoid groups with \
-only 1 section — merge that section into the closest related group.
-- Implementation details like CORS config, streaming responses, or individual \
-utility files should be subsections within a broader section, NOT standalone \
-sections.
+- Every group SHOULD have 2+ sections. If a topic stands alone, merge it into \
+the closest related group rather than creating a single-item group.
+- Groups should be ordered by importance: Architecture/Core first, then \
+major subsystems, then supporting concerns (config, DevOps, etc.).
 
-Content rules:
+CONSOLIDATION RULES:
+- Merge sections that cover the same subsystem or concern. Do NOT create \
+separate sections for "UI Structure", "UI Layout", "UI Components" — combine \
+into 1-2 sections under a "Frontend" group.
+- Implementation details (CORS config, streaming setup, individual utility \
+files) belong inside broader sections, NOT as standalone sections.
+- BUT do NOT over-consolidate: distinct architectural layers (e.g. agent \
+orchestration vs. API endpoints vs. frontend components) deserve their own \
+sections even if the project is small.
+
+CONTENT RULES:
 - ONLY create sections for topics that have actual dossier findings. \
 If a tag has 0 findings, do NOT create a section for it.
 - seed_files MUST be copied exactly from the file list provided. \
 Do NOT invent or guess file paths. If unsure, leave seed_files empty.
 - focus_tags MUST reference real dossier tags from the tag distribution.
-- Section count MUST match the project's actual complexity: \
-{section_cap}
 - boundary_hint prevents agents from writing duplicate content across sections.
 - cross_refs should list slugs of related sections.
 - Output ONLY the JSON object. No markdown fences, no explanation, no preamble.
@@ -102,28 +115,23 @@ def content_planner_node(state: V3WikiState) -> dict:
     # Build compact prompt context
     context = _build_planner_context(dossier_dict, compressed, all_files, repo_path, repo_name)
 
-    # Hard section cap based on file count — always enforced, even with nav_plan.
-    n_files = len(all_files)
-    if n_files < 20:
-        max_sections = 3
-    elif n_files < 50:
-        max_sections = 5
-    elif n_files < 200:
-        max_sections = 8
-    else:
-        max_sections = 12
-
+    # Build section guidance — no hard cap, just contextual advice
     nav_plan = compressed.get("nav_plan", {})
+    n_files = len(all_files)
     if nav_plan and nav_plan.get("sections"):
         nav_count = len(nav_plan["sections"])
         section_cap = (
-            f"The nav skeleton below has {nav_count} raw sections — you MUST "
-            f"consolidate them into at most {max_sections} sections (excluding home). "
-            f"Merge closely related topics into single sections with broader scope. "
-            f"The skeleton is INPUT, not the final structure."
+            f"The nav skeleton below has {nav_count} raw sections derived from "
+            f"repository analysis ({n_files} files). Use it as your starting taxonomy. "
+            f"Consolidate sections that cover the same subsystem, split sections that "
+            f"span unrelated concerns, and group everything into a clear menu hierarchy. "
+            f"The skeleton is INPUT — refine it into a professional documentation sidebar."
         )
     else:
-        section_cap = f"max {max_sections} sections ({n_files} files in project)"
+        section_cap = (
+            f"This project has {n_files} files. Create as many sections as the "
+            f"content warrants — enough to cover each distinct concern without overlap."
+        )
 
     system_prompt = PLANNER_SYSTEM.replace("{section_cap}", section_cap)
 
@@ -148,16 +156,6 @@ def content_planner_node(state: V3WikiState) -> dict:
 
     # Validate seed_files against actual repo files
     wiki_nav = _validate_nav(wiki_nav, all_files)
-
-    # Enforce section cap — drop lowest-priority sections if LLM over-produced
-    non_home = [s for s in wiki_nav.sections if s.type != "home"]
-    home = [s for s in wiki_nav.sections if s.type == "home"]
-    if len(non_home) > max_sections:
-        logger.warning(
-            "Planner produced %d sections (cap %d) — trimming",
-            len(non_home), max_sections,
-        )
-        wiki_nav.sections = home + non_home[:max_sections]
 
     # Ensure every non-home section has menu_group (assign from title if missing)
     _ensure_menu_groups(wiki_nav)

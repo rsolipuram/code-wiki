@@ -54,7 +54,9 @@ You have tools to query real code relationships:
 
 4. Use double quotes, not single quotes, inside brackets.
 
-5. Keep diagrams focused: **max 12 nodes**. Simplify aggressively if needed.
+5. Keep diagrams focused and readable. Let the subject's complexity determine \
+the diagram size — use as many nodes as needed for clarity, but prefer splitting \
+into multiple diagrams over one overcrowded diagram.
 
 6. No raw HTML tags in labels (no `<br>`, `<b>`, etc.).
 
