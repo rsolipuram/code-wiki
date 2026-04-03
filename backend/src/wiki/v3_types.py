@@ -45,6 +45,11 @@ class SectionSpec:
     menu_label: str = ""
     # Optional child label shown inside menu_group
 
+    key_insights: list[str] = field(default_factory=list)
+    # Critical architectural / logic-flow insights the writer MUST cover.
+    # e.g. ["All requests route through triage_agent before reaching specialists",
+    #        "Context is rebuilt from memory_store on every turn"]
+
     def to_dict(self) -> dict:
         return {
             "slug": self.slug,
@@ -57,6 +62,7 @@ class SectionSpec:
             "cross_refs": self.cross_refs,
             "menu_group": self.menu_group,
             "menu_label": self.menu_label,
+            "key_insights": self.key_insights,
         }
 
     @classmethod
@@ -72,6 +78,7 @@ class SectionSpec:
             cross_refs=d.get("cross_refs", []),
             menu_group=d.get("menu_group", ""),
             menu_label=d.get("menu_label", ""),
+            key_insights=d.get("key_insights", []),
         )
 
 

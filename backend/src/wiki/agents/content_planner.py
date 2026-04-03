@@ -47,7 +47,11 @@ Output ONLY valid JSON with this exact structure:
       "boundary_hint": "Focus on X and Y; skip Z (covered in section 'Other Section')",
       "cross_refs": ["slug-of-related-section"],
       "menu_group": "Architecture",
-      "menu_label": "System Overview"
+      "menu_label": "System Overview",
+      "key_insights": [
+        "All incoming requests are routed through the triage agent before reaching specialists",
+        "Context is rebuilt from the memory store on every conversation turn"
+      ]
     }
   ]
 }
@@ -154,6 +158,14 @@ Do NOT invent or guess file paths. If unsure, leave seed_files empty.
 - focus_tags MUST reference real dossier tags from the tag distribution.
 - boundary_hint prevents agents from writing duplicate content across sections.
 - cross_refs should list slugs of related sections.
+- key_insights is a list of 2-5 critical observations that a wiki writer MUST \
+cover in this section. Think: "What would a senior engineer highlight in a \
+design review?" Focus on logic flow, entry points, routing patterns, state \
+management, error handling strategies, and non-obvious architectural decisions. \
+These should be specific and concrete — not generic descriptions. \
+Example: "All API requests funnel through triage_agent which classifies intent \
+before dispatching to flight_change or booking specialists" is great. \
+"This section covers the agent architecture" is useless.
 - Output ONLY the JSON object. No markdown fences, no explanation, no preamble.
 """
 
@@ -702,6 +714,15 @@ def _absorb_into(primary, others: list) -> None:
                     primary.cross_refs = []
                 primary.cross_refs.append(r)
                 seen_refs.add(r)
+    # Merge key_insights (deduplicate by exact match)
+    seen_insights: set[str] = set(primary.key_insights or [])
+    for s in others:
+        for insight in (s.key_insights or []):
+            if insight not in seen_insights:
+                if not primary.key_insights:
+                    primary.key_insights = []
+                primary.key_insights.append(insight)
+                seen_insights.add(insight)
 
 
 # ── Response parsing ──────────────────────────────────────────────────────────

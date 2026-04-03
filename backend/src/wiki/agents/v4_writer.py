@@ -127,6 +127,7 @@ def _format_section_brief(spec_dict: dict, other_titles: list[str]) -> str:
     seed_files = spec_dict.get("seed_files", [])
     boundary = spec_dict.get("boundary_hint", "")
     cross_refs = spec_dict.get("cross_refs", [])
+    key_insights = spec_dict.get("key_insights", [])
 
     lines = [
         f"**Title**: {title}",
@@ -137,6 +138,10 @@ def _format_section_brief(spec_dict: dict, other_titles: list[str]) -> str:
         f"**Boundary**: {boundary}" if boundary else "",
         f"**Cross-refs**: {', '.join(cross_refs)}" if cross_refs else "",
     ]
+    if key_insights:
+        lines.append("**Key insights you MUST cover** (verify each by reading the code):")
+        for i, insight in enumerate(key_insights, 1):
+            lines.append(f"  {i}. {insight}")
     if other_titles:
         lines.append(f"**Other sections in this wiki**: {', '.join(other_titles)}")
     return "\n".join(l for l in lines if l)
