@@ -160,6 +160,10 @@ def content_planner_node(state: V3WikiState) -> dict:
     # Ensure every non-home section has menu_group (assign from title if missing)
     _ensure_menu_groups(wiki_nav)
 
+    # Consolidate sections that share the same (menu_group, menu_label) —
+    # the LLM often produces multiple sections for the same nav slot.
+    _consolidate_sections(wiki_nav)
+
     elapsed = time.monotonic() - t0
     logger.info(
         "Content planner complete: %d sections (%.1fs)", len(wiki_nav.sections), elapsed
@@ -448,6 +452,107 @@ def _ensure_menu_groups(nav: WikiNav) -> None:
             )
         if not section.menu_label:
             section.menu_label = section.title
+
+
+def _consolidate_sections(nav: WikiNav) -> None:
+    """Merge sections that share the same (menu_group, menu_label) into one.
+
+    The LLM often splits a single nav slot into multiple sections (e.g. 4
+    sections all labeled "Backend Agents" under "Architecture"). This merges
+    them into a single richer section — combining seed_files, focus_tags,
+    and cross_refs while keeping the first section's slug and type.
+
+    Also merges singleton groups (groups with only 1 section) into the
+    nearest related group to keep the sidebar clean.
+    """
+    home = [s for s in nav.sections if s.type == "home"]
+    others = [s for s in nav.sections if s.type != "home"]
+
+    if not others:
+        return
+
+    # Phase 1: merge sections sharing (menu_group, menu_label)
+    slot_map: dict[tuple[str, str], list] = {}
+    for section in others:
+        key = (section.menu_group or "", section.menu_label or section.title)
+        slot_map.setdefault(key, []).append(section)
+
+    merged: list = []
+    for (group, label), sections in slot_map.items():
+        primary = sections[0]
+        if len(sections) > 1:
+            # Combine titles into a broader title
+            sub_titles = [s.title for s in sections[1:]]
+            combined_subtitle = ", ".join(sub_titles)
+            primary.boundary_hint = (
+                (primary.boundary_hint or "")
+                + f" Also covers: {combined_subtitle}."
+            ).strip()
+            # Merge seed_files (deduplicated, preserving order)
+            seen_files: set[str] = set(primary.seed_files or [])
+            for s in sections[1:]:
+                for f in (s.seed_files or []):
+                    if f not in seen_files:
+                        primary.seed_files.append(f)
+                        seen_files.add(f)
+            # Merge focus_tags (deduplicated)
+            seen_tags: set[str] = set(primary.focus_tags or [])
+            for s in sections[1:]:
+                for t in (s.focus_tags or []):
+                    if t not in seen_tags:
+                        primary.focus_tags.append(t)
+                        seen_tags.add(t)
+            # Merge cross_refs
+            seen_refs: set[str] = set(primary.cross_refs or [])
+            for s in sections[1:]:
+                for r in (s.cross_refs or []):
+                    if r not in seen_refs:
+                        if not primary.cross_refs:
+                            primary.cross_refs = []
+                        primary.cross_refs.append(r)
+                        seen_refs.add(r)
+
+            logger.info(
+                "Consolidated %d sections under (%s / %s) → %r",
+                len(sections), group, label, primary.slug,
+            )
+        merged.append(primary)
+
+    before = len(others)
+    after = len(merged)
+    if before != after:
+        logger.info(
+            "Section consolidation: %d → %d sections (merged %d duplicates)",
+            before, after, before - after,
+        )
+
+    # Phase 2: merge singleton groups into nearest group
+    group_counts: dict[str, int] = {}
+    for s in merged:
+        g = s.menu_group or ""
+        group_counts[g] = group_counts.get(g, 0) + 1
+
+    singletons = {g for g, c in group_counts.items() if c == 1}
+    if singletons and len(group_counts) > 1:
+        # Find the largest group as merge target
+        largest_group = max(
+            (g for g in group_counts if g not in singletons),
+            key=lambda g: group_counts[g],
+            default=None,
+        )
+        if largest_group:
+            for section in merged:
+                if section.menu_group in singletons:
+                    old_group = section.menu_group
+                    section.menu_group = largest_group
+                    # Keep original group name as label hint
+                    section.menu_label = f"{old_group}: {section.menu_label or section.title}"
+                    logger.info(
+                        "Merged singleton group %r into %r for section %r",
+                        old_group, largest_group, section.slug,
+                    )
+
+    nav.sections = home + merged
 
 
 # ── Response parsing ──────────────────────────────────────────────────────────
