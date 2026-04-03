@@ -647,8 +647,8 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
         label: m.name || m.slug || '/',
         href: m.slug,
         active: slug === m.slug,
-        badge: readingOrder.length > 0 ? String(i + 1) : undefined,
-        hint: i === 0 ? 'Start here' : undefined,
+        badge: undefined,
+        hint: undefined,
         menuGroup: menuGroup || undefined,
         menuLabel: menuLabel || undefined,
       };
