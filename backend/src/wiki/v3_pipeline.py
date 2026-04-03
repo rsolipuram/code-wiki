@@ -190,18 +190,24 @@ def generate_wiki_v3(
     # Reference pages (getting-started, glossary, api-reference) are WikiPages
     # but NOT Modules — they shouldn't appear in the learning path sidebar.
 
+    # Build slug → spec type lookup from planner output so we can
+    # reliably identify the home page regardless of slug naming.
+    spec_type_by_slug: dict[str, str] = {
+        spec.slug: spec.type for spec in wiki_nav.sections
+    }
+
     # Create WikiPage records
     seen_page_slugs: set[str] = set()
     skipped_empty = 0
     for section_dict in resolved_sections:
         raw_slug = section_dict.get("section_slug", "")
 
-        # Fix 5: Drop empty sections (but never home or reference pages)
+        # Drop empty sections (but never home or reference pages)
         segments = section_dict.get("prose_segments", [])
         word_count = section_dict.get("word_count", 0)
         if not segments or word_count < 50:
             is_ref = section_dict.get("is_reference_page", False)
-            is_home = raw_slug in ("home", "overview", "introduction")
+            is_home = spec_type_by_slug.get(raw_slug) == "home"
             if not is_ref and not is_home:
                 logger.warning(
                     "Dropping empty section %r (%d words, %d segments)",
@@ -214,7 +220,7 @@ def generate_wiki_v3(
         title = section_dict.get("section_title", "")
         is_ref = section_dict.get("is_reference_page", False)
 
-        page_type = _slug_to_page_type(slug, is_ref)
+        page_type = _slug_to_page_type(slug, is_ref, spec_type_by_slug.get(raw_slug, ""))
 
         page_content = section_dict.get("page_content")
         if isinstance(page_content, dict) and page_content:
@@ -373,7 +379,11 @@ def _serialize_compressed(compressed: CompressedCodebase) -> dict:
     }
 
 
-def _slug_to_page_type(slug: str, is_ref: bool) -> PageType:
+def _slug_to_page_type(slug: str, is_ref: bool, spec_type: str = "") -> PageType:
+    # Primary signal: the planner's declared section type
+    if spec_type == "home":
+        return PageType.home
+
     if slug == "getting-started":
         return PageType.getting_started
     if slug == "glossary":
@@ -384,8 +394,8 @@ def _slug_to_page_type(slug: str, is_ref: bool) -> PageType:
         return PageType.function_index
     if is_ref:
         return PageType.module
-    # Home section → home type
-    if slug in ("home", "overview", "introduction", "getting-started"):
+    # Fallback slug matching for home
+    if slug in ("home", "overview", "introduction"):
         return PageType.home
     return PageType.module
 

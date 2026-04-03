@@ -102,24 +102,28 @@ def content_planner_node(state: V3WikiState) -> dict:
     # Build compact prompt context
     context = _build_planner_context(dossier_dict, compressed, all_files, repo_path, repo_name)
 
-    # Derive section guidance — uncapped when nav_plan provides a skeleton
+    # Hard section cap based on file count — always enforced, even with nav_plan.
+    n_files = len(all_files)
+    if n_files < 20:
+        max_sections = 3
+    elif n_files < 50:
+        max_sections = 5
+    elif n_files < 200:
+        max_sections = 8
+    else:
+        max_sections = 12
+
     nav_plan = compressed.get("nav_plan", {})
     if nav_plan and nav_plan.get("sections"):
         nav_count = len(nav_plan["sections"])
         section_cap = (
-            f"use the nav skeleton as your guide (~{nav_count} sections). "
-            "Merge thin sections, split overloaded ones — let content density decide."
+            f"The nav skeleton below has {nav_count} raw sections — you MUST "
+            f"consolidate them into at most {max_sections} sections (excluding home). "
+            f"Merge closely related topics into single sections with broader scope. "
+            f"The skeleton is INPUT, not the final structure."
         )
     else:
-        n_files = len(all_files)
-        if n_files < 20:
-            section_cap = "max 3 sections (very small project)"
-        elif n_files < 50:
-            section_cap = "max 5 sections (small project)"
-        elif n_files < 200:
-            section_cap = "max 8 sections (medium project)"
-        else:
-            section_cap = "max 12 sections (large project)"
+        section_cap = f"max {max_sections} sections ({n_files} files in project)"
 
     system_prompt = PLANNER_SYSTEM.replace("{section_cap}", section_cap)
 
@@ -144,6 +148,19 @@ def content_planner_node(state: V3WikiState) -> dict:
 
     # Validate seed_files against actual repo files
     wiki_nav = _validate_nav(wiki_nav, all_files)
+
+    # Enforce section cap — drop lowest-priority sections if LLM over-produced
+    non_home = [s for s in wiki_nav.sections if s.type != "home"]
+    home = [s for s in wiki_nav.sections if s.type == "home"]
+    if len(non_home) > max_sections:
+        logger.warning(
+            "Planner produced %d sections (cap %d) — trimming",
+            len(non_home), max_sections,
+        )
+        wiki_nav.sections = home + non_home[:max_sections]
+
+    # Ensure every non-home section has menu_group (assign from title if missing)
+    _ensure_menu_groups(wiki_nav)
 
     elapsed = time.monotonic() - t0
     logger.info(
@@ -407,6 +424,32 @@ def _validate_nav(nav: WikiNav, all_files: list[str]) -> WikiNav:
 
     nav.sections = valid_sections
     return nav
+
+
+def _ensure_menu_groups(nav: WikiNav) -> None:
+    """Guarantee every non-home section has a menu_group.
+
+    If the LLM omitted menu_group, derive one from the section type:
+    concept/architecture → "Architecture", workflow → "Guides",
+    reference → "Reference", otherwise "General".
+    """
+    TYPE_TO_GROUP = {
+        "architecture": "Architecture",
+        "concept": "Architecture",
+        "workflow": "Guides",
+        "reference": "Reference",
+    }
+    for section in nav.sections:
+        if section.type == "home":
+            continue
+        if not section.menu_group:
+            section.menu_group = TYPE_TO_GROUP.get(section.type, "General")
+            logger.info(
+                "Assigned default menu_group %r to section %r",
+                section.menu_group, section.slug,
+            )
+        if not section.menu_label:
+            section.menu_label = section.title
 
 
 # ── Response parsing ──────────────────────────────────────────────────────────
