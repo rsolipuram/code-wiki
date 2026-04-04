@@ -72,7 +72,8 @@ def _search_entities(
             collection=vector_db.COLLECTION_CODE_ENTITIES,
             vector=query_vector,
             limit=_ENTITY_LIMIT,
-            filters={"repository_id": repository_id},
+            # code_entities are indexed with "repo_id" (see dossier.rag_index.index_entities)
+            filters={"repo_id": repository_id},
             score_threshold=_SCORE_THRESHOLD,
         )
         return [r["payload"] for r in results if r.get("payload")]

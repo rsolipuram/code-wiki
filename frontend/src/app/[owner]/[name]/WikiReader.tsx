@@ -901,7 +901,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
         {/* ── Left sidebar ── */}
         <WikiSidebar pageTitle={`${name} Wiki`} width={300}>
           <div style={{ padding: '0 20px 12px' }}>
-            <Logo href={base} />
+            <Logo href="/dashboard" />
           </div>
 
           {/* Search */}
