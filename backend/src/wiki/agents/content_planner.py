@@ -19,7 +19,7 @@ from pathlib import Path
 
 from src.wiki.agents.graph import report_agent_progress
 from src.wiki.agents.model import get_wiki_model
-from src.wiki.v3_types import SectionSpec, V3WikiState, WikiNav
+from src.wiki.pipeline_types import SectionSpec, V3WikiState, WikiNav
 
 logger = logging.getLogger(__name__)
 

@@ -26,9 +26,9 @@ from src.parsers.base import ParsedEntity
 from src.recon.fingerprint import RepoFingerprint
 from src.wiki.compressor import CodebaseCompressor
 from src.wiki.interestingness import score_entities
-from src.wiki.v2_types import CompressedCodebase
-from src.wiki.v3_graph import run_v3_pipeline
-from src.wiki.v3_types import V3WikiState, WikiNav
+from src.wiki.compression_types import CompressedCodebase
+from src.wiki.wiki_graph import run_v3_pipeline
+from src.wiki.pipeline_types import V3WikiState, WikiNav
 
 logger = logging.getLogger(__name__)
 

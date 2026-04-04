@@ -48,7 +48,7 @@ from src.dossier.serializer import dossier_output_path, serialize_dossier
 from src.orchestrator.descriptor import AgentDescriptor
 from src.recon import repo_recon
 from src.recon.fingerprint import RepoFingerprint
-from src.wiki.v2_types import CompressedCodebase
+from src.wiki.compression_types import CompressedCodebase
 
 logger = logging.getLogger(__name__)
 

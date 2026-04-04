@@ -22,7 +22,7 @@ from src.llm.client import chat
 from src.parsers.base import ParsedEntity
 from src.recon.fingerprint import RepoFingerprint
 from src.wiki.interestingness import ScoredEntity, score_entities
-from src.wiki.v2_types import (
+from src.wiki.compression_types import (
     CompressedCodebase,
     DirectorySummary,
     FileSummary,

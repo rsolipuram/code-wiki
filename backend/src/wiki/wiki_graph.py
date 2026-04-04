@@ -1,4 +1,4 @@
-"""LangGraph StateGraph for the V3/V4 wiki pipeline.
+"""LangGraph StateGraph for the V4 wiki pipeline.
 
 Execution flow:
   content_planner → fan_out_sections (Send per section, max 2 concurrent)
@@ -7,16 +7,14 @@ Execution flow:
                   → reference_node
                   → END
 
-Each deep content agent section is dispatched via Send() and appends
-its V3Section dict to deep_sections (Annotated[list, add]).
+Each section is dispatched via Send() and appends its section dict to
+deep_sections (Annotated[list, add]).
 
-V4 mode (WIKI_PIPELINE_VERSION=v4): deep_section_node runs a 3-phase
-subgraph (Writer → parallel(Diagrammer, Code Embedder) → Assembler)
-instead of the monolithic deep_content agent.
+Section generation is always the V4 3-phase subgraph:
+Writer → parallel(Diagrammer, Code Embedder) → Assembler.
 """
 
 import logging
-import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
@@ -26,14 +24,11 @@ from langgraph.constants import Send
 from langgraph.graph import END, StateGraph
 
 from src.wiki.agents.graph import configure_progress_reporting, report_agent_progress
-from src.wiki.v3_types import V3WikiState, WikiNav
+from src.wiki.pipeline_types import V3WikiState, WikiNav
 
 logger = logging.getLogger(__name__)
 
-# Pipeline version: "v3" (default) or "v4" (separated agents)
-_PIPELINE_VERSION = os.environ.get("WIKI_PIPELINE_VERSION", "v3").lower()
-
-# Shared semaphore enforcing max 2 concurrent deep content agents
+# Shared semaphore enforcing max 2 concurrent section agents
 _concurrency_sem = threading.Semaphore(2)
 
 # ── Node: content planner ─────────────────────────────────────────────────────
@@ -68,28 +63,17 @@ def fan_out_sections(state: V3WikiState) -> list[Send]:
     for spec_dict in sections:
         sends.append(Send("deep_section_node", {**shared, "section_spec": spec_dict}))
 
-    version = _PIPELINE_VERSION
-    logger.info("Fan-out: %d section agents dispatched (pipeline=%s)", len(sends), version)
+    logger.info("Fan-out: %d section agents dispatched (pipeline=v4)", len(sends))
     return sends
 
 
 # ── Node: deep content agent (per section) ───────────────────────────────────
 
 def deep_section_node(state: V3WikiState) -> dict:
-    """Wrapper node invoked once per section via Send().
-
-    Merges section_spec from Send payload into state before calling agent.
-    In V4 mode, delegates to the V4 section subgraph instead of deep_content.
-    """
-    section_spec_dict = state.get("section_spec") or {}
-
+    """Wrapper node invoked once per section via Send()."""
     with _concurrency_sem:
-        if _PIPELINE_VERSION == "v4":
-            from src.wiki.v4_section_graph import run_v4_section
-            return run_v4_section(state)
-        else:
-            from src.wiki.agents.deep_content import deep_content_node
-            return deep_content_node(state, section_spec_dict)
+        from src.wiki.section_graph import run_v4_section
+        return run_v4_section(state)
 
 
 # ── Node: assemble all sections ──────────────────────────────────────────────
