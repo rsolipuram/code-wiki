@@ -14,13 +14,14 @@ WikiPage DB records are created from assembled sections.
 
 import logging
 import time
+import hashlib
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from sqlalchemy.orm import Session
 
 from src.dossier.schema import Dossier
-from src.models.code_entity import Module
+from src.models.code_entity import CodeEntity, EntityType, Module
 from src.models.wiki import PageType, Wiki, WikiPage
 from src.parsers.base import ParsedEntity
 from src.recon.fingerprint import RepoFingerprint
@@ -31,6 +32,113 @@ from src.wiki.wiki_graph import run_v3_pipeline
 from src.wiki.pipeline_types import V3WikiState, WikiNav
 
 logger = logging.getLogger(__name__)
+
+_ENTITY_TYPE_MAP: dict[str, EntityType] = {
+    "function": EntityType.function,
+    "method": EntityType.method,
+    "class": EntityType.class_,
+    "module": EntityType.module,
+    "interface": EntityType.interface,
+    "variable": EntityType.variable,
+}
+
+
+def _to_repo_relative(file_path: str, repo_root: Path) -> str:
+    """Normalize file paths to repository-relative format."""
+    raw = str(file_path or "").replace("\\", "/")
+    repo_prefix = str(repo_root).replace("\\", "/").rstrip("/") + "/"
+    if raw.startswith(repo_prefix):
+        return raw[len(repo_prefix):]
+    if raw.startswith("./"):
+        return raw[2:]
+    p = Path(file_path)
+    if p.is_absolute():
+        try:
+            return str(p.relative_to(repo_root)).replace("\\", "/")
+        except ValueError:
+            pass
+    return raw
+
+
+def _stable_qualified_name(qualified_name: str, max_len: int = 1024) -> str:
+    """Return DB-safe qualified name without losing uniqueness across truncation."""
+    if len(qualified_name) <= max_len:
+        return qualified_name
+    digest = hashlib.sha1(qualified_name.encode("utf-8")).hexdigest()[:16]
+    keep = max_len - len(digest) - 1
+    return f"{qualified_name[:keep]}_{digest}"
+
+
+def _persist_code_entities(
+    session: Session,
+    modules: list[Module],
+    entities: list[ParsedEntity],
+    scored_map: dict[str, float],
+    repo_root: Path,
+) -> int:
+    """Persist parsed entities into code_entities linked by module seed files."""
+    file_to_module: dict[str, Module] = {}
+    for mod in sorted(modules, key=lambda m: int(m.sort_order or 0)):
+        for fp in mod.file_paths or []:
+            rel = _to_repo_relative(fp, repo_root)
+            if rel and rel not in file_to_module:
+                file_to_module[rel] = mod
+
+    if not file_to_module:
+        logger.warning("Skipping code entity persistence: no module seed files")
+        return 0
+
+    rows: list[CodeEntity] = []
+    seen_keys: set[tuple[str, str]] = set()
+    skipped_unknown_type = 0
+    skipped_unmapped_file = 0
+
+    for ent in entities:
+        rel_file = _to_repo_relative(ent.file_path, repo_root)
+        mod = file_to_module.get(rel_file)
+        if mod is None:
+            skipped_unmapped_file += 1
+            continue
+
+        mapped_type = _ENTITY_TYPE_MAP.get(ent.entity_type)
+        if mapped_type is None:
+            skipped_unknown_type += 1
+            continue
+
+        stored_qname = _stable_qualified_name(ent.qualified_name)
+        dedupe_key = (mod.id, stored_qname)
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+
+        rows.append(
+            CodeEntity(
+                module_id=mod.id,
+                name=ent.name[:255],
+                qualified_name=stored_qname,
+                entity_type=mapped_type,
+                file_path=rel_file[:1024] if rel_file else None,
+                line_start=ent.line_start,
+                line_end=ent.line_end,
+                signature=(ent.signature or None),
+                docstring=(ent.docstring or None),
+                description=None,
+                interestingness_score=float(scored_map.get(ent.qualified_name, 0.0)),
+                entity_metadata=ent.entity_metadata or {},
+            )
+        )
+
+    if rows:
+        session.add_all(rows)
+        session.flush()
+
+    logger.info(
+        "Persisted %d code entities (skipped: %d unmapped files, %d unknown type)",
+        len(rows),
+        skipped_unmapped_file,
+        skipped_unknown_type,
+    )
+    return len(rows)
 
 
 def _dedupe_slug(base_slug: str, seen_slugs: set[str]) -> str:
@@ -67,6 +175,7 @@ def generate_wiki_v3(
     t_total = time.monotonic()
     pages_created = 0
     generation_warnings: list[dict] = []
+    scored_entities = score_entities(entities)
 
     def _report(pages: int, name: str) -> None:
         if page_progress_callback:
@@ -75,7 +184,6 @@ def generate_wiki_v3(
     # ── Phase 0: Compress ────────────────────────────────────────────────
     _report(0, "Compressing codebase...")
     if compressed is None:
-        scored_entities = score_entities(entities)
         compressor = CodebaseCompressor()
         compressed = compressor.compress(repo_path, entities, fingerprint, scored_entities)
         logger.info("V3 Phase 0 (Compress): level=%s", compressed.compression_level)
@@ -286,6 +394,19 @@ def generate_wiki_v3(
             session.delete(mod)
             del section_to_module[slug]
 
+    # Persist parsed entities into module-linked code_entities for symbol lookup.
+    scored_map = {
+        se.entity.qualified_name: float(se.score)
+        for se in scored_entities
+    }
+    persisted_entities = _persist_code_entities(
+        session=session,
+        modules=list(section_to_module.values()),
+        entities=entities,
+        scored_map=scored_map,
+        repo_root=resolved_root,
+    )
+
     wiki.page_count = pages_created
     wiki.module_count = len(section_to_module)
 
@@ -293,8 +414,8 @@ def generate_wiki_v3(
 
     total_elapsed = time.monotonic() - t_total
     logger.info(
-        "V3 pipeline complete: %d pages, %d empty skipped, %d warnings (%.1fs)",
-        pages_created, skipped_empty, len(generation_warnings), total_elapsed,
+        "V3 pipeline complete: %d pages, %d entities persisted, %d empty skipped, %d warnings (%.1fs)",
+        pages_created, persisted_entities, skipped_empty, len(generation_warnings), total_elapsed,
     )
 
     return {

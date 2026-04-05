@@ -8,14 +8,17 @@ Usage:
 
 from src.parsers.base import CodeParser, UnsupportedLanguageError
 from src.parsers.python_parser import PythonParser
+from src.parsers.rust_parser import RustParser
 from src.parsers.typescript_parser import SUPPORTED_EXTENSIONS as _TS_EXTS
 from src.parsers.typescript_parser import TypeScriptParser
 
 _PYTHON_PARSER: PythonParser | None = None
 _TS_PARSER: TypeScriptParser | None = None
+_RUST_PARSER: RustParser | None = None
 
 _EXTENSION_MAP: dict[str, str] = {
     ".py": "python",
+    ".rs": "rust",
     **{ext: "typescript" for ext in _TS_EXTS},
 }
 
@@ -32,7 +35,7 @@ def get_parser(extension: str) -> CodeParser:
     Raises:
         UnsupportedLanguageError: If no parser is registered for the extension.
     """
-    global _PYTHON_PARSER, _TS_PARSER
+    global _PYTHON_PARSER, _TS_PARSER, _RUST_PARSER
 
     lang = _EXTENSION_MAP.get(extension.lower())
     if lang == "python":
@@ -43,6 +46,10 @@ def get_parser(extension: str) -> CodeParser:
         if _TS_PARSER is None:
             _TS_PARSER = TypeScriptParser()
         return _TS_PARSER
+    if lang == "rust":
+        if _RUST_PARSER is None:
+            _RUST_PARSER = RustParser()
+        return _RUST_PARSER
 
     raise UnsupportedLanguageError(
         f"No parser registered for extension {extension!r}. "

@@ -132,7 +132,7 @@ def write_finding(dossier_manager: DossierManager, finding: SecurityFinding) -> 
 
 
 def parse_ast(file_path: str) -> dict[str, Any]:
-    """Return a structural summary of a Python or TypeScript file via the parser.
+    """Return a structural summary of a Python/TypeScript/Rust file via the parser.
 
     Args:
         file_path: Absolute path to the source file.
