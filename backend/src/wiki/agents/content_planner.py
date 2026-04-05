@@ -22,7 +22,13 @@ from pathlib import Path
 
 from src.wiki.agents.graph import report_agent_progress
 from src.wiki.agents.model import get_wiki_model
-from src.wiki.pipeline_types import MenuGroupPlan, SectionSpec, V3WikiState, WikiNav
+from src.wiki.pipeline_types import (
+    MenuGroupPlan,
+    SectionSpec,
+    V3WikiState,
+    WikiNav,
+    _safe_int,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -534,25 +540,6 @@ def _parse_group_plans(data: dict, top_dirs: list[str]) -> list[MenuGroupPlan]:
             )
         )
     return result
-
-
-def _safe_int(value, default: int = 0) -> int:
-    try:
-        if value is None:
-            return default
-        if isinstance(value, bool):
-            return int(value)
-        if isinstance(value, (int, float)):
-            return int(value)
-        s = str(value).strip()
-        if not s:
-            return default
-        m = re.search(r"-?\d+", s)
-        if not m:
-            return default
-        return int(m.group(0))
-    except Exception:
-        return default
 
 
 def _top_level_stats(compressed: dict, all_files: list[str]) -> list[dict]:
