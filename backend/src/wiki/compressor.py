@@ -110,6 +110,81 @@ class CodebaseCompressor:
 
         return raw.lstrip("./")
 
+    @staticmethod
+    def _top_level_dir(file_path: str, assume_directory: bool = False) -> str:
+        parts = [p for p in Path(file_path).parts if p not in {"", "."}]
+        if not parts:
+            return "."
+        if len(parts) == 1 and not assume_directory:
+            return "."
+        return parts[0]
+
+    def _stratified_file_sample(
+        self,
+        file_summaries: dict[str, FileSummary],
+        budget: int,
+    ) -> list[tuple[str, FileSummary]]:
+        """Sample file summaries proportionally across top-level directories."""
+        if not file_summaries or budget <= 0:
+            return []
+
+        items = list(file_summaries.items())
+        if budget >= len(items):
+            return sorted(items, key=lambda kv: kv[0])
+
+        buckets: dict[str, list[tuple[str, FileSummary]]] = {}
+        for path, fs in items:
+            buckets.setdefault(self._top_level_dir(path), []).append((path, fs))
+
+        for bucket in buckets.values():
+            bucket.sort(key=lambda kv: (-kv[1].entity_count, kv[0]))
+
+        total = len(items)
+        allocations: dict[str, int] = {}
+        remainders: list[tuple[float, str]] = []
+        for top, bucket in buckets.items():
+            frac = (len(bucket) / total) * budget
+            base = int(frac)
+            allocations[top] = base
+            remainders.append((frac - base, top))
+
+        selected = sum(allocations.values())
+        guaranteed = [top for top in sorted(buckets) if allocations[top] == 0 and buckets[top]]
+        for top in guaranteed:
+            if selected >= budget:
+                break
+            allocations[top] += 1
+            selected += 1
+
+        if selected < budget:
+            for _, top in sorted(remainders, reverse=True):
+                if selected >= budget:
+                    break
+                if allocations[top] < len(buckets[top]):
+                    allocations[top] += 1
+                    selected += 1
+
+        if selected > budget:
+            for top in sorted(allocations.keys(), key=lambda k: allocations[k], reverse=True):
+                while selected > budget and allocations[top] > 0:
+                    allocations[top] -= 1
+                    selected -= 1
+
+        chosen: list[tuple[str, FileSummary]] = []
+        for top in sorted(buckets):
+            take = min(allocations.get(top, 0), len(buckets[top]))
+            chosen.extend(buckets[top][:take])
+
+        seen = {path for path, _ in chosen}
+        if len(chosen) < budget:
+            leftovers: list[tuple[str, FileSummary]] = []
+            for top in sorted(buckets):
+                leftovers.extend([(p, fs) for p, fs in buckets[top] if p not in seen])
+            leftovers.sort(key=lambda kv: (-kv[1].entity_count, kv[0]))
+            chosen.extend(leftovers[: budget - len(chosen)])
+
+        return chosen[:budget]
+
     def compress(
         self,
         repo_path: str,
@@ -614,7 +689,9 @@ class CodebaseCompressor:
     ) -> str:
         """Single LLM call: aggregate file summaries into repo overview."""
         summary_lines = []
-        for fp, fs in sorted(file_summaries.items())[:50]:
+        budget = min(len(file_summaries), max(50, min(120, fingerprint.file_count // 10)))
+        sampled = self._stratified_file_sample(file_summaries, budget)
+        for fp, fs in sampled:
             summary_lines.append(f"  - {fp}: {fs.summary}")
 
         langs = ", ".join(fingerprint.languages[:5])
@@ -782,8 +859,10 @@ class CodebaseCompressor:
         tree_lines = [f"  {d}/" for d in sorted(all_dirs)]
 
         if not dir_nav_lines and not topic_lines:
-            logger.info("No nav hints collected — skipping consolidation")
-            return {}
+            logger.info("No nav hints collected — using structural fallback")
+            return self._structural_nav_fallback(
+                file_summaries, directory_summaries, repo_name
+            )
 
         prompt = (
             f"You are organizing a code wiki's navigation. Below are navigation "
@@ -824,8 +903,84 @@ class CodebaseCompressor:
                     len(parsed["sections"]),
                 )
                 return parsed
-            logger.warning("Nav consolidation returned invalid JSON, skipping")
-            return {}
+            logger.warning("Nav consolidation returned invalid JSON, using structural fallback")
+            return self._structural_nav_fallback(
+                file_summaries, directory_summaries, repo_name
+            )
         except Exception as exc:
             logger.warning("Nav consolidation LLM call failed: %s", exc)
-            return {}
+            return self._structural_nav_fallback(
+                file_summaries, directory_summaries, repo_name
+            )
+
+    def _structural_nav_fallback(
+        self,
+        file_summaries: dict[str, FileSummary],
+        directory_summaries: dict[str, DirectorySummary],
+        repo_name: str,
+    ) -> dict:
+        """Deterministic nav skeleton from directory/file structure (no LLM)."""
+        if not file_summaries and not directory_summaries:
+            return {
+                "sections": [
+                    {
+                        "slug": "overview",
+                        "title": "Overview",
+                        "type": "home",
+                        "subsections": [],
+                        "seed_files": [],
+                        "importance": "core",
+                    }
+                ]
+            }
+
+        top_files: dict[str, list[str]] = {}
+        for fp in sorted(file_summaries):
+            top = self._top_level_dir(fp)
+            top_files.setdefault(top, []).append(fp)
+
+        ranked = sorted(
+            top_files.items(),
+            key=lambda kv: len(kv[1]),
+            reverse=True,
+        )
+        if not ranked and directory_summaries:
+            for dp in sorted(directory_summaries):
+                top = self._top_level_dir(dp, assume_directory=True)
+                top_files.setdefault(top, [])
+            ranked = sorted(top_files.items(), key=lambda kv: kv[0])
+
+        sections: list[dict] = [
+            {
+                "slug": "overview",
+                "title": "Overview",
+                "type": "home",
+                "subsections": [],
+                "seed_files": [],
+                "importance": "core",
+            }
+        ]
+        max_count = max((len(files) for _, files in ranked), default=1)
+        for top, files in ranked:
+            if top == ".":
+                title = "Root Files"
+                slug = "root-files"
+            else:
+                title = f"{top} Subsystem"
+                slug = re.sub(r"[^a-z0-9]+", "-", top.lower()).strip("-") or "section"
+            importance = "core" if len(files) >= max(5, max_count // 2) else "supporting"
+            sections.append(
+                {
+                    "slug": slug,
+                    "title": title,
+                    "type": "architecture" if importance == "core" else "concept",
+                    "subsections": [],
+                    "seed_files": files[:5],
+                    "importance": importance,
+                }
+            )
+
+        logger.info(
+            "Structural nav fallback produced %d sections", len(sections)
+        )
+        return {"sections": sections}

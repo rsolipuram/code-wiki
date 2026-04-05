@@ -16,11 +16,13 @@ import os
 import logging
 import re
 import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from src.wiki.agents.graph import report_agent_progress
 from src.wiki.agents.model import get_wiki_model
-from src.wiki.pipeline_types import SectionSpec, V3WikiState, WikiNav
+from src.wiki.pipeline_types import MenuGroupPlan, SectionSpec, V3WikiState, WikiNav
 
 logger = logging.getLogger(__name__)
 
@@ -186,45 +188,33 @@ def content_planner_node(state: V3WikiState) -> dict:
     repo_name = state.get("repo_name") or "project"
     repo_path = state.get("repo_path") or ""
 
-    # Build compact prompt context
-    context = _build_planner_context(dossier_dict, compressed, all_files, repo_path, repo_name)
-
-    # Build section guidance — no hard cap, just contextual advice
-    nav_plan = compressed.get("nav_plan", {})
-    n_files = len(all_files)
-    if nav_plan and nav_plan.get("sections"):
-        nav_count = len(nav_plan["sections"])
-        section_cap = (
-            f"The nav skeleton below has {nav_count} raw sections derived from "
-            f"repository analysis ({n_files} files). Use it as your starting taxonomy. "
-            f"Consolidate sections that cover the same subsystem, split sections that "
-            f"span unrelated concerns, and group everything into a clear menu hierarchy. "
-            f"The skeleton is INPUT — refine it into a professional documentation sidebar."
-        )
-    else:
-        section_cap = (
-            f"This project has {n_files} files. Create as many sections as the "
-            f"content warrants — enough to cover each distinct concern without overlap."
-        )
-
-    system_prompt = PLANNER_SYSTEM.replace("{section_cap}", section_cap)
-
     model = get_wiki_model(temperature=0.3)
     log_planner_io = os.environ.get("WIKI_LOG_PLANNER_IO", "").strip().lower() in {
         "1", "true", "yes", "on",
     }
-    if log_planner_io:
-        logger.info("PLANNER_LLM_INPUT_SYSTEM:\n%s", system_prompt)
-        logger.info("PLANNER_LLM_INPUT_USER:\n%s", context)
 
+    use_two_phase = len(all_files) >= 200
     try:
-        response = model.invoke([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": context},
-        ])
-        raw = response.content if hasattr(response, "content") else str(response)
-        if log_planner_io:
-            logger.info("PLANNER_LLM_RAW_RESPONSE:\n%s", raw)
+        if use_two_phase:
+            wiki_nav = _two_phase_plan(
+                model=model,
+                dossier_dict=dossier_dict,
+                compressed=compressed,
+                all_files=all_files,
+                repo_path=repo_path,
+                repo_name=repo_name,
+                log_planner_io=log_planner_io,
+            )
+        else:
+            wiki_nav = _single_phase_plan(
+                model=model,
+                dossier_dict=dossier_dict,
+                compressed=compressed,
+                all_files=all_files,
+                repo_path=repo_path,
+                repo_name=repo_name,
+                log_planner_io=log_planner_io,
+            )
     except Exception as exc:
         logger.error("Content planner LLM call failed: %s", exc)
         wiki_nav = _fallback_nav(repo_name)
@@ -233,8 +223,6 @@ def content_planner_node(state: V3WikiState) -> dict:
             "wiki_nav": wiki_nav.to_dict(),
             "agent_results": [{"agent": "content_planner", "success": False, "elapsed": time.monotonic() - t0}],
         }
-
-    wiki_nav = _parse_wiki_nav(raw, repo_name)
 
     # Validate seed_files against actual repo files
     wiki_nav = _validate_nav(wiki_nav, all_files)
@@ -259,6 +247,503 @@ def content_planner_node(state: V3WikiState) -> dict:
         "wiki_nav": wiki_nav.to_dict(),
         "agent_results": [{"agent": "content_planner", "success": True, "elapsed": elapsed}],
     }
+
+
+# ── Planner execution modes ────────────────────────────────────────────────────
+
+GROUP_PLANNER_SYSTEM = """\
+You are planning wiki sections for ONE sidebar menu group.
+
+Return ONLY valid JSON:
+{{
+  "sections": [
+    {{
+      "slug": "url-safe-slug",
+      "title": "Section Title",
+      "type": "concept|architecture|workflow|reference",
+      "one_liner": "One sentence",
+      "focus_tags": ["architecture"],
+      "seed_files": ["path/file.py"],
+      "boundary_hint": "Scope guardrails",
+      "cross_refs": ["other-slug"],
+      "menu_group": "{group_name}",
+      "menu_label": "Short label",
+      "key_insights": ["Insight 1", "Insight 2"]
+    }}
+  ]
+}}
+
+Rules:
+- Plan ONLY for menu_group "{group_name}".
+- Target around {expected_sections} sections (±1 is okay).
+- Use only file paths from the provided file list.
+- Do not emit a home section.
+- Keep section boundaries distinct and non-overlapping.
+- Apply this boundary focus: {boundary_hint}
+"""
+
+
+def _single_phase_plan(
+    model,
+    dossier_dict: dict,
+    compressed: dict,
+    all_files: list[str],
+    repo_path: str,
+    repo_name: str,
+    log_planner_io: bool,
+) -> WikiNav:
+    context = _build_planner_context(dossier_dict, compressed, all_files, repo_path, repo_name)
+    nav_plan = compressed.get("nav_plan", {})
+    n_files = len(all_files)
+    if nav_plan and nav_plan.get("sections"):
+        nav_count = len(nav_plan["sections"])
+        section_cap = (
+            f"The nav skeleton below has {nav_count} raw sections derived from "
+            f"repository analysis ({n_files} files). Use it as your starting taxonomy. "
+            f"Consolidate sections that cover the same subsystem, split sections that "
+            f"span unrelated concerns, and group everything into a clear menu hierarchy. "
+            f"The skeleton is INPUT — refine it into a professional documentation sidebar."
+        )
+    else:
+        section_cap = (
+            f"This project has {n_files} files. Create as many sections as the "
+            f"content warrants — enough to cover each distinct concern without overlap."
+        )
+
+    system_prompt = PLANNER_SYSTEM.replace("{section_cap}", section_cap)
+    if log_planner_io:
+        logger.info("PLANNER_LLM_INPUT_SYSTEM:\n%s", system_prompt)
+        logger.info("PLANNER_LLM_INPUT_USER:\n%s", context)
+
+    response = model.invoke([
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": context},
+    ])
+    raw = response.content if hasattr(response, "content") else str(response)
+    if log_planner_io:
+        logger.info("PLANNER_LLM_RAW_RESPONSE:\n%s", raw)
+    return _parse_wiki_nav(raw, repo_name)
+
+
+def _two_phase_plan(
+    model,
+    dossier_dict: dict,
+    compressed: dict,
+    all_files: list[str],
+    repo_path: str,
+    repo_name: str,
+    log_planner_io: bool,
+) -> WikiNav:
+    groups = _structural_plan(
+        model=model,
+        compressed=compressed,
+        all_files=all_files,
+        repo_name=repo_name,
+        log_planner_io=log_planner_io,
+    )
+    if not groups:
+        return _single_phase_plan(
+            model, dossier_dict, compressed, all_files, repo_path, repo_name, log_planner_io
+        )
+
+    workers = min(3, max(1, len(groups)))
+    grouped_sections: list[SectionSpec] = []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(
+                _group_section_plan,
+                model,
+                group,
+                dossier_dict,
+                compressed,
+                all_files,
+                repo_path,
+                repo_name,
+                log_planner_io,
+            ): group.group_name
+            for group in groups
+        }
+        for future in as_completed(futures):
+            group_name = futures[future]
+            try:
+                grouped_sections.extend(future.result())
+            except Exception as exc:
+                logger.warning("Group planner failed for %s: %s", group_name, exc)
+
+    merged_sections = _merge_group_sections(grouped_sections)
+    if not merged_sections:
+        return _single_phase_plan(
+            model, dossier_dict, compressed, all_files, repo_path, repo_name, log_planner_io
+        )
+
+    home = _home_section(repo_name, compressed)
+    nav = WikiNav(
+        title=f"{repo_name} — Documentation",
+        sections=[home] + merged_sections,
+    )
+    _normalize_slugs(nav)
+    return nav
+
+
+def _structural_plan(
+    model,
+    compressed: dict,
+    all_files: list[str],
+    repo_name: str,
+    log_planner_io: bool,
+) -> list[MenuGroupPlan]:
+    stats = _top_level_stats(compressed, all_files)
+    if not stats:
+        return []
+
+    top_dirs = [s["top_dir"] for s in stats]
+    stats_lines = []
+    for s in stats[:30]:
+        top = s["top_dir"]
+        cnt = s["file_count"]
+        langs = ", ".join(s["languages"][:3]) if s["languages"] else "mixed"
+        hint = s["summary"][:180] if s["summary"] else ""
+        stats_lines.append(f"- {top}: {cnt} files; langs={langs}; hint={hint}")
+
+    prompt = (
+        f"Repository: {repo_name}\n"
+        "Top-level directory stats:\n"
+        + "\n".join(stats_lines)
+        + "\n\nReturn ONLY JSON:\n"
+        + '{"groups":[{"group_name":"Core Backend","scope_dirs":["backend","src"],'
+        + '"expected_sections":3,"boundary_hint":"what this group should cover",'
+        + '"importance":"core|supporting|peripheral"}]}'
+        + "\nRules:\n"
+        + "- Cover every top-level directory at least once.\n"
+        + "- Create 4-10 groups total.\n"
+        + "- Keep group names concise and architectural.\n"
+    )
+    if log_planner_io:
+        logger.info("PLANNER_PHASE_A_INPUT:\n%s", prompt)
+
+    groups = []
+    try:
+        response = model.invoke([
+            {"role": "system", "content": "Design high-level wiki menu groups from directory structure."},
+            {"role": "user", "content": prompt},
+        ])
+        raw = response.content if hasattr(response, "content") else str(response)
+        if log_planner_io:
+            logger.info("PLANNER_PHASE_A_RAW:\n%s", raw)
+        parsed = _extract_json_dict(raw)
+        groups = _parse_group_plans(parsed, top_dirs)
+    except Exception as exc:
+        logger.warning("Phase-A structural planner failed: %s", exc)
+
+    if not groups:
+        groups = _structural_groups_fallback(stats)
+    return _ensure_group_coverage(groups, top_dirs)
+
+
+def _group_section_plan(
+    model,
+    group: MenuGroupPlan,
+    dossier_dict: dict,
+    compressed: dict,
+    all_files: list[str],
+    repo_path: str,
+    repo_name: str,
+    log_planner_io: bool,
+) -> list[SectionSpec]:
+    scoped_files = _files_in_scope(all_files, group.scope_dirs)
+    if not scoped_files:
+        return []
+
+    scoped_compressed = _scope_compressed(compressed, group.scope_dirs)
+    context = _build_planner_context(
+        dossier_dict=dossier_dict,
+        compressed=scoped_compressed,
+        all_files=scoped_files,
+        repo_path=repo_path,
+        repo_name=f"{repo_name} [{group.group_name}]",
+    )
+    system_prompt = GROUP_PLANNER_SYSTEM.format(
+        group_name=group.group_name,
+        expected_sections=max(1, group.expected_sections),
+        boundary_hint=group.boundary_hint or "Keep sections within the scoped directories.",
+    )
+    if log_planner_io:
+        logger.info("PLANNER_PHASE_B_SYSTEM(%s):\n%s", group.group_name, system_prompt)
+        logger.info("PLANNER_PHASE_B_USER(%s):\n%s", group.group_name, context)
+
+    response = model.invoke([
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": context},
+    ])
+    raw = response.content if hasattr(response, "content") else str(response)
+    if log_planner_io:
+        logger.info("PLANNER_PHASE_B_RAW(%s):\n%s", group.group_name, raw)
+
+    parsed = _extract_json_dict(raw)
+    sections = _parse_group_sections(parsed, group.group_name)
+    fallback_files = scoped_files[:2]
+    for section in sections:
+        if not section.seed_files:
+            section.seed_files = fallback_files.copy()
+        if not section.menu_group:
+            section.menu_group = group.group_name
+        if not section.menu_label:
+            section.menu_label = section.title
+        if not section.boundary_hint:
+            section.boundary_hint = group.boundary_hint
+    return sections
+
+
+def _extract_json_dict(raw: str) -> dict:
+    cleaned = re.sub(r"```(?:json)?\s*", "", (raw or "")).replace("```", "").strip()
+    m = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if m:
+        cleaned = m.group(0)
+    try:
+        data = json.loads(cleaned)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _parse_group_plans(data: dict, top_dirs: list[str]) -> list[MenuGroupPlan]:
+    groups_raw = data.get("groups", []) if isinstance(data, dict) else []
+    result: list[MenuGroupPlan] = []
+    top_dir_set = set(top_dirs)
+    for item in groups_raw:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("group_name") or "").strip()
+        if not name:
+            continue
+        scope = [d for d in (item.get("scope_dirs") or []) if isinstance(d, str) and d in top_dir_set]
+        if not scope:
+            continue
+        expected = _safe_int(item.get("expected_sections", 2), default=2)
+        expected = max(1, min(expected, 8))
+        importance = (item.get("importance") or "supporting").lower()
+        if importance not in {"core", "supporting", "peripheral"}:
+            importance = "supporting"
+        result.append(
+            MenuGroupPlan(
+                group_name=name,
+                scope_dirs=scope,
+                expected_sections=expected,
+                boundary_hint=(item.get("boundary_hint") or "").strip(),
+                importance=importance,
+            )
+        )
+    return result
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        s = str(value).strip()
+        if not s:
+            return default
+        m = re.search(r"-?\d+", s)
+        if not m:
+            return default
+        return int(m.group(0))
+    except Exception:
+        return default
+
+
+def _top_level_stats(compressed: dict, all_files: list[str]) -> list[dict]:
+    dir_summaries = compressed.get("directory_summaries", {}) or {}
+    top_counts: Counter = Counter()
+    top_langs: dict[str, Counter] = {}
+    ext_lang = {
+        ".py": "Python", ".ts": "TypeScript", ".tsx": "TypeScript", ".js": "JavaScript",
+        ".jsx": "JavaScript", ".rs": "Rust", ".go": "Go", ".java": "Java", ".md": "Markdown",
+    }
+    for fp in all_files:
+        top = _top_level_dir(fp)
+        top_counts[top] += 1
+        lang = ext_lang.get(Path(fp).suffix.lower(), Path(fp).suffix.lstrip(".").upper() or "Unknown")
+        top_langs.setdefault(top, Counter())[lang] += 1
+
+    top_summaries: dict[str, str] = {}
+    for dir_path, info in dir_summaries.items():
+        if not isinstance(info, dict):
+            continue
+        top = _top_level_dir(dir_path, assume_directory=True)
+        if top not in top_summaries:
+            top_summaries[top] = (info.get("summary", "") or "").strip()
+
+    stats: list[dict] = []
+    for top, count in top_counts.most_common():
+        stats.append(
+            {
+                "top_dir": top,
+                "file_count": count,
+                "languages": [lang for lang, _ in top_langs.get(top, Counter()).most_common(4)],
+                "summary": top_summaries.get(top, ""),
+            }
+        )
+    return stats
+
+
+def _structural_groups_fallback(stats: list[dict]) -> list[MenuGroupPlan]:
+    if not stats:
+        return []
+    total = sum(s["file_count"] for s in stats) or 1
+    groups: list[MenuGroupPlan] = []
+    supporting_dirs: list[str] = []
+    for s in stats:
+        top = s["top_dir"]
+        ratio = s["file_count"] / total
+        if ratio >= 0.12 or s["file_count"] >= 120:
+            groups.append(
+                MenuGroupPlan(
+                    group_name=f"{top} Architecture" if top != "." else "Root Architecture",
+                    scope_dirs=[top],
+                    expected_sections=max(2, min(5, s["file_count"] // 120 + 1)),
+                    boundary_hint=f"Cover major architecture and flow under {top}.",
+                    importance="core",
+                )
+            )
+        else:
+            supporting_dirs.append(top)
+    if supporting_dirs:
+        groups.append(
+            MenuGroupPlan(
+                group_name="Supporting Systems",
+                scope_dirs=supporting_dirs,
+                expected_sections=max(2, min(4, len(supporting_dirs) // 2 + 1)),
+                boundary_hint="Cover supporting and peripheral modules without deep overlap.",
+                importance="supporting",
+            )
+        )
+    return groups
+
+
+def _ensure_group_coverage(groups: list[MenuGroupPlan], top_dirs: list[str]) -> list[MenuGroupPlan]:
+    covered: set[str] = set()
+    for g in groups:
+        covered.update(g.scope_dirs)
+    for top in top_dirs:
+        if top not in covered:
+            groups.append(
+                MenuGroupPlan(
+                    group_name=f"{top} Modules" if top != "." else "Root Modules",
+                    scope_dirs=[top],
+                    expected_sections=1,
+                    boundary_hint=f"Document modules under {top}.",
+                    importance="supporting",
+                )
+            )
+    return groups
+
+
+def _files_in_scope(all_files: list[str], scope_dirs: list[str]) -> list[str]:
+    if not scope_dirs:
+        return []
+    result: list[str] = []
+    for fp in all_files:
+        top = _top_level_dir(fp)
+        if top in scope_dirs:
+            result.append(fp)
+    return result
+
+
+def _scope_compressed(compressed: dict, scope_dirs: list[str]) -> dict:
+    file_summaries = compressed.get("file_summaries", {}) or {}
+    dir_summaries = compressed.get("directory_summaries", {}) or {}
+    scoped_fs = {
+        path: data for path, data in file_summaries.items()
+        if _top_level_dir(path) in scope_dirs
+    }
+    scoped_ds = {
+        path: data for path, data in dir_summaries.items()
+        if _top_level_dir(path, assume_directory=True) in scope_dirs
+    }
+    scoped = dict(compressed)
+    scoped["file_summaries"] = scoped_fs
+    scoped["directory_summaries"] = scoped_ds
+    # Prevent cross-group leakage in phase-B prompts.
+    # Group planners should use scoped evidence only, not global nav skeleton.
+    scoped["nav_plan"] = {}
+    return scoped
+
+
+def _parse_group_sections(data: dict, group_name: str) -> list[SectionSpec]:
+    raw_sections = data.get("sections", []) if isinstance(data, dict) else []
+    sections: list[SectionSpec] = []
+    for item in raw_sections:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "home":
+            continue
+        section = SectionSpec.from_dict(item)
+        section.seed_files = _coerce_list(section.seed_files)
+        section.focus_tags = _coerce_list(section.focus_tags)
+        section.cross_refs = _coerce_list(section.cross_refs)
+        section.key_insights = _coerce_list(section.key_insights)
+        section.menu_group = section.menu_group or group_name
+        section.menu_label = section.menu_label or section.title
+        if not section.slug:
+            section.slug = _title_to_slug(section.title)
+        sections.append(section)
+    return sections
+
+
+def _merge_group_sections(sections: list[SectionSpec]) -> list[SectionSpec]:
+    if not sections:
+        return []
+    slot_map: dict[tuple[str, str], list[SectionSpec]] = {}
+    for section in sections:
+        key = (section.menu_group or "General", section.menu_label or section.title)
+        slot_map.setdefault(key, []).append(section)
+
+    merged: list[SectionSpec] = []
+    for _, same_slot in slot_map.items():
+        primary = same_slot[0]
+        if len(same_slot) > 1:
+            _absorb_into(primary, same_slot[1:])
+        merged.append(primary)
+    return merged
+
+
+def _home_section(repo_name: str, compressed: dict) -> SectionSpec:
+    nav_plan = compressed.get("nav_plan", {}) or {}
+    raw_sections = nav_plan.get("sections", []) if isinstance(nav_plan, dict) else []
+    for item in raw_sections:
+        if isinstance(item, dict) and item.get("type") == "home":
+            home = SectionSpec.from_dict(item)
+            home.type = "home"
+            home.menu_group = ""
+            home.menu_label = ""
+            if not home.slug:
+                home.slug = "overview"
+            if not home.title:
+                home.title = "Overview"
+            return home
+    return SectionSpec(
+        slug="overview",
+        title="Overview",
+        type="home",
+        one_liner=f"Overview of the {repo_name} codebase.",
+        focus_tags=["architecture"],
+        seed_files=[],
+    )
+
+
+def _coerce_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value if str(v).strip()]
+    if isinstance(value, str):
+        v = value.strip()
+        return [v] if v else []
+    return [str(value)]
 
 
 # ── Context builders ──────────────────────────────────────────────────────────
@@ -313,12 +798,19 @@ def _build_planner_context(
     if file_tree:
         parts.append(f"## File Tree\n{file_tree}\n")
 
-    # Per-file summaries — no longer capped at 50 when nav_plan exists
+    # Directory summaries first (prominent structural context)
+    dir_summaries = compressed.get("directory_summaries", {})
+    dir_lines = _directory_context_lines(dir_summaries, all_files)
+    if dir_lines:
+        parts.append("## Directory Context\n" + "\n".join(dir_lines) + "\n")
+
+    # Per-file summaries — stratified sampling across top-level directories
     file_summaries = compressed.get("file_summaries", {})
     if file_summaries:
-        cap = len(file_summaries) if nav_plan else 50
+        budget = min(len(file_summaries), max(150, len(all_files) // 5))
+        sampled = _stratified_file_sample(file_summaries, budget)
         fs_lines = []
-        for fpath, fdata in list(file_summaries.items())[:cap]:
+        for fpath, fdata in sampled:
             entities = fdata.get("key_entities", [])
             exports = fdata.get("exported_symbols", [])
             lang = fdata.get("language", "")
@@ -357,17 +849,6 @@ def _build_planner_context(
         + "\n".join(all_files)
         + "\n"
     )
-
-    # Directory summaries — no longer capped at 15
-    dir_summaries = compressed.get("directory_summaries", {})
-    if dir_summaries:
-        dir_lines = []
-        for dir_path, summary in sorted(dir_summaries.items()):
-            s = summary.get("summary", "") if isinstance(summary, dict) else ""
-            if s:
-                dir_lines.append(f"- {dir_path}: {s[:200]}")
-        if dir_lines:
-            parts.append("## Directory Context\n" + "\n".join(dir_lines) + "\n")
 
     return "\n".join(parts)
 
@@ -436,6 +917,123 @@ def _build_file_tree(all_files: list[str], repo_path: str, max_entries: int = 60
             break
 
     return "\n".join(entries[:max_entries])
+
+
+def _top_level_dir(path: str, assume_directory: bool = False) -> str:
+    parts = [p for p in Path(path).parts if p not in {"", "."}]
+    if not parts:
+        return "."
+    if len(parts) == 1 and not assume_directory:
+        return "."
+    return parts[0]
+
+
+def _stratified_file_sample(file_summaries: dict, budget: int) -> list[tuple[str, dict]]:
+    """Sample file summaries proportionally across top-level dirs."""
+    if not file_summaries or budget <= 0:
+        return []
+
+    items = list(file_summaries.items())
+    if budget >= len(items):
+        return sorted(items, key=lambda kv: kv[0])
+
+    buckets: dict[str, list[tuple[str, dict]]] = {}
+    for path, fdata in items:
+        buckets.setdefault(_top_level_dir(path), []).append((path, fdata))
+
+    for bucket in buckets.values():
+        bucket.sort(key=lambda kv: (-(kv[1].get("entity_count", 0) or 0), kv[0]))
+
+    total = len(items)
+    allocations: dict[str, int] = {}
+    remainders: list[tuple[float, str]] = []
+    for top, bucket in buckets.items():
+        frac = (len(bucket) / total) * budget
+        base = int(frac)
+        allocations[top] = base
+        remainders.append((frac - base, top))
+
+    selected = sum(allocations.values())
+    for top in sorted(buckets):
+        if selected >= budget:
+            break
+        if allocations[top] == 0 and buckets[top]:
+            allocations[top] = 1
+            selected += 1
+
+    if selected < budget:
+        for _, top in sorted(remainders, reverse=True):
+            if selected >= budget:
+                break
+            if allocations[top] < len(buckets[top]):
+                allocations[top] += 1
+                selected += 1
+
+    if selected > budget:
+        for top in sorted(allocations, key=lambda k: allocations[k], reverse=True):
+            while selected > budget and allocations[top] > 0:
+                allocations[top] -= 1
+                selected -= 1
+
+    result: list[tuple[str, dict]] = []
+    for top in sorted(buckets):
+        take = min(allocations.get(top, 0), len(buckets[top]))
+        result.extend(buckets[top][:take])
+
+    seen = {p for p, _ in result}
+    if len(result) < budget:
+        leftovers: list[tuple[str, dict]] = []
+        for top in sorted(buckets):
+            leftovers.extend([(p, d) for p, d in buckets[top] if p not in seen])
+        leftovers.sort(key=lambda kv: (-(kv[1].get("entity_count", 0) or 0), kv[0]))
+        result.extend(leftovers[: budget - len(result)])
+
+    return result[:budget]
+
+
+def _directory_context_lines(dir_summaries: dict, all_files: list[str]) -> list[str]:
+    """Directory summaries or deterministic fallback synthesized from file tree."""
+    lines: list[str] = []
+    if dir_summaries:
+        for dir_path, summary in sorted(dir_summaries.items()):
+            s = summary.get("summary", "") if isinstance(summary, dict) else ""
+            if s:
+                lines.append(f"- {dir_path}: {s[:200]}")
+        if lines:
+            return lines
+
+    # Fallback: synthesize from all_files when LLM dir summaries are absent.
+    dir_counts: Counter = Counter()
+    dir_lang_counts: dict[str, Counter] = {}
+    dir_children: dict[str, Counter] = {}
+    ext_lang = {
+        ".py": "Python", ".ts": "TypeScript", ".tsx": "TypeScript", ".js": "JavaScript",
+        ".jsx": "JavaScript", ".rs": "Rust", ".go": "Go", ".java": "Java", ".md": "Markdown",
+    }
+    for fp in all_files:
+        p = Path(fp)
+        parent = str(p.parent) if str(p.parent) != "." else "."
+        dir_counts[parent] += 1
+        lang = ext_lang.get(p.suffix.lower(), p.suffix.lstrip(".").upper() or "Unknown")
+        dir_lang_counts.setdefault(parent, Counter())[lang] += 1
+        if parent != ".":
+            parts = parent.split("/")
+            if len(parts) > 1:
+                top = "/".join(parts[:-1])
+                child = parts[-1]
+                dir_children.setdefault(top, Counter())[child] += 1
+
+    ranked = sorted(dir_counts.items(), key=lambda kv: kv[1], reverse=True)[:120]
+    for dir_path, count in ranked:
+        langs = dir_lang_counts.get(dir_path, Counter()).most_common(3)
+        lang_summary = ", ".join(f"{n} {lang}" for lang, n in langs) if langs else "mixed files"
+        child_counter = dir_children.get(dir_path, Counter())
+        child_summary = ""
+        if child_counter:
+            top_children = ", ".join(name for name, _ in child_counter.most_common(4))
+            child_summary = f"; subdirs: {top_children}"
+        lines.append(f"- {dir_path} ({count} files): {lang_summary}{child_summary}")
+    return lines
 
 
 def _first_dict_value(d: dict, max_chars: int) -> str:

@@ -12,6 +12,32 @@ from operator import add
 from typing import Annotated, Optional, TypedDict
 
 
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        s = str(value).strip()
+        if not s:
+            return default
+        digits = []
+        started = False
+        for ch in s:
+            if ch.isdigit() or (ch == "-" and not started):
+                digits.append(ch)
+                started = True
+            elif started:
+                break
+        if not digits or digits == ["-"]:
+            return default
+        return int("".join(digits))
+    except Exception:
+        return default
+
+
 # ── Content Planner output ────────────────────────────────────────────────────
 
 @dataclass
@@ -107,6 +133,38 @@ class WikiNav:
     def slug_map(self) -> dict[str, str]:
         """Return {title: slug} mapping for cross-ref resolution."""
         return {s.title: s.slug for s in self.sections}
+
+
+# ── Planner-internal grouping model ───────────────────────────────────────────
+
+@dataclass
+class MenuGroupPlan:
+    """Planner phase-A output: one navigation group and its scoped directories."""
+
+    group_name: str
+    scope_dirs: list[str] = field(default_factory=list)
+    expected_sections: int = 2
+    boundary_hint: str = ""
+    importance: str = "supporting"  # "core" | "supporting" | "peripheral"
+
+    def to_dict(self) -> dict:
+        return {
+            "group_name": self.group_name,
+            "scope_dirs": self.scope_dirs,
+            "expected_sections": self.expected_sections,
+            "boundary_hint": self.boundary_hint,
+            "importance": self.importance,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "MenuGroupPlan":
+        return cls(
+            group_name=d.get("group_name", ""),
+            scope_dirs=d.get("scope_dirs", []) or [],
+            expected_sections=_safe_int(d.get("expected_sections", 2), default=2),
+            boundary_hint=d.get("boundary_hint", "") or "",
+            importance=d.get("importance", "supporting") or "supporting",
+        )
 
 
 # ── Deep Content Agent output ─────────────────────────────────────────────────
