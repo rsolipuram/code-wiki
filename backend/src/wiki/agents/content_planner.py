@@ -12,6 +12,7 @@ Section count is entirely at the planner's discretion — no artificial caps.
 """
 
 import json
+import os
 import logging
 import re
 import time
@@ -209,6 +210,12 @@ def content_planner_node(state: V3WikiState) -> dict:
     system_prompt = PLANNER_SYSTEM.replace("{section_cap}", section_cap)
 
     model = get_wiki_model(temperature=0.3)
+    log_planner_io = os.environ.get("WIKI_LOG_PLANNER_IO", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    if log_planner_io:
+        logger.info("PLANNER_LLM_INPUT_SYSTEM:\n%s", system_prompt)
+        logger.info("PLANNER_LLM_INPUT_USER:\n%s", context)
 
     try:
         response = model.invoke([
@@ -216,6 +223,8 @@ def content_planner_node(state: V3WikiState) -> dict:
             {"role": "user", "content": context},
         ])
         raw = response.content if hasattr(response, "content") else str(response)
+        if log_planner_io:
+            logger.info("PLANNER_LLM_RAW_RESPONSE:\n%s", raw)
     except Exception as exc:
         logger.error("Content planner LLM call failed: %s", exc)
         wiki_nav = _fallback_nav(repo_name)

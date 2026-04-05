@@ -62,6 +62,54 @@ def _extract_json_object(text: str) -> Optional[dict]:
 class CodebaseCompressor:
     """Compress a codebase into an LLM-digestible representation."""
 
+    @staticmethod
+    def _ancestor_dirs(file_path: str) -> list[str]:
+        """Return all non-root ancestor directories for a relative file path.
+
+        Example:
+          ui/desktop/src/main.ts -> ["ui", "ui/desktop", "ui/desktop/src"]
+        """
+        parts = [p for p in Path(file_path).parts if p not in {"", "."}]
+        if not parts:
+            return []
+        if len(parts) == 1:
+            # Keep root-level files visible in directory-level aggregation.
+            return ["."]
+        return ["/".join(parts[:i]) for i in range(1, len(parts))]
+
+    @staticmethod
+    def _to_repo_relative(file_path: str, repo_path: str) -> str:
+        """Normalize parser file paths to repo-relative form.
+
+        Handles absolute and relative values emitted by different parsers.
+        Returns empty string for paths that cannot be safely mapped to repo root.
+        """
+        raw = str(file_path or "").replace("\\", "/")
+        if not raw:
+            return ""
+
+        if not repo_path:
+            return raw.lstrip("./")
+
+        root = Path(repo_path).resolve()
+        root_prefix = str(root).replace("\\", "/").rstrip("/") + "/"
+        if raw.startswith(root_prefix):
+            return raw[len(root_prefix):]
+
+        rel_prefix = str(Path(repo_path)).replace("\\", "/").rstrip("/") + "/"
+        if raw.startswith(rel_prefix):
+            return raw[len(rel_prefix):]
+
+        p = Path(file_path)
+        if p.is_absolute():
+            try:
+                return str(p.resolve().relative_to(root)).replace("\\", "/")
+            except ValueError:
+                logger.warning("Skipping non-repo absolute path during compression: %s", file_path)
+                return ""
+
+        return raw.lstrip("./")
+
     def compress(
         self,
         repo_path: str,
@@ -113,20 +161,12 @@ class CodebaseCompressor:
         # ── Step 2: upgrade each file's summary prose via LLM ────────────────
         # Rebuild file→entities map using normalised relative paths (same as
         # _extract_file_metadata) so keys match.
-        import os as _os
-        abs_prefix = _os.path.abspath(repo_path).rstrip("/") + "/"
-        rel_prefix = repo_path.rstrip("/") + "/"
-
-        def _to_rel(fp: str) -> str:
-            if fp.startswith(abs_prefix):
-                return fp[len(abs_prefix):]
-            if fp.startswith(rel_prefix):
-                return fp[len(rel_prefix):]
-            return fp
-
         file_entities: dict[str, list[ParsedEntity]] = {}
         for e in entities:
-            file_entities.setdefault(_to_rel(e.file_path), []).append(e)
+            rel = self._to_repo_relative(e.file_path, repo_path)
+            if not rel:
+                continue
+            file_entities.setdefault(rel, []).append(e)
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
@@ -157,9 +197,8 @@ class CodebaseCompressor:
         # ── Step 3: LLM directory summaries ───────────────────────────────────
         dir_groups: dict[str, list[str]] = {}
         for fp in file_summaries:
-            parent = str(Path(fp).parent)
-            if parent != ".":
-                dir_groups.setdefault(parent, []).append(fp)
+            for anc in self._ancestor_dirs(fp):
+                dir_groups.setdefault(anc, []).append(fp)
 
         directory_summaries: dict[str, DirectorySummary] = {}
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -215,7 +254,10 @@ class CodebaseCompressor:
         # Level 0: file summaries
         file_entities: dict[str, list[ParsedEntity]] = {}
         for e in entities:
-            file_entities.setdefault(e.file_path, []).append(e)
+            rel = self._to_repo_relative(e.file_path, repo_path)
+            if not rel:
+                continue
+            file_entities.setdefault(rel, []).append(e)
 
         file_summaries: dict[str, FileSummary] = {}
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -235,8 +277,8 @@ class CodebaseCompressor:
         # Level 1: directory summaries
         dir_groups: dict[str, list[str]] = {}
         for fp in file_summaries:
-            parent = str(Path(fp).parent)
-            dir_groups.setdefault(parent, []).append(fp)
+            for anc in self._ancestor_dirs(fp):
+                dir_groups.setdefault(anc, []).append(fp)
 
         dir_summaries: dict[str, DirectorySummary] = {}
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -295,22 +337,12 @@ class CodebaseCompressor:
         key_entities are scored by interestingness, not positional.
         """
         from pathlib import Path as _Path
-        import os as _os
-
-        abs_repo = _os.path.abspath(repo_path).rstrip("/") + "/" if repo_path else ""
-        rel_repo = repo_path.rstrip("/") + "/" if repo_path else ""
-
-        def _to_rel(fp: str) -> str:
-            """Strip repo_path prefix regardless of whether fp is abs or relative."""
-            if abs_repo and fp.startswith(abs_repo):
-                return fp[len(abs_repo):]
-            if rel_repo and fp.startswith(rel_repo):
-                return fp[len(rel_repo):]
-            return fp
 
         file_entities: dict[str, list[ParsedEntity]] = {}
         for e in entities:
-            rel = _to_rel(e.file_path)
+            rel = self._to_repo_relative(e.file_path, repo_path)
+            if not rel:
+                continue
             file_entities.setdefault(rel, []).append(e)
 
         lang_map = {".py": "Python", ".ts": "TypeScript", ".js": "JavaScript",
@@ -381,14 +413,10 @@ class CodebaseCompressor:
         dir_files: dict[str, list[str]] = {}
         for rel_path in file_summaries:
             parent = str(_Path(rel_path).parent)
-            if parent == ".":
-                parent = ""
             dir_files.setdefault(parent, []).append(rel_path)
 
         summaries: dict[str, DirectorySummary] = {}
         for dir_path, file_paths in dir_files.items():
-            if not dir_path:
-                continue  # skip root-level files
             all_key_ents: list[str] = []
             for fp in file_paths:
                 fs = file_summaries.get(fp)

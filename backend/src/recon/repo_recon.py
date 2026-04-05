@@ -349,7 +349,7 @@ def _detect_source_roots(
             pass
 
     # Heuristic: common source directories that contain code files
-    for candidate in ("src", "lib", "app", "packages"):
+    for candidate in ("src", "lib", "app", "packages", "ui", "frontend", "client"):
         candidate_path = root / candidate
         if candidate_path.is_dir() and candidate not in source_roots:
             # Verify it contains code files (not just config)
