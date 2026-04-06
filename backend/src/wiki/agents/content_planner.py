@@ -348,6 +348,9 @@ def _two_phase_plan(
     repo_name: str,
     log_planner_io: bool,
 ) -> WikiNav:
+    # Diagnostic: log all_files distribution
+    _log_all_files_stats(all_files)
+
     groups = _structural_plan(
         model=model,
         compressed=compressed,
@@ -356,9 +359,16 @@ def _two_phase_plan(
         log_planner_io=log_planner_io,
     )
     if not groups:
+        logger.warning("Two-phase plan: no groups from structural plan, falling back to single-phase")
         return _single_phase_plan(
             model, dossier_dict, compressed, all_files, repo_path, repo_name, log_planner_io
         )
+
+    logger.warning(
+        "Two-phase plan: %d groups → %s",
+        len(groups),
+        [(g.group_name, g.scope_dirs, g.expected_sections) for g in groups],
+    )
 
     workers = min(5, max(1, len(groups)))
     grouped_sections: list[SectionSpec] = []
@@ -380,12 +390,19 @@ def _two_phase_plan(
         for future in as_completed(futures):
             group_name = futures[future]
             try:
-                grouped_sections.extend(future.result())
+                sections = future.result()
+                logger.warning(
+                    "Phase B result: group=%s → %d sections: %s",
+                    group_name, len(sections),
+                    [s.title for s in sections],
+                )
+                grouped_sections.extend(sections)
             except Exception as exc:
                 logger.warning("Group planner failed for %s: %s", group_name, exc)
 
     merged_sections = _merge_group_sections(grouped_sections)
     if not merged_sections:
+        logger.warning("Two-phase plan: 0 merged sections, falling back to single-phase")
         return _single_phase_plan(
             model, dossier_dict, compressed, all_files, repo_path, repo_name, log_planner_io
         )
@@ -397,6 +414,19 @@ def _two_phase_plan(
     )
     _normalize_slugs(nav)
     return nav
+
+
+def _log_all_files_stats(all_files: list[str]) -> None:
+    """Log distribution of all_files by top-level directory (WARNING level for visibility)."""
+    top_counts: Counter = Counter()
+    for fp in all_files:
+        top = _top_level_dir(fp)
+        top_counts[top] += 1
+    logger.warning(
+        "Planner all_files: %d files across %d top-level dirs: %s",
+        len(all_files), len(top_counts),
+        [(d, n) for d, n in top_counts.most_common()],
+    )
 
 
 def _structural_plan(

@@ -371,6 +371,9 @@ def _detect_build_outputs(
     """Detect build output directories (deterministic, no LLM).
 
     Checks tsconfig outDir, .gitignore patterns, and scans for minified files.
+    Avoids false positives by checking that candidate dirs don't contain
+    significant source code (a bundled .min.js inside a source tree is not
+    evidence that the entire tree is build output).
     """
     build_dirs: set[str] = set()
 
@@ -390,23 +393,41 @@ def _detect_build_outputs(
         if (root / candidate).is_dir():
             build_dirs.add(candidate)
 
-    # Scan for directories containing minified files (avg line length > 300)
+    # Scan for directories containing minified files (avg line length > 300).
+    # Only flag the top-level dir as build output when it has MANY minified
+    # files relative to source — a few vendored .min.js in an otherwise
+    # source-heavy tree is NOT a build output directory.
+    _SOURCE_EXTS = {".py", ".ts", ".tsx", ".rs", ".go", ".java", ".jsx"}
+    minified_dirs: dict[str, int] = {}  # top-dir → count of minified files
     for js_file in root.rglob("*.js"):
         if any(skip in js_file.parts for skip in _SKIP_DIRS):
             continue
         try:
             chunk = js_file.read_bytes()[:4096]
             lines = chunk.split(b"\n")
+            is_minified = False
             if len(lines) <= 2 and len(chunk) > 10240:
-                # Single-line bundle > 10KB
-                rel = js_file.relative_to(root)
-                build_dirs.add(rel.parts[0])
+                is_minified = True
             elif lines:
                 avg_len = len(chunk) / max(len(lines), 1)
                 if avg_len > 300:
-                    rel = js_file.relative_to(root)
-                    build_dirs.add(rel.parts[0])
+                    is_minified = True
+            if is_minified:
+                rel = js_file.relative_to(root)
+                top = rel.parts[0]
+                minified_dirs[top] = minified_dirs.get(top, 0) + 1
         except (OSError, ValueError):
             pass
+
+    # Only add a minified-file dir if it doesn't contain real source files.
+    for top, _count in minified_dirs.items():
+        top_path = root / top
+        has_source = False
+        for src_ext in _SOURCE_EXTS:
+            if any(True for _ in top_path.rglob(f"*{src_ext}")):
+                has_source = True
+                break
+        if not has_source:
+            build_dirs.add(top)
 
     return tuple(sorted(build_dirs))

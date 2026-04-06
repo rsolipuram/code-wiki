@@ -75,6 +75,11 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
     Returns:
         Dict with status and summary statistics.
     """
+    # Ensure wiki pipeline logs (INFO) are visible in the RQ worker
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    for mod in ("src.wiki.agents.content_planner", "src.wiki.wiki_pipeline", "src.wiki.compressor"):
+        logging.getLogger(mod).setLevel(logging.INFO)
+
     settings = get_settings()
     engine = create_engine(settings.database_url)
     pipeline_start = time.monotonic()
