@@ -57,6 +57,7 @@ Output ONLY valid JSON with this exact structure:
       "cross_refs": ["slug-of-related-section"],
       "menu_group": "Architecture",
       "menu_label": "System Overview",
+      "sub_group": "",
       "key_insights": [
         "All incoming requests are routed through the triage agent before reaching specialists",
         "Context is rebuilt from the memory store on every conversation turn"
@@ -274,6 +275,7 @@ Return ONLY valid JSON:
       "cross_refs": ["other-slug"],
       "menu_group": "{group_name}",
       "menu_label": "Short label",
+      "sub_group": "",
       "key_insights": ["Insight 1", "Insight 2"]
     }}
   ]
@@ -281,11 +283,17 @@ Return ONLY valid JSON:
 
 Rules:
 - Plan ONLY for menu_group "{group_name}".
-- Target around {expected_sections} sections (±1 is okay).
+- Target around {expected_sections} sections (±2 is okay).
 - Use only file paths from the provided file list.
 - Do not emit a home section.
 - Keep section boundaries distinct and non-overlapping.
 - Apply this boundary focus: {boundary_hint}
+- When the group covers a large directory with distinct sub-projects or \
+sub-directories, use sub_group to create logical sub-groupings within the \
+menu group. For example, if group="Rust Core" covers crates/goose-cli and \
+crates/goose-server, set sub_group="CLI" for CLI-related sections and \
+sub_group="Server" for server sections. Leave sub_group empty for sections \
+that don't need sub-grouping or when the group has fewer than 6 sections.
 """
 
 
@@ -352,7 +360,7 @@ def _two_phase_plan(
             model, dossier_dict, compressed, all_files, repo_path, repo_name, log_planner_io
         )
 
-    workers = min(3, max(1, len(groups)))
+    workers = min(5, max(1, len(groups)))
     grouped_sections: list[SectionSpec] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
@@ -423,6 +431,11 @@ def _structural_plan(
         + "- Cover every top-level directory at least once.\n"
         + "- Create 4-10 groups total.\n"
         + "- Keep group names concise and architectural.\n"
+        + "- Set expected_sections proportional to directory size: "
+        + "2-3 for small dirs (<50 files), 3-5 for medium (50-200), "
+        + "5-10 for large (200+). Directories with many distinct sub-projects "
+        + "(e.g. a crates/ dir with 9 separate crate sub-directories) deserve "
+        + "more sections — one per major sub-project.\n"
     )
     if log_planner_io:
         logger.info("PLANNER_PHASE_A_INPUT:\n%s", prompt)
@@ -443,7 +456,9 @@ def _structural_plan(
 
     if not groups:
         groups = _structural_groups_fallback(stats)
-    return _ensure_group_coverage(groups, top_dirs)
+
+    file_counts = {s["top_dir"]: s["file_count"] for s in stats}
+    return _ensure_group_coverage(groups, top_dirs, file_counts)
 
 
 def _group_section_plan(
@@ -468,11 +483,21 @@ def _group_section_plan(
         repo_path=repo_path,
         repo_name=f"{repo_name} [{group.group_name}]",
     )
+
+    # For large groups, add sub-directory enumeration so the LLM understands
+    # the internal structure (e.g., crates/ with 9 distinct crates).
+    sub_dir_hint = ""
+    if len(scoped_files) > 50:
+        sub_dir_hint = _enumerate_sub_dirs(scoped_files, group.scope_dirs)
+
     system_prompt = GROUP_PLANNER_SYSTEM.format(
         group_name=group.group_name,
         expected_sections=max(1, group.expected_sections),
         boundary_hint=group.boundary_hint or "Keep sections within the scoped directories.",
     )
+    if sub_dir_hint:
+        context += f"\n## Sub-directory Structure\n{sub_dir_hint}\n"
+
     if log_planner_io:
         logger.info("PLANNER_PHASE_B_SYSTEM(%s):\n%s", group.group_name, system_prompt)
         logger.info("PLANNER_PHASE_B_USER(%s):\n%s", group.group_name, context)
@@ -526,7 +551,7 @@ def _parse_group_plans(data: dict, top_dirs: list[str]) -> list[MenuGroupPlan]:
         if not scope:
             continue
         expected = _safe_int(item.get("expected_sections", 2), default=2)
-        expected = max(1, min(expected, 8))
+        expected = max(1, min(expected, 15))
         importance = (item.get("importance") or "supporting").lower()
         if importance not in {"core", "supporting", "peripheral"}:
             importance = "supporting"
@@ -611,19 +636,27 @@ def _structural_groups_fallback(stats: list[dict]) -> list[MenuGroupPlan]:
     return groups
 
 
-def _ensure_group_coverage(groups: list[MenuGroupPlan], top_dirs: list[str]) -> list[MenuGroupPlan]:
+def _ensure_group_coverage(
+    groups: list[MenuGroupPlan],
+    top_dirs: list[str],
+    file_counts: dict[str, int] | None = None,
+) -> list[MenuGroupPlan]:
     covered: set[str] = set()
     for g in groups:
         covered.update(g.scope_dirs)
+    file_counts = file_counts or {}
     for top in top_dirs:
         if top not in covered:
+            count = file_counts.get(top, 0)
+            # Proportional: 1 section per ~80 files, minimum 2, max 8
+            expected = max(2, min(8, count // 80 + 1))
             groups.append(
                 MenuGroupPlan(
                     group_name=f"{top} Modules" if top != "." else "Root Modules",
                     scope_dirs=[top],
-                    expected_sections=1,
+                    expected_sections=expected,
                     boundary_hint=f"Document modules under {top}.",
-                    importance="supporting",
+                    importance="core" if count >= 100 else "supporting",
                 )
             )
     return groups
@@ -638,6 +671,51 @@ def _files_in_scope(all_files: list[str], scope_dirs: list[str]) -> list[str]:
         if top in scope_dirs:
             result.append(fp)
     return result
+
+
+def _enumerate_sub_dirs(scoped_files: list[str], scope_dirs: list[str]) -> str:
+    """Build a sub-directory enumeration for the LLM to understand group structure.
+
+    For a group covering crates/ with 494 files, this produces:
+      crates/goose-cli (42 files, Rust) — CLI entry point and commands
+      crates/goose-server (38 files, Rust) — HTTP server
+      ...
+    """
+    ext_lang = {
+        ".py": "Python", ".ts": "TypeScript", ".tsx": "TypeScript", ".js": "JavaScript",
+        ".jsx": "JavaScript", ".rs": "Rust", ".go": "Go", ".java": "Java",
+    }
+    # Group files by their first 2 path components (e.g., crates/goose-cli)
+    sub_dir_counts: Counter = Counter()
+    sub_dir_langs: dict[str, Counter] = {}
+    for fp in scoped_files:
+        parts = Path(fp).parts
+        if len(parts) >= 2:
+            sub = "/".join(parts[:2])
+        elif len(parts) == 1:
+            sub = parts[0]
+        else:
+            continue
+        sub_dir_counts[sub] += 1
+        lang = ext_lang.get(Path(fp).suffix.lower(), "")
+        if lang:
+            sub_dir_langs.setdefault(sub, Counter())[lang] += 1
+
+    if not sub_dir_counts:
+        return ""
+
+    lines: list[str] = []
+    for sub, count in sub_dir_counts.most_common(25):
+        langs = sub_dir_langs.get(sub, Counter())
+        lang_str = ", ".join(f"{lang}" for lang, _ in langs.most_common(2)) if langs else "mixed"
+        lines.append(f"- {sub}: {count} files ({lang_str})")
+
+    scope_label = ", ".join(scope_dirs[:3])
+    header = (
+        f"The directories under {scope_label} contain these sub-projects/modules. "
+        f"Consider creating sections aligned to these natural boundaries:"
+    )
+    return header + "\n" + "\n".join(lines)
 
 
 def _scope_compressed(compressed: dict, scope_dirs: list[str]) -> dict:
@@ -675,6 +753,7 @@ def _parse_group_sections(data: dict, group_name: str) -> list[SectionSpec]:
         section.key_insights = _coerce_list(section.key_insights)
         section.menu_group = section.menu_group or group_name
         section.menu_label = section.menu_label or section.title
+        section.sub_group = (section.sub_group or "").strip()
         if not section.slug:
             section.slug = _title_to_slug(section.title)
         sections.append(section)

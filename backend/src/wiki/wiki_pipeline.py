@@ -248,6 +248,7 @@ def generate_wiki_v3(
             "diagram_count": 0,
             "menu_group": spec.menu_group or "",
             "menu_label": spec.menu_label or spec.title,
+            "sub_group": spec.sub_group or "",
         }
         for spec in wiki_nav.sections
         if spec.type != "home"

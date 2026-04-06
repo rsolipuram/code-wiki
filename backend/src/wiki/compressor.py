@@ -335,7 +335,7 @@ class CodebaseCompressor:
             file_entities.setdefault(rel, []).append(e)
 
         file_summaries: dict[str, FileSummary] = {}
-        with ThreadPoolExecutor(max_workers=1) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {
                 pool.submit(self._summarize_file, fp, ents, repo_path): fp
                 for fp, ents in file_entities.items()
@@ -356,7 +356,7 @@ class CodebaseCompressor:
                 dir_groups.setdefault(anc, []).append(fp)
 
         dir_summaries: dict[str, DirectorySummary] = {}
-        with ThreadPoolExecutor(max_workers=1) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {
                 pool.submit(
                     self._summarize_directory, dp, files, file_summaries,

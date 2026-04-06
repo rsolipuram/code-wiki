@@ -23,12 +23,13 @@ type SidebarLeafItem = {
   hint?: string;
   menuGroup?: string;
   menuLabel?: string;
+  subGroup?: string;
 };
 
 type SidebarGroupItem = {
   label: string;
   active: boolean;
-  children: SidebarLeafItem[];
+  children: SidebarItem[];
 };
 
 type SidebarItem = SidebarLeafItem | SidebarGroupItem;
@@ -643,6 +644,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
       const summary = summaryById.get(m.slug);
       const menuGroup = summary && typeof summary.menu_group === 'string' ? summary.menu_group : '';
       const menuLabel = summary && typeof summary.menu_label === 'string' ? summary.menu_label : '';
+      const subGroup = summary && typeof summary.sub_group === 'string' ? summary.sub_group : '';
       return {
         label: m.name || m.slug || '/',
         href: m.slug,
@@ -651,11 +653,13 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
         hint: undefined,
         menuGroup: menuGroup || undefined,
         menuLabel: menuLabel || undefined,
+        subGroup: subGroup || undefined,
       };
     });
   }, [orderedModules, readingOrder, slug, homePage]);
 
   // Planner-driven grouping via home.content.section_summaries[].menu_group.
+  // Supports 3-level nesting: menu_group > sub_group > menu_label.
   // Falls back to flat list when no groups are provided.
   const groupedLearningPathItems: SidebarItem[] = React.useMemo(() => {
     const groupMeta = new Map<string, { firstIndex: number; children: SidebarLeafItem[] }>();
@@ -692,11 +696,45 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
         items.push(flatItems[flatCursor]);
         flatCursor += 1;
       }
-      items.push({
-        label: groupLabel,
-        active: data.children.some((child) => child.active),
-        children: data.children,
-      });
+
+      // Check if children have sub_group values — create nested structure
+      const hasSubGroups = data.children.some((c) => c.subGroup?.trim());
+      if (hasSubGroups) {
+        const subGroupMeta = new Map<string, SidebarLeafItem[]>();
+        const ungrouped: SidebarLeafItem[] = [];
+        for (const child of data.children) {
+          const sg = child.subGroup?.trim();
+          if (sg) {
+            const existing = subGroupMeta.get(sg);
+            if (existing) {
+              existing.push(child);
+            } else {
+              subGroupMeta.set(sg, [child]);
+            }
+          } else {
+            ungrouped.push(child);
+          }
+        }
+        const nestedChildren: SidebarItem[] = [...ungrouped];
+        for (const [subLabel, subChildren] of subGroupMeta) {
+          nestedChildren.push({
+            label: subLabel,
+            active: subChildren.some((c) => c.active),
+            children: subChildren,
+          });
+        }
+        items.push({
+          label: groupLabel,
+          active: data.children.some((child) => child.active),
+          children: nestedChildren,
+        });
+      } else {
+        items.push({
+          label: groupLabel,
+          active: data.children.some((child) => child.active),
+          children: data.children,
+        });
+      }
     }
 
     while (flatCursor < flatItems.length) {
@@ -706,7 +744,7 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
  
     const seen = new Set<string>();
     return items.filter((it) => {
-      const key = isSidebarGroupItem(it) ? `group:${it.label}` : `leaf:${it.href}`;
+      const key = isSidebarGroupItem(it) ? `group:${it.label}` : `leaf:${(it as SidebarLeafItem).href}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -967,7 +1005,31 @@ export default function WikiReader({ owner, name, slug }: WikiReaderProps) {
                       >
                         {item.label}
                       </div>
-                      {item.children.map((child) => renderSidebarLeafItem(child, 44))}
+                      {item.children.map((child) =>
+                        isSidebarGroupItem(child) ? (
+                          <div key={`subgroup-${child.label}`} style={{ margin: '2px 0 6px' }}>
+                            <div
+                              style={{
+                                padding: '6px 20px 6px 44px',
+                                fontSize: 11,
+                                fontWeight: 600,
+                                letterSpacing: '0.4px',
+                                color: child.active ? 'var(--primary-light)' : 'var(--text-tertiary)',
+                                opacity: 0.85,
+                              }}
+                            >
+                              {child.label}
+                            </div>
+                            {child.children.map((leaf) =>
+                              isSidebarGroupItem(leaf)
+                                ? null
+                                : renderSidebarLeafItem(leaf as SidebarLeafItem, 56)
+                            )}
+                          </div>
+                        ) : (
+                          renderSidebarLeafItem(child as SidebarLeafItem, 44)
+                        )
+                      )}
                     </div>
                   ) : (
                     renderSidebarLeafItem(item, 20)
