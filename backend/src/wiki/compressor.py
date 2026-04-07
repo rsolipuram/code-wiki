@@ -667,7 +667,14 @@ class CodebaseCompressor:
                 if not isinstance(nav_items, list):
                     nav_items = []
             else:
-                summary = raw_response
+                # Fallback: strip markdown fences so raw JSON doesn't leak as summary
+                cleaned = raw_response.strip()
+                if cleaned.startswith("```"):
+                    cleaned = "\n".join(
+                        line for line in cleaned.splitlines()
+                        if not line.strip().startswith("```")
+                    ).strip()
+                summary = cleaned
         except Exception as exc:
             logger.warning("LLM dir summary failed for %s: %s", dir_path, exc)
             summary = f"Contains {len(child_files)} files."

@@ -449,10 +449,31 @@ def _structural_plan(
         hint = s["summary"][:180] if s["summary"] else ""
         stats_lines.append(f"- {top}: {cnt} files; langs={langs}; hint={hint}")
 
+    # Repo summary (truncated) gives LLM project-level context
+    repo_summary = (compressed.get("repo_summary") or "")[:600]
+
+    # Build folder tree for large top-level dirs so LLM sees sub-project boundaries
+    tree_sections = []
+    for s in stats:
+        if s["file_count"] >= 50:
+            scoped = [fp for fp in all_files if _top_level_dir(fp) == s["top_dir"]]
+            sub_tree = _enumerate_sub_dirs(scoped, [s["top_dir"]])
+            if sub_tree:
+                tree_sections.append(sub_tree)
+
+    tree_block = ""
+    if tree_sections:
+        tree_block = "\n\nFolder structure (large directories):\n" + "\n".join(tree_sections)
+
     prompt = (
         f"Repository: {repo_name}\n"
+    )
+    if repo_summary:
+        prompt += f"About: {repo_summary}\n"
+    prompt += (
         "Top-level directory stats:\n"
         + "\n".join(stats_lines)
+        + tree_block
         + "\n\nReturn ONLY JSON:\n"
         + '{"groups":[{"group_name":"Core Backend","scope_dirs":["backend","src"],'
         + '"expected_sections":3,"boundary_hint":"what this group should cover",'
@@ -616,8 +637,12 @@ def _top_level_stats(compressed: dict, all_files: list[str]) -> list[dict]:
         if not isinstance(info, dict):
             continue
         top = _top_level_dir(dir_path, assume_directory=True)
-        if top not in top_summaries:
-            top_summaries[top] = (info.get("summary", "") or "").strip()
+        summary_text = (info.get("summary", "") or "").strip()
+        # Prefer exact top-level key (e.g. "crates") over child (e.g. "crates/goose").
+        # Exact match = dir_path IS the top-level dir itself.
+        is_exact = (dir_path.strip("/") == top)
+        if top not in top_summaries or is_exact:
+            top_summaries[top] = summary_text
 
     stats: list[dict] = []
     for top, count in top_counts.most_common():
