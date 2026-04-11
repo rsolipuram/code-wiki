@@ -18,6 +18,7 @@ import re
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.wiki.agents.graph import report_agent_progress
@@ -180,6 +181,26 @@ before dispatching to flight_change or booking specialists" is great. \
 """
 
 
+_PLANNER_LOG_PATH = Path("/tmp/planner-io.md")
+_PLANNER_LOG_LOCK = __import__("threading").Lock()
+
+
+def _write_planner_md_log(phase: str, system: str, user: str, response: str) -> None:
+    """Append one LLM call (system + user + response) to /tmp/planner-io.md."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    block = (
+        f"\n---\n\n"
+        f"## {phase}  _{ts}_\n\n"
+        f"### SYSTEM\n\n```\n{system}\n```\n\n"
+        f"### USER\n\n```\n{user}\n```\n\n"
+        f"### RESPONSE\n\n```json\n{response}\n```\n"
+    )
+    with _PLANNER_LOG_LOCK:
+        with _PLANNER_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(block)
+    logger.info("Planner I/O logged → %s", _PLANNER_LOG_PATH)
+
+
 def content_planner_node(state: V3WikiState) -> dict:
     """LangGraph node: run Content Planner to produce WikiNav.
 
@@ -328,6 +349,7 @@ def _single_phase_plan(
     if log_planner_io:
         logger.info("PLANNER_LLM_INPUT_SYSTEM:\n%s", system_prompt)
         logger.info("PLANNER_LLM_INPUT_USER:\n%s", context)
+        _PLANNER_LOG_PATH.write_text(f"# Planner I/O — {repo_name}\n", encoding="utf-8")
 
     response = model.invoke([
         {"role": "system", "content": system_prompt},
@@ -336,6 +358,7 @@ def _single_phase_plan(
     raw = response.content if hasattr(response, "content") else str(response)
     if log_planner_io:
         logger.info("PLANNER_LLM_RAW_RESPONSE:\n%s", raw)
+        _write_planner_md_log("Single-Phase Plan", system_prompt, context, raw)
     return _parse_wiki_nav(raw, repo_name)
 
 
@@ -491,15 +514,17 @@ def _structural_plan(
     if log_planner_io:
         logger.info("PLANNER_PHASE_A_INPUT:\n%s", prompt)
 
+    phase_a_system = "Design high-level wiki menu groups from directory structure."
     groups = []
     try:
         response = model.invoke([
-            {"role": "system", "content": "Design high-level wiki menu groups from directory structure."},
+            {"role": "system", "content": phase_a_system},
             {"role": "user", "content": prompt},
         ])
         raw = response.content if hasattr(response, "content") else str(response)
         if log_planner_io:
             logger.info("PLANNER_PHASE_A_RAW:\n%s", raw)
+            _write_planner_md_log("Phase A — Group Structure", phase_a_system, prompt, raw)
         parsed = _extract_json_dict(raw)
         groups = _parse_group_plans(parsed, top_dirs)
     except Exception as exc:
@@ -560,6 +585,7 @@ def _group_section_plan(
     raw = response.content if hasattr(response, "content") else str(response)
     if log_planner_io:
         logger.info("PLANNER_PHASE_B_RAW(%s):\n%s", group.group_name, raw)
+        _write_planner_md_log(f"Phase B — {group.group_name}", system_prompt, context, raw)
 
     parsed = _extract_json_dict(raw)
     sections = _parse_group_sections(parsed, group.group_name)
