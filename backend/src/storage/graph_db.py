@@ -38,6 +38,18 @@ _SCHEMA_STATEMENTS = [
     "CREATE REL TABLE IF NOT EXISTS OVERRIDES(FROM CodeEntity TO CodeEntity);",
 ]
 
+# Schema migrations to enrich the CodeEntity node with source-level metadata.
+# Each statement is attempted independently; errors are silenced so we handle
+# both "column already exists" (on existing DBs) and "table doesn't exist yet"
+# (on fresh DBs where _SCHEMA_STATEMENTS hasn't run yet — safe to skip here).
+_SCHEMA_MIGRATION_STATEMENTS = [
+    "ALTER TABLE CodeEntity ADD line_start INT64",
+    "ALTER TABLE CodeEntity ADD line_end INT64",
+    "ALTER TABLE CodeEntity ADD signature STRING",
+    "ALTER TABLE CodeEntity ADD docstring STRING",
+    "ALTER TABLE CodeEntity ADD properties STRING",
+]
+
 
 def _get_lbug() -> Any:
     global _lbug_module
@@ -87,6 +99,11 @@ def _ensure_schema(conn: Any) -> None:
         return
     for stmt in _SCHEMA_STATEMENTS:
         conn.execute(stmt)
+    for stmt in _SCHEMA_MIGRATION_STATEMENTS:
+        try:
+            conn.execute(stmt)
+        except Exception:
+            pass  # column already exists or table not yet created — both safe to ignore
     _schema_initialized = True
 
 
@@ -150,6 +167,11 @@ def create_code_entity_node(
     name: str,
     file_path: Optional[str] = None,
     module_id: Optional[str] = None,
+    line_start: Optional[int] = None,
+    line_end: Optional[int] = None,
+    signature: Optional[str] = None,
+    docstring: Optional[str] = None,
+    properties: Optional[str] = None,
 ) -> dict[str, Any]:
     rows = query_records(
         """
@@ -158,7 +180,12 @@ def create_code_entity_node(
             e.entity_type = $entity_type,
             e.name = $name,
             e.file_path = $file_path,
-            e.module_id = $module_id
+            e.module_id = $module_id,
+            e.line_start = $line_start,
+            e.line_end = $line_end,
+            e.signature = $signature,
+            e.docstring = $docstring,
+            e.properties = $properties
         RETURN e.id AS id, e.qualified_name AS qualified_name, e.entity_type AS entity_type,
                e.name AS name, e.file_path AS file_path, e.module_id AS module_id
         """,
@@ -169,6 +196,11 @@ def create_code_entity_node(
             "name": name,
             "file_path": file_path,
             "module_id": module_id,
+            "line_start": line_start,
+            "line_end": line_end,
+            "signature": signature,
+            "docstring": docstring,
+            "properties": properties,
         },
     )
     return rows[0] if rows else {}
@@ -230,20 +262,29 @@ def get_entity_relationships(entity_qualified_name: str) -> dict[str, list[str]]
         OPTIONAL MATCH (n)-[:CALLS]->(callee:CodeEntity)
         OPTIONAL MATCH (n)-[:IMPORTS]->(imported:CodeEntity)
         OPTIONAL MATCH (n)-[:INHERITS_FROM]->(parent:CodeEntity)
+        OPTIONAL MATCH (n)-[:DEFINES]->(defined:CodeEntity)
+        OPTIONAL MATCH (n)-[:USES]->(used:CodeEntity)
+        OPTIONAL MATCH (n)-[:OVERRIDES]->(overridden:CodeEntity)
         RETURN
             collect(DISTINCT callee.qualified_name) AS calls,
             collect(DISTINCT imported.qualified_name) AS imports,
-            collect(DISTINCT parent.qualified_name) AS inherits_from
+            collect(DISTINCT parent.qualified_name) AS inherits_from,
+            collect(DISTINCT defined.qualified_name) AS defines,
+            collect(DISTINCT used.qualified_name) AS uses,
+            collect(DISTINCT overridden.qualified_name) AS overrides
         """,
         {"qname": entity_qualified_name},
     )
     if not rows:
-        return {"calls": [], "imports": [], "inherits_from": []}
+        return {"calls": [], "imports": [], "inherits_from": [], "defines": [], "uses": [], "overrides": []}
     row = rows[0]
     return {
         "calls": [x for x in row.get("calls", []) if x],
         "imports": [x for x in row.get("imports", []) if x],
         "inherits_from": [x for x in row.get("inherits_from", []) if x],
+        "defines": [x for x in row.get("defines", []) if x],
+        "uses": [x for x in row.get("uses", []) if x],
+        "overrides": [x for x in row.get("overrides", []) if x],
     }
 
 

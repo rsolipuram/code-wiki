@@ -10,6 +10,7 @@ Orchestrates the full pipeline:
 """
 
 import logging
+import json
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -397,11 +398,17 @@ def _write_graph(entities: list[ParsedEntity]) -> dict[str, int]:
         if entity.name not in name_to_qname:
             name_to_qname[entity.name] = entity.qualified_name
 
+    # Build lookup: file_path → module qualified_name (for DEFINES edges)
+    file_to_module_qname: dict[str, str] = {}
+    for entity in entities:
+        if entity.entity_type == "module":
+            file_to_module_qname[entity.file_path] = entity.qualified_name
+
     nodes_created = 0
     edges_created = 0
     edges_unresolved = 0
 
-    # Create all nodes first
+    # Create all nodes first (with enriched metadata)
     for entity in entities:
         try:
             graph_db.create_code_entity_node(
@@ -410,26 +417,31 @@ def _write_graph(entities: list[ParsedEntity]) -> dict[str, int]:
                 entity_type=entity.entity_type,
                 name=entity.name,
                 file_path=entity.file_path,
+                module_id=file_to_module_qname.get(entity.file_path),
+                line_start=entity.line_start,
+                line_end=entity.line_end,
+                signature=entity.signature,
+                docstring=entity.docstring,
+                properties=json.dumps(entity.entity_metadata) if entity.entity_metadata else None,
             )
             nodes_created += 1
         except Exception as exc:
             logger.warning("Graph node creation failed for %s: %s", entity.qualified_name, exc)
 
-    # Create relationships with fuzzy name resolution
+    # Build set of all known qualified names for fast membership testing
     qnames = {e.qualified_name for e in entities}
+
+    # --- CALLS edges ---
     for entity in entities:
         for callee in entity.calls:
             try:
-                # Try exact match first (callee is already a qualified name)
                 if callee in qnames:
                     target = callee
                 elif callee in name_to_qname:
-                    # Fuzzy match: short name → qualified name
                     target = name_to_qname[callee]
                 else:
                     edges_unresolved += 1
                     continue
-
                 graph_db.create_relationship(
                     from_id=entity.qualified_name,
                     to_id=target,
@@ -439,7 +451,73 @@ def _write_graph(entities: list[ParsedEntity]) -> dict[str, int]:
             except Exception as exc:
                 logger.warning("Graph edge creation failed for %s → %s: %s", entity.qualified_name, callee, exc)
 
+    # --- DEFINES edges: module → every non-module entity in the same file ---
+    for entity in entities:
+        if entity.entity_type == "module":
+            continue
+        module_qname = file_to_module_qname.get(entity.file_path)
+        if module_qname and module_qname in qnames:
+            try:
+                graph_db.create_relationship(
+                    from_id=module_qname,
+                    to_id=entity.qualified_name,
+                    rel_type="DEFINES",
+                )
+                edges_created += 1
+            except Exception as exc:
+                logger.warning("Graph DEFINES edge failed for %s → %s: %s", module_qname, entity.qualified_name, exc)
+
+    # --- IMPORTS edges: module → imported module (for module-level entities) ---
+    for entity in entities:
+        if entity.entity_type != "module":
+            continue
+        for imported_name in entity.imports:
+            # Normalise the dotted name so it can be fuzzy-matched
+            short = imported_name.split(".")[-1]
+            if imported_name in qnames:
+                target = imported_name
+            elif imported_name in name_to_qname:
+                target = name_to_qname[imported_name]
+            elif short in name_to_qname:
+                target = name_to_qname[short]
+            else:
+                edges_unresolved += 1
+                continue
+            try:
+                graph_db.create_relationship(
+                    from_id=entity.qualified_name,
+                    to_id=target,
+                    rel_type="IMPORTS",
+                )
+                edges_created += 1
+            except Exception as exc:
+                logger.warning("Graph IMPORTS edge failed for %s → %s: %s", entity.qualified_name, imported_name, exc)
+
+    # --- INHERITS_FROM edges: class → base class ---
+    for entity in entities:
+        base_classes: list[str] = (entity.entity_metadata or {}).get("base_classes", [])
+        for base in base_classes:
+            short = base.split(".")[-1]
+            if base in qnames:
+                target = base
+            elif base in name_to_qname:
+                target = name_to_qname[base]
+            elif short in name_to_qname:
+                target = name_to_qname[short]
+            else:
+                edges_unresolved += 1
+                continue
+            try:
+                graph_db.create_relationship(
+                    from_id=entity.qualified_name,
+                    to_id=target,
+                    rel_type="INHERITS_FROM",
+                )
+                edges_created += 1
+            except Exception as exc:
+                logger.warning("Graph INHERITS_FROM edge failed for %s → %s: %s", entity.qualified_name, base, exc)
+
     if edges_unresolved:
-        logger.warning("Graph DB: %d call targets unresolved (no matching entity)", edges_unresolved)
+        logger.warning("Graph DB: %d targets unresolved (no matching entity)", edges_unresolved)
     logger.info("Graph stats: nodes=%d, edges=%d, unresolved=%d", nodes_created, edges_created, edges_unresolved)
     return {"nodes": nodes_created, "edges": edges_created, "unresolved": edges_unresolved}

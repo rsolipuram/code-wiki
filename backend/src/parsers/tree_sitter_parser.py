@@ -269,6 +269,117 @@ class TreeSitterParser(CodeParser):
             stack.extend(reversed(current.children))
         return calls
 
+    def _extract_docstring(self, entity_node, source_bytes: bytes) -> Optional[str]:
+        """Extract the docstring from a function or class node, if present.
+
+        Looks for the first statement in the function/class body.  If it is a
+        string literal (Python triple-quote or regular string, JS/TS template or
+        string), extracts and returns the cleaned text.
+        """
+        body_field_names = ("body", "suite", "class_body", "statement_block")
+        body_node = None
+        for field_name in body_field_names:
+            body_node = entity_node.child_by_field_name(field_name)
+            if body_node is not None:
+                break
+
+        if body_node is None:
+            return None
+
+        # Walk children to find the first named child that is a string literal
+        for child in body_node.named_children:
+            # Python: expression_statement wrapping a string constant
+            actual = child
+            if child.type == "expression_statement" and child.named_child_count == 1:
+                actual = child.named_children[0]
+
+            if actual.type in {"string", "string_literal", "template_string"}:
+                raw = _node_text(actual, source_bytes)
+                # Strip triple quotes first, then single quotes
+                for quote in ('"""', "'''", '"', "'"):
+                    if raw.startswith(quote) and raw.endswith(quote) and len(raw) >= 2 * len(quote):
+                        raw = raw[len(quote):-len(quote)]
+                        break
+                return raw.strip() or None
+            break  # Only check first named statement
+
+        return None
+
+    def _extract_entity_metadata(self, entity_node, source_bytes: bytes, language: str) -> dict:
+        """Extract decorators, return type, parameters, and base classes from an entity node."""
+        metadata: dict = {}
+
+        # --- Decorators ---
+        decorators: list[str] = []
+        parent = entity_node.parent
+        if parent is not None:
+            # siblings *before* this node that are decorator nodes
+            for sibling in parent.children:
+                if sibling == entity_node:
+                    break
+                if sibling.type in {"decorator", "decoration"}:
+                    decorators.append(_node_text(sibling, source_bytes).strip())
+        if decorators:
+            metadata["decorators"] = decorators
+
+        # --- Return type ---
+        return_type_node = entity_node.child_by_field_name("return_type")
+        if return_type_node is not None:
+            rt = _node_text(return_type_node, source_bytes).strip().lstrip("->:").strip()
+            if rt:
+                metadata["return_type"] = rt
+
+        # --- Parameters ---
+        params_node = entity_node.child_by_field_name("parameters")
+        if params_node is None:
+            params_node = entity_node.child_by_field_name("formal_parameters")
+        if params_node is not None:
+            params: list[dict] = []
+            for param in params_node.named_children:
+                pname_node = param.child_by_field_name("name") or (
+                    param if param.type in _IDENTIFIER_NODE_TYPES else None
+                )
+                if pname_node is None:
+                    for child in param.named_children:
+                        if child.type in _IDENTIFIER_NODE_TYPES:
+                            pname_node = child
+                            break
+                if pname_node is None:
+                    continue
+                pname = _node_text(pname_node, source_bytes).strip()
+                ptype_node = param.child_by_field_name("type") or param.child_by_field_name("annotation")
+                ptype = _node_text(ptype_node, source_bytes).strip().lstrip(":").strip() if ptype_node else None
+                params.append({"name": pname, "type": ptype})
+            if params:
+                metadata["parameters"] = params
+
+        # --- Base classes (Python class_definition) ---
+        if language == "python" and entity_node.type == "class_definition":
+            superclasses_node = entity_node.child_by_field_name("superclasses") or \
+                                entity_node.child_by_field_name("argument_list")
+            if superclasses_node is not None:
+                bases: list[str] = []
+                for child in superclasses_node.named_children:
+                    if child.type in _IDENTIFIER_NODE_TYPES:
+                        bases.append(_node_text(child, source_bytes).strip())
+                    elif child.type == "attribute":
+                        bases.append(_node_text(child, source_bytes).strip())
+                if bases:
+                    metadata["base_classes"] = bases
+
+        # --- Base classes / implements (TypeScript class_declaration) ---
+        if language in {"typescript", "tsx"} and entity_node.type in {"class_declaration", "class"}:
+            bases = []
+            for clause in entity_node.named_children:
+                if clause.type in {"class_heritage", "extends_clause", "implements_clause"}:
+                    for child in clause.named_children:
+                        if child.type in _IDENTIFIER_NODE_TYPES | {"type_identifier"}:
+                            bases.append(_node_text(child, source_bytes).strip())
+            if bases:
+                metadata["base_classes"] = bases
+
+        return metadata
+
     def _entity_kind_from_capture(self, capture_name: str, entity_node) -> Optional[str]:
         if capture_name == "entity.class":
             return "class"
@@ -333,6 +444,8 @@ class TreeSitterParser(CodeParser):
             line_start, line_end = _line_span(entity_node)
             signature = _node_text(entity_node, source_bytes).splitlines()[0].strip()
             calls = self._extract_calls(entity_node, source_bytes, exclude={name, qualified_name})
+            docstring = self._extract_docstring(entity_node, source_bytes)
+            entity_metadata = self._extract_entity_metadata(entity_node, source_bytes, self.language_name)
             entities.append(
                 ParsedEntity(
                     name=name,
@@ -344,6 +457,8 @@ class TreeSitterParser(CodeParser):
                     signature=signature[:500] if signature else None,
                     calls=calls,
                     imports=[],
+                    docstring=docstring,
+                    entity_metadata=entity_metadata,
                 )
             )
 
@@ -373,6 +488,8 @@ class TreeSitterParser(CodeParser):
                 line_start, line_end = _line_span(node)
                 signature = _node_text(node, source_bytes).splitlines()[0].strip()
                 calls = self._extract_calls(node, source_bytes, exclude={name, qualified_name})
+                docstring = self._extract_docstring(node, source_bytes)
+                entity_metadata = self._extract_entity_metadata(node, source_bytes, self.language_name)
                 entities.append(
                     ParsedEntity(
                         name=name,
@@ -384,6 +501,8 @@ class TreeSitterParser(CodeParser):
                         signature=signature[:500] if signature else None,
                         calls=calls,
                         imports=[],
+                        docstring=docstring,
+                        entity_metadata=entity_metadata,
                     )
                 )
             stack.extend(reversed(node.children))
