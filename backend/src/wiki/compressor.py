@@ -38,44 +38,59 @@ logger = logging.getLogger(__name__)
 def _extract_json_object(text: str) -> Optional[dict]:
     """Extract first valid JSON object from LLM output.
 
-    Handles thinking-model preamble (e.g. "Here's my reasoning...{...}") by
-    trying every { position rather than relying on a greedy regex that can
-    span across unrelated braces in the preamble text.
+    Handles thinking-model output that wraps JSON in a markdown code block
+    after a reasoning preamble, e.g.:
+        Here's my thinking...
+        ```json
+        {"summary": "...", "nav_topic": "...", "nav_role": "..."}
+        ```
+    Also handles bare JSON with a preamble containing stray braces.
     """
     raw = (text or "").strip()
-    # Strip markdown fences
-    if raw.startswith("```"):
-        raw = "\n".join(
-            line for line in raw.splitlines() if not line.strip().startswith("```")
-        ).strip()
 
-    # Try whole string first (fast path for clean responses)
+    # Extract content from ALL markdown code fences (not just leading ones)
+    fence_contents: list[str] = []
+    fence_re = re.compile(r"```(?:json|jsonc)?\s*\n?(.*?)```", re.DOTALL)
+    for m in fence_re.finditer(raw):
+        fence_contents.append(m.group(1).strip())
+
+    # Strip all fences from raw for the bare-JSON search below
+    raw_no_fence = fence_re.sub(" ", raw).strip()
+
+    # Try each fenced block first (most reliable when model uses code blocks)
+    for block in fence_contents:
+        try:
+            data = json.loads(block)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+
+    # Try whole defenced string (fast path for clean bare-JSON responses)
     try:
-        data = json.loads(raw)
+        data = json.loads(raw_no_fence)
         return data if isinstance(data, dict) else None
     except json.JSONDecodeError:
         pass
 
-    # Try each { position — finds the first well-formed JSON object even when
-    # there is a thinking preamble containing stray braces before the real JSON.
-    for i, ch in enumerate(raw):
+    # Walk every { position — handles preambles with stray braces
+    for i, ch in enumerate(raw_no_fence):
         if ch != "{":
             continue
-        # Scan forward to find the matching closing brace
         depth = 0
-        for j, c in enumerate(raw[i:], i):
+        for j, c in enumerate(raw_no_fence[i:], i):
             if c == "{":
                 depth += 1
             elif c == "}":
                 depth -= 1
                 if depth == 0:
-                    candidate = raw[i : j + 1]
+                    candidate = raw_no_fence[i : j + 1]
                     try:
                         data = json.loads(candidate)
                         if isinstance(data, dict):
                             return data
                     except json.JSONDecodeError:
-                        break  # malformed at this position, try next {
+                        break
                     break
     return None
 
@@ -802,11 +817,21 @@ class CodebaseCompressor:
             f"Code preview:\n{file_preview[:3000]}"
         )
 
+        system_msg = (
+            "You are a code analysis assistant. "
+            "Respond with ONLY a valid JSON object — no explanation, "
+            "no reasoning, no markdown, no preamble. "
+            "Start your response with `{` and end with `}`."
+        )
+
         nav_topic = ""
         nav_role = ""
         try:
             raw_response = chat(
-                [{"role": "user", "content": prompt}],
+                [
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": prompt},
+                ],
                 max_tokens=600,
                 temperature=0.1,
             )
