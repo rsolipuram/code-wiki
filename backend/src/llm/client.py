@@ -8,9 +8,11 @@ import time
 from uuid import uuid4
 from typing import Any, Optional
 
+import openai
 from openai import OpenAI
 
 from src.config import get_settings
+from src.llm.providers import resolve_provider
 from src.storage import cache as cache_store
 
 logger = logging.getLogger(__name__)
@@ -22,16 +24,18 @@ def get_client() -> OpenAI:
     global _client
     if _client is None:
         settings = get_settings()
+        config = resolve_provider(settings)
         _client = OpenAI(
-            base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key,
-            timeout=180.0,
+            base_url=config.base_url,
+            api_key=config.api_key,
+            timeout=config.timeout,
         )
     return _client
 
 
 def _cache_key(messages: list[dict[str, str]], **kwargs: Any) -> str:
-    payload = json.dumps({"messages": messages, **kwargs}, sort_keys=True)
+    config = resolve_provider(get_settings())
+    payload = json.dumps({"base_url": config.base_url, "messages": messages, **kwargs}, sort_keys=True)
     return "llm:" + hashlib.sha256(payload.encode()).hexdigest()[:32]
 
 
@@ -42,8 +46,8 @@ def _call_llm(
     max_tokens: int = 4096,
 ) -> tuple[str, int]:
     """Raw LLM call with bounded retry. Returns content and retry count."""
-    settings = get_settings()
-    resolved_model = model or settings.llm_model
+    config = resolve_provider(get_settings())
+    resolved_model = model or config.model
     last_exc: Exception | None = None
     delay_seconds = 2
 
@@ -74,6 +78,39 @@ def _call_llm(
             last_exc = exc
             if attempt >= 3:
                 raise
+            if isinstance(exc, openai.APIStatusError):
+                status_code = getattr(exc, "status_code", None)
+                if status_code not in config.retryable_statuses:
+                    raise
+                sleep_seconds = delay_seconds
+                if status_code == 429:
+                    retry_after = None
+                    try:
+                        response = getattr(exc, "response", None)
+                        if response is not None:
+                            retry_after_header = response.headers.get("Retry-After")
+                            if retry_after_header is not None:
+                                retry_after = int(float(retry_after_header))
+                    except Exception:  # noqa: BLE001
+                        retry_after = None
+                    if retry_after is not None:
+                        sleep_seconds = max(0, min(retry_after, 60))
+                logger.warning(
+                    "LLM call attempt %d/3 failed with status %s. Retrying in %ss.",
+                    attempt,
+                    status_code,
+                    sleep_seconds,
+                )
+                time.sleep(sleep_seconds)
+                delay_seconds = min(delay_seconds * 2, 10)
+                continue
+
+            if isinstance(exc, (openai.APIConnectionError, openai.APITimeoutError)):
+                logger.warning("LLM connection attempt %d/3 failed: %s", attempt, exc)
+                time.sleep(delay_seconds)
+                delay_seconds = min(delay_seconds * 2, 10)
+                continue
+
             logger.warning("LLM call attempt %d/3 failed: %s", attempt, exc)
             time.sleep(delay_seconds)
             delay_seconds = min(delay_seconds * 2, 10)
@@ -101,8 +138,9 @@ def chat(
     Returns:
         Response content string.
     """
-    key = _cache_key(messages, model=model, temperature=temperature, max_tokens=max_tokens)
-    settings = get_settings()
+    config = resolve_provider(get_settings())
+    effective_model = model or config.model
+    key = _cache_key(messages, model=effective_model, temperature=temperature, max_tokens=max_tokens)
     caller = inspect.stack()[1]
     context = {
         "call_id": (trace_context or {}).get("call_id", uuid4().hex[:12]),
@@ -111,7 +149,7 @@ def chat(
         "analysis_id": (trace_context or {}).get("analysis_id"),
         "caller_file": caller.filename,
         "caller_line": caller.lineno,
-        "model": model or settings.llm_model,
+        "model": effective_model,
     }
 
     if cache_ttl is not None:
@@ -145,7 +183,7 @@ def chat(
         )
     except Exception as exc:  # noqa: BLE001
         duration_ms = int((time.perf_counter() - started) * 1000)
-        logger.error("LM Studio unavailable after retries: %s", exc)
+        logger.error("LLM provider unavailable after retries: %s", exc)
         logger.error(
             "LLM_TELEMETRY %s",
             json.dumps(
