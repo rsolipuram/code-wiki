@@ -835,12 +835,16 @@ class CodebaseCompressor:
                 max_tokens=600,
                 temperature=0.1,
             )
+            # DEBUG: log raw response so we can verify extraction against real output
+            logger.info("SUMMARIZE_RAW[%s]: %r", file_path, raw_response[:2000])
             parsed = _extract_json_object(raw_response)
             if parsed and "summary" in parsed:
+                logger.info("SUMMARIZE_OK[%s]: extracted JSON cleanly", file_path)
                 summary = parsed["summary"]
                 nav_topic = parsed.get("nav_topic") or ""
                 nav_role = parsed.get("nav_role") or ""
             else:
+                logger.warning("SUMMARIZE_FAIL[%s]: JSON extraction failed, raw=%r", file_path, raw_response[:500])
                 # JSON extraction failed — take first non-empty paragraph of
                 # response (avoids storing an entire chain-of-thought blob).
                 first_para = next(
@@ -877,6 +881,15 @@ class CodebaseCompressor:
                     seen_deps.add(top)
                     dependencies.append(top)
 
+        # Per-entity outbound calls (same logic as _extract_file_metadata)
+        function_calls: dict[str, list[str]] = {}
+        for e in file_entities:
+            if e.entity_type == "module" or not e.calls:
+                continue
+            short_callees = [c.split(".")[-1] if "." in c else c for c in e.calls[:20]]
+            if short_callees:
+                function_calls[e.name] = short_callees
+
         return FileSummary(
             file_path=file_path,
             language=language,
@@ -888,6 +901,7 @@ class CodebaseCompressor:
             dependencies=dependencies[:20],
             nav_topic=nav_topic.strip(),
             nav_role=nav_role.strip(),
+            function_calls=function_calls,
         )
 
     def _summarize_directory_cached(
