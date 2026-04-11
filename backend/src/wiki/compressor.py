@@ -36,31 +36,48 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_json_object(text: str) -> Optional[dict]:
-    """Extract first JSON object from LLM output.
+    """Extract first valid JSON object from LLM output.
 
-    Strips markdown fences, tries direct parse, falls back to regex extraction.
-    Reuses pattern from v4_code_embedder.py.
+    Handles thinking-model preamble (e.g. "Here's my reasoning...{...}") by
+    trying every { position rather than relying on a greedy regex that can
+    span across unrelated braces in the preamble text.
     """
     raw = (text or "").strip()
+    # Strip markdown fences
     if raw.startswith("```"):
         raw = "\n".join(
             line for line in raw.splitlines() if not line.strip().startswith("```")
         ).strip()
 
+    # Try whole string first (fast path for clean responses)
     try:
         data = json.loads(raw)
         return data if isinstance(data, dict) else None
     except json.JSONDecodeError:
         pass
 
-    m = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not m:
-        return None
-    try:
-        data = json.loads(m.group(0))
-        return data if isinstance(data, dict) else None
-    except json.JSONDecodeError:
-        return None
+    # Try each { position — finds the first well-formed JSON object even when
+    # there is a thinking preamble containing stray braces before the real JSON.
+    for i, ch in enumerate(raw):
+        if ch != "{":
+            continue
+        # Scan forward to find the matching closing brace
+        depth = 0
+        for j, c in enumerate(raw[i:], i):
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = raw[i : j + 1]
+                    try:
+                        data = json.loads(candidate)
+                        if isinstance(data, dict):
+                            return data
+                    except json.JSONDecodeError:
+                        break  # malformed at this position, try next {
+                    break
+    return None
 
 
 # ── Cache serialization helpers ──────────────────────────────────────────────
@@ -799,8 +816,14 @@ class CodebaseCompressor:
                 nav_topic = parsed.get("nav_topic") or ""
                 nav_role = parsed.get("nav_role") or ""
             else:
-                # Fallback: treat entire response as plain text summary
-                summary = raw_response
+                # JSON extraction failed — take first non-empty paragraph of
+                # response (avoids storing an entire chain-of-thought blob).
+                first_para = next(
+                    (p.strip() for p in raw_response.split("\n\n") if p.strip()
+                     and not p.strip().lower().startswith("here")),
+                    "",
+                )
+                summary = first_para[:500] if first_para else ""
         except Exception as exc:
             logger.warning("LLM summary failed for %s: %s", file_path, exc)
             summary = file_entities[0].docstring or "" if file_entities else ""
