@@ -70,6 +70,9 @@ yarn.lock
 .claude/
 .playwright-cli/
 
+graphify-output/
+graphify-out/
+
 # Backend
 backend/venv/
 backend/.env
