@@ -10,13 +10,14 @@ Within "flat", parallelism is tuned by file count:
   100-999 files → 2 parallel workers
 """
 
+import hashlib
 import json
 import logging
 import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from src.llm.client import chat
 from src.parsers.base import ParsedEntity
@@ -27,6 +28,9 @@ from src.wiki.compression_types import (
     DirectorySummary,
     FileSummary,
 )
+
+if TYPE_CHECKING:
+    from src.cache.index_cache import IndexCache
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +61,52 @@ def _extract_json_object(text: str) -> Optional[dict]:
         return data if isinstance(data, dict) else None
     except json.JSONDecodeError:
         return None
+
+
+# ── Cache serialization helpers ──────────────────────────────────────────────
+
+def _file_summary_to_dict(fs: FileSummary) -> dict:
+    """Convert a FileSummary to a plain dict for cache storage."""
+    return {
+        "file_path": fs.file_path,
+        "language": fs.language,
+        "line_count": fs.line_count,
+        "summary": fs.summary,
+        "entity_count": fs.entity_count,
+        "key_entities": fs.key_entities,
+        "exported_symbols": fs.exported_symbols,
+        "dependencies": fs.dependencies,
+        "nav_topic": fs.nav_topic,
+        "nav_role": fs.nav_role,
+    }
+
+
+def _dict_to_file_summary(d: dict) -> FileSummary:
+    """Reconstruct a FileSummary from a cached dict."""
+    return FileSummary(
+        file_path=d.get("file_path", ""),
+        language=d.get("language", ""),
+        line_count=d.get("line_count", 0),
+        summary=d.get("summary", ""),
+        entity_count=d.get("entity_count", 0),
+        key_entities=d.get("key_entities", []),
+        exported_symbols=d.get("exported_symbols", []),
+        dependencies=d.get("dependencies", []),
+        nav_topic=d.get("nav_topic", ""),
+        nav_role=d.get("nav_role", ""),
+    )
+
+
+def _dir_summary_to_dict(ds: DirectorySummary) -> dict:
+    """Convert a DirectorySummary to a plain dict for cache storage."""
+    return {
+        "dir_path": ds.dir_path,
+        "file_count": ds.file_count,
+        "summary": ds.summary,
+        "child_files": ds.child_files,
+        "key_entities": ds.key_entities,
+        "nav_items": ds.nav_items,
+    }
 
 
 class CodebaseCompressor:
@@ -191,6 +241,7 @@ class CodebaseCompressor:
         entities: list[ParsedEntity],
         fingerprint: RepoFingerprint,
         scored_entities: list[ScoredEntity],
+        cache: Optional["IndexCache"] = None,
     ) -> CompressedCodebase:
         level = self._decide_compression_level(fingerprint)
         logger.info(
@@ -199,9 +250,9 @@ class CodebaseCompressor:
         )
 
         if level == "flat":
-            return self._compress_flat(repo_path, entities, scored_entities, fingerprint)
+            return self._compress_flat(repo_path, entities, scored_entities, fingerprint, cache=cache)
         else:
-            return self._compress_pyramid(repo_path, entities, scored_entities, fingerprint)
+            return self._compress_pyramid(repo_path, entities, scored_entities, fingerprint, cache=cache)
 
     def _decide_compression_level(self, fingerprint: RepoFingerprint) -> str:
         if fingerprint.file_count < 1000:
@@ -221,6 +272,7 @@ class CodebaseCompressor:
         entities: list[ParsedEntity],
         scored: list[ScoredEntity],
         fingerprint: RepoFingerprint,
+        cache: Optional["IndexCache"] = None,
     ) -> CompressedCodebase:
         """Flat aggregation: LLM per-file + per-dir + repo summary.
 
@@ -229,6 +281,10 @@ class CodebaseCompressor:
           100-999 files → 2 workers
         """
         workers = self._workers_for(fingerprint.file_count)
+
+        # ── Check cache settings ─────────────────────────────────────────────
+        from src.config import get_settings
+        cache_reads_enabled = cache is not None and get_settings().index_cache_enabled
 
         # ── Step 1: extract structural metadata from AST (no LLM) ────────────
         file_summaries = self._extract_file_metadata(entities, repo_path)
@@ -243,10 +299,69 @@ class CodebaseCompressor:
                 continue
             file_entities.setdefault(rel, []).append(e)
 
+        # Compute content hashes for cache invalidation
+        file_hashes: dict[str, str] = {}
+        for rel_path in file_entities:
+            full_path = Path(repo_path) / rel_path
+            try:
+                if full_path.is_file():
+                    file_hashes[rel_path] = hashlib.sha256(
+                        full_path.read_bytes()
+                    ).hexdigest()
+            except OSError:
+                pass
+
+        # Determine cache hits/misses when cache is available
+        cache_hit_paths: set[str] = set()
+        if cache_reads_enabled:
+            diff = cache.diff_against_tree(file_hashes)
+            cache_hit_paths = set(diff.hits)
+            if diff.stale:
+                cache.cleanup_stale(diff.stale)
+            logger.info(
+                "Cache diff: %d hits, %d misses, %d stale",
+                len(diff.hits), len(diff.misses), len(diff.stale),
+            )
+
+        # Restore cached file summaries (cache hits)
+        for rel_path in list(cache_hit_paths):
+            if cache is not None:
+                cached = cache.get_file_summary(rel_path)
+                if cached and rel_path in file_summaries:
+                    meta = cached.get("_cache_meta", {})
+                    logger.info("Cache HIT for %s", rel_path)
+                    fs = file_summaries[rel_path]
+                    file_summaries[rel_path] = FileSummary(
+                        file_path=fs.file_path,
+                        language=cached.get("language", fs.language),
+                        line_count=cached.get("line_count", fs.line_count),
+                        summary=cached.get("summary", fs.summary),
+                        entity_count=cached.get("entity_count", fs.entity_count),
+                        key_entities=cached.get("key_entities", fs.key_entities),
+                        exported_symbols=cached.get("exported_symbols", fs.exported_symbols),
+                        dependencies=cached.get("dependencies", fs.dependencies),
+                        nav_topic=cached.get("nav_topic", fs.nav_topic),
+                        nav_role=cached.get("nav_role", fs.nav_role),
+                    )
+                else:
+                    # Cache file missing despite manifest entry — treat as miss
+                    cache_hit_paths.discard(rel_path)
+
+        # LLM calls only for cache misses
+        llm_targets = {
+            rel_path: ents for rel_path, ents in file_entities.items()
+            if rel_path not in cache_hit_paths
+        }
+        if llm_targets:
+            logger.info("Cache MISS for %d files — calling LLM", len(llm_targets))
+
+        # Track which files have valid cache entries (hits + successful writes)
+        cached_paths: set[str] = set(cache_hit_paths)
+
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(self._summarize_file, rel_path, ents, repo_path): rel_path
-                for rel_path, ents in file_entities.items()
+                for rel_path, ents in llm_targets.items()
             }
             for future in as_completed(futures):
                 rel_path = futures[future]
@@ -266,8 +381,29 @@ class CodebaseCompressor:
                             nav_topic=result.nav_topic,
                             nav_role=result.nav_role,
                         )
+                        # Persist to cache
+                        if cache is not None:
+                            content_hash = file_hashes.get(rel_path, "")
+                            cache.put_file_summary(
+                                rel_path,
+                                _file_summary_to_dict(file_summaries[rel_path]),
+                                content_hash=content_hash,
+                                model=get_settings().llm_model,
+                            )
+                            cached_paths.add(rel_path)
                 except Exception as exc:
                     logger.warning("LLM file summary failed for %s: %s", rel_path, exc)
+
+        # Update manifest — only include files that have valid cache entries
+        # to avoid marking failed LLM calls as cached.
+        if cache is not None:
+            manifest_hashes = {
+                p: h for p, h in file_hashes.items() if p in cached_paths
+            }
+            try:
+                cache.save_manifest({"file_hashes": manifest_hashes})
+            except Exception as exc:
+                logger.warning("Failed to save cache manifest: %s", exc)
 
         # ── Step 3: LLM directory summaries ───────────────────────────────────
         dir_groups: dict[str, list[str]] = {}
@@ -278,7 +414,10 @@ class CodebaseCompressor:
         directory_summaries: dict[str, DirectorySummary] = {}
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
-                pool.submit(self._summarize_directory, dp, files, file_summaries): dp
+                pool.submit(
+                    self._summarize_directory_cached, dp, files, file_summaries,
+                    file_hashes, cache, cache_reads_enabled,
+                ): dp
                 for dp, files in dir_groups.items()
             }
             for future in as_completed(futures):
@@ -303,6 +442,11 @@ class CodebaseCompressor:
             fingerprint.project_name or "project",
         )
 
+        # Persist aggregated artifacts to cache
+        if cache is not None:
+            cache.put_top_entities(key_entities)
+            cache.put_wiki_nav(nav_plan)
+
         return CompressedCodebase(
             repo_summary=repo_summary,
             file_summaries=file_summaries,
@@ -320,12 +464,16 @@ class CodebaseCompressor:
         entities: list[ParsedEntity],
         scored: list[ScoredEntity],
         fingerprint: RepoFingerprint,
+        cache: Optional["IndexCache"] = None,
     ) -> CompressedCodebase:
         """3-level progressive rollup: file → directory → repo.
 
         Used for repos >= 1000 files where flat aggregation would overflow
         context when generating the repo summary.
         """
+        from src.config import get_settings
+        cache_reads_enabled = cache is not None and get_settings().index_cache_enabled
+
         # Level 0: file summaries
         file_entities: dict[str, list[ParsedEntity]] = {}
         for e in entities:
@@ -334,11 +482,56 @@ class CodebaseCompressor:
                 continue
             file_entities.setdefault(rel, []).append(e)
 
+        # Compute content hashes for cache invalidation
+        file_hashes: dict[str, str] = {}
+        for rel_path in file_entities:
+            full_path = Path(repo_path) / rel_path
+            try:
+                if full_path.is_file():
+                    file_hashes[rel_path] = hashlib.sha256(
+                        full_path.read_bytes()
+                    ).hexdigest()
+            except OSError:
+                pass
+
+        # Determine cache hits
+        cache_hit_paths: set[str] = set()
+        if cache_reads_enabled:
+            diff = cache.diff_against_tree(file_hashes)
+            cache_hit_paths = set(diff.hits)
+            if diff.stale:
+                cache.cleanup_stale(diff.stale)
+            logger.info(
+                "Pyramid cache diff: %d hits, %d misses, %d stale",
+                len(diff.hits), len(diff.misses), len(diff.stale),
+            )
+
+        # Restore cached file summaries
         file_summaries: dict[str, FileSummary] = {}
+        for rel_path in list(cache_hit_paths):
+            if cache is not None:
+                cached = cache.get_file_summary(rel_path)
+                if cached:
+                    logger.info("Cache HIT for %s", rel_path)
+                    file_summaries[rel_path] = _dict_to_file_summary(cached)
+                else:
+                    cache_hit_paths.discard(rel_path)
+
+        # LLM calls only for misses
+        llm_targets = {
+            fp: ents for fp, ents in file_entities.items()
+            if fp not in cache_hit_paths
+        }
+        if llm_targets:
+            logger.info("Cache MISS for %d files — calling LLM", len(llm_targets))
+
+        # Track which files have valid cache entries (hits + successful writes)
+        cached_paths: set[str] = set(cache_hit_paths)
+
         with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {
                 pool.submit(self._summarize_file, fp, ents, repo_path): fp
-                for fp, ents in file_entities.items()
+                for fp, ents in llm_targets.items()
             }
             for future in as_completed(futures):
                 fp = futures[future]
@@ -346,8 +539,27 @@ class CodebaseCompressor:
                     summary = future.result(timeout=30)
                     if summary:
                         file_summaries[fp] = summary
+                        # Persist to cache
+                        if cache is not None:
+                            cache.put_file_summary(
+                                fp,
+                                _file_summary_to_dict(summary),
+                                content_hash=file_hashes.get(fp, ""),
+                                model=get_settings().llm_model,
+                            )
+                            cached_paths.add(fp)
                 except Exception as exc:
                     logger.warning("File summary failed for %s: %s", fp, exc)
+
+        # Update manifest — only include successfully cached files
+        if cache is not None:
+            manifest_hashes = {
+                p: h for p, h in file_hashes.items() if p in cached_paths
+            }
+            try:
+                cache.save_manifest({"file_hashes": manifest_hashes})
+            except Exception as exc:
+                logger.warning("Failed to save cache manifest: %s", exc)
 
         # Level 1: directory summaries
         dir_groups: dict[str, list[str]] = {}
@@ -359,7 +571,8 @@ class CodebaseCompressor:
         with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {
                 pool.submit(
-                    self._summarize_directory, dp, files, file_summaries,
+                    self._summarize_directory_cached, dp, files, file_summaries,
+                    file_hashes, cache, cache_reads_enabled,
                 ): dp
                 for dp, files in dir_groups.items()
             }
@@ -386,6 +599,11 @@ class CodebaseCompressor:
             file_summaries, dir_summaries, repo_summary,
             fingerprint.project_name or "project",
         )
+
+        # Persist aggregated artifacts to cache
+        if cache is not None:
+            cache.put_top_entities(key_entities)
+            cache.put_wiki_nav(nav_plan)
 
         return CompressedCodebase(
             repo_summary=repo_summary,
@@ -610,6 +828,56 @@ class CodebaseCompressor:
             nav_topic=nav_topic.strip(),
             nav_role=nav_role.strip(),
         )
+
+    def _summarize_directory_cached(
+        self,
+        dir_path: str,
+        child_files: list[str],
+        file_summaries: dict[str, FileSummary],
+        file_hashes: dict[str, str],
+        cache: Optional["IndexCache"],
+        cache_reads_enabled: bool,
+    ) -> Optional[DirectorySummary]:
+        """Cache-aware wrapper around ``_summarize_directory``.
+
+        Checks cache first (if enabled), delegates to LLM on miss, and
+        persists the result back to cache.
+        """
+        # Build child hash fingerprint for this directory
+        child_hashes = {fp: file_hashes.get(fp, "") for fp in child_files}
+        composite_hash = hashlib.sha256(
+            json.dumps(child_hashes, sort_keys=True).encode()
+        ).hexdigest()
+
+        if cache_reads_enabled and cache is not None:
+            cached = cache.get_dir_summary(dir_path)
+            if cached:
+                cached_meta = cached.get("_cache_meta", {})
+                if cached_meta.get("content_hash") == composite_hash:
+                    logger.info("Cache HIT for dir %s", dir_path)
+                    return DirectorySummary(
+                        dir_path=cached.get("dir_path", dir_path),
+                        file_count=cached.get("file_count", len(child_files)),
+                        summary=cached.get("summary", ""),
+                        child_files=cached.get("child_files", child_files),
+                        key_entities=cached.get("key_entities", []),
+                        nav_items=cached.get("nav_items", []),
+                    )
+
+        logger.info("Cache MISS for dir %s — calling LLM", dir_path)
+        result = self._summarize_directory(dir_path, child_files, file_summaries)
+        if result and cache is not None:
+            try:
+                from src.config import get_settings
+                cache.put_dir_summary(
+                    dir_path,
+                    _dir_summary_to_dict(result),
+                    child_hashes=child_hashes,
+                    model=get_settings().llm_model,
+                )
+            except Exception as exc:
+                logger.warning("Cache write failed for dir %s: %s", dir_path, exc)
+        return result
 
     def _summarize_directory(
         self,

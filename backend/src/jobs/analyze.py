@@ -183,10 +183,25 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
             t0 = time.monotonic()
             logger.info("[%s] Step 5: Compressing codebase", repository_id)
             compressed = None
+            index_cache = None
+            try:
+                # Initialise per-repo/branch artifact cache
+                from src.cache.index_cache import IndexCache
+                repo_name = repo.name or repo_url.split("/")[-1]
+                index_cache = IndexCache(
+                    repo_name=repo_name,
+                    branch=branch or "main",
+                )
+                logger.info("[%s] IndexCache root: %s", repository_id, index_cache.root)
+            except Exception as cache_exc:
+                logger.warning("[%s] IndexCache init failed (non-fatal): %s", repository_id, cache_exc)
             try:
                 scored_entities = score_entities(entities)
                 compressor = CodebaseCompressor()
-                compressed = compressor.compress(str(local_path), entities, fingerprint, scored_entities)
+                compressed = compressor.compress(
+                    str(local_path), entities, fingerprint, scored_entities,
+                    cache=index_cache,
+                )
                 logger.info(
                     "[%s] Step 5 done (%.1fs): level=%s, %d key_entities, %d file_summaries",
                     repository_id, time.monotonic() - t0,
@@ -213,6 +228,7 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                 progress_callback=_agent_progress_callback,
                 compressed=compressed,
                 repo_name=repo.name or repo_url.split("/")[-1],
+                index_cache=index_cache,
             )
             logger.info("[%s] Step 6 done (%.1fs)", repository_id, time.monotonic() - t0)
 

@@ -1,6 +1,12 @@
+from pathlib import Path as _Path
+
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from functools import lru_cache
+
+# Backend dir is the parent of this file's directory (backend/src/config.py → backend/).
+_BACKEND_DIR = _Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = _BACKEND_DIR.parent
 
 
 class Settings(BaseSettings):
@@ -41,6 +47,13 @@ class Settings(BaseSettings):
     # Repository storage
     repo_cache_dir: str = Field(default="./cache/repos", alias="REPO_CACHE_DIR")
 
+    # Data directory — root for all persistent artifacts (index cache, etc.).
+    # Default resolves to {project_root}/cache.  Override via DATA_DIR env var.
+    data_dir: str = Field(default="", alias="DATA_DIR")
+
+    # When False, skip cache reads (still writes so cache is populated for next run).
+    index_cache_enabled: bool = Field(default=True, alias="INDEX_CACHE_ENABLED")
+
     # Performance
     max_concurrent_parses: int = Field(default=5, alias="MAX_CONCURRENT_PARSES")
     parse_timeout_seconds: int = Field(default=900, alias="PARSE_TIMEOUT_SECONDS")
@@ -79,6 +92,21 @@ class Settings(BaseSettings):
     )
 
     model_config = {"env_file": ".env", "populate_by_name": True}
+
+    @property
+    def resolved_data_dir(self) -> str:
+        """Absolute path to the data directory.
+
+        If ``data_dir`` is empty (the default), resolves to
+        ``{project_root}/cache``.  Otherwise treats ``data_dir`` as an
+        absolute or backend-relative path.
+        """
+        if self.data_dir:
+            p = _Path(self.data_dir)
+            if not p.is_absolute():
+                p = _BACKEND_DIR / p
+            return str(p.resolve())
+        return str(_PROJECT_ROOT / "cache")
 
 
 @lru_cache

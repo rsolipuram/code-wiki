@@ -90,6 +90,7 @@ class AnalysisPipeline:
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
         compressed: Optional["CompressedCodebase"] = None,
         repo_name: Optional[str] = None,
+        index_cache: Optional[object] = None,
     ) -> None:
         self.repo_path = repo_path
         self.repository_id = repository_id
@@ -97,6 +98,7 @@ class AnalysisPipeline:
         self.progress_callback = progress_callback
         self.compressed = compressed
         self.repo_name = repo_name
+        self.index_cache = index_cache
         self._agents_completed = 0
         self._agents_total = 0
         self.dossier_manager = DossierManager(Dossier(
@@ -131,6 +133,14 @@ class AnalysisPipeline:
                 "file_summary_count": len(self.compressed.file_summaries),
                 "call_graph_summary": self.compressed.call_graph_summary,
             }
+            # Persist full CompressedCodebase to index cache
+            if self.index_cache is not None:
+                try:
+                    from dataclasses import asdict
+                    self.index_cache.put_compressed(asdict(self.compressed))
+                    logger.info("Persisted CompressedCodebase to index cache")
+                except Exception as exc:
+                    logger.warning("Failed to persist compressed to cache: %s", exc)
 
         # ── Collect descriptors by tier ───────────────────────────────────────
         heuristic = _descriptors_by_tier("heuristic")
@@ -252,6 +262,7 @@ def run_analysis(
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
     compressed: Optional["CompressedCodebase"] = None,
     repo_name: Optional[str] = None,
+    index_cache: Optional[object] = None,
 ) -> Dossier:
     """Entry point for the full analysis pipeline.
 
@@ -261,6 +272,7 @@ def run_analysis(
         progress_callback: Optional (completed, total, agent_name) callback.
         compressed: Optional pre-run CompressedCodebase to pass to agents.
         repo_name: Human-readable repo name for artifact output path alignment.
+        index_cache: Optional IndexCache for persisting compressed artifacts.
 
     Returns:
         Populated Dossier ready for wiki generation.
@@ -272,5 +284,6 @@ def run_analysis(
         progress_callback=progress_callback,
         compressed=compressed,
         repo_name=repo_name,
+        index_cache=index_cache,
     )
     return pipeline.run()

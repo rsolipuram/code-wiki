@@ -66,7 +66,7 @@ yarn.lock
 *.tmp
 *.temp
 .cache/
-cache/
+/cache/
 .claude/
 .playwright-cli/
 
@@ -82,3 +82,10 @@ frontend/out/
 
 # Docker
 .dockerignore
+# Squad: ignore runtime state (logs, inbox, sessions)
+.squad/orchestration-log/
+.squad/log/
+.squad/decisions/inbox/
+.squad/sessions/
+# Squad: SubSquad activation file (local to this machine)
+.squad-workstream
