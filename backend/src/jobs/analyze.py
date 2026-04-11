@@ -385,24 +385,54 @@ def _get_or_create_wiki(session: Session, repository_id: str) -> str | None:
 def _write_graph(entities: list[ParsedEntity]) -> dict[str, int]:
     """Write all entities and relationships to graph storage.
 
-    Builds a name→qualified_name lookup to resolve call targets that use
-    short names instead of fully qualified names (fixes dangling edges).
+    Uses scope-aware name resolution for CALLS edges:
+      1. Exact qualified-name match (global)
+      2. Same-file entities (file-local scope)
+      3. Import-aware short names (what the file explicitly imported)
+      4. Global short-name fallback (first-seen across all files)
 
     Returns:
         Dict with keys: nodes, edges, unresolved.
     """
-    # Build lookup: short name → qualified_name for fuzzy matching
-    name_to_qname: dict[str, str] = {}
-    for entity in entities:
-        # First-seen wins; collisions are ambiguous and skipped
-        if entity.name not in name_to_qname:
-            name_to_qname[entity.name] = entity.qualified_name
+    qnames = {e.qualified_name for e in entities}
 
     # Build lookup: file_path → module qualified_name (for DEFINES edges)
     file_to_module_qname: dict[str, str] = {}
     for entity in entities:
         if entity.entity_type == "module":
             file_to_module_qname[entity.file_path] = entity.qualified_name
+
+    # Global fallback: short name → qualified_name (first-seen wins for ambiguous names)
+    global_name_to_qname: dict[str, str] = {}
+    for entity in entities:
+        if entity.name not in global_name_to_qname:
+            global_name_to_qname[entity.name] = entity.qualified_name
+
+    # Per-file local resolution map: file_path → {short_name: qualified_name}
+    # Priority: same-file entity names > imported short names
+    file_local_names: dict[str, dict[str, str]] = {}
+    # First pass: index all entities by file
+    file_entities: dict[str, list] = {}
+    for entity in entities:
+        file_entities.setdefault(entity.file_path, []).append(entity)
+    # Second pass: for each file, build name map from same-file entities + imports
+    for file_path, file_ents in file_entities.items():
+        local: dict[str, str] = {}
+        # Layer 1: import-aware short names from this file's module imports
+        for ent in file_ents:
+            if ent.entity_type == "module":
+                for imp in ent.imports:
+                    # e.g. "agents.GuardrailsAgent" → short="GuardrailsAgent"
+                    short = imp.split(".")[-1]
+                    if imp in qnames and short not in local:
+                        local[short] = imp
+                    elif short in global_name_to_qname and short not in local:
+                        local[short] = global_name_to_qname[short]
+        # Layer 2: same-file entity names override (higher priority)
+        for ent in file_ents:
+            if ent.entity_type != "module":
+                local[ent.name] = ent.qualified_name
+        file_local_names[file_path] = local
 
     nodes_created = 0
     edges_created = 0
@@ -428,17 +458,20 @@ def _write_graph(entities: list[ParsedEntity]) -> dict[str, int]:
         except Exception as exc:
             logger.warning("Graph node creation failed for %s: %s", entity.qualified_name, exc)
 
-    # Build set of all known qualified names for fast membership testing
-    qnames = {e.qualified_name for e in entities}
-
     # --- CALLS edges ---
     for entity in entities:
+        local = file_local_names.get(entity.file_path, {})
         for callee in entity.calls:
             try:
+                # 1. Exact qualified-name match
                 if callee in qnames:
                     target = callee
-                elif callee in name_to_qname:
-                    target = name_to_qname[callee]
+                # 2. File-local / import-aware short name
+                elif callee in local:
+                    target = local[callee]
+                # 3. Global short-name fallback
+                elif callee in global_name_to_qname:
+                    target = global_name_to_qname[callee]
                 else:
                     edges_unresolved += 1
                     continue
@@ -472,14 +505,13 @@ def _write_graph(entities: list[ParsedEntity]) -> dict[str, int]:
         if entity.entity_type != "module":
             continue
         for imported_name in entity.imports:
-            # Normalise the dotted name so it can be fuzzy-matched
             short = imported_name.split(".")[-1]
             if imported_name in qnames:
                 target = imported_name
-            elif imported_name in name_to_qname:
-                target = name_to_qname[imported_name]
-            elif short in name_to_qname:
-                target = name_to_qname[short]
+            elif imported_name in global_name_to_qname:
+                target = global_name_to_qname[imported_name]
+            elif short in global_name_to_qname:
+                target = global_name_to_qname[short]
             else:
                 edges_unresolved += 1
                 continue
@@ -495,15 +527,18 @@ def _write_graph(entities: list[ParsedEntity]) -> dict[str, int]:
 
     # --- INHERITS_FROM edges: class → base class ---
     for entity in entities:
+        local = file_local_names.get(entity.file_path, {})
         base_classes: list[str] = (entity.entity_metadata or {}).get("base_classes", [])
         for base in base_classes:
             short = base.split(".")[-1]
             if base in qnames:
                 target = base
-            elif base in name_to_qname:
-                target = name_to_qname[base]
-            elif short in name_to_qname:
-                target = name_to_qname[short]
+            elif base in local:
+                target = local[base]
+            elif base in global_name_to_qname:
+                target = global_name_to_qname[base]
+            elif short in global_name_to_qname:
+                target = global_name_to_qname[short]
             else:
                 edges_unresolved += 1
                 continue
