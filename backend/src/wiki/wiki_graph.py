@@ -214,7 +214,7 @@ def run_v3_pipeline(
                 "v3_pipeline",
                 "running",
                 "Generating wiki sections...",
-                mark_activity=False,
+                mark_activity=True,
             )
 
     heartbeat = threading.Thread(target=_heartbeat, name="v3-heartbeat", daemon=True)
