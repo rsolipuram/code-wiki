@@ -23,18 +23,12 @@ def _check_postgres_sync() -> dict[str, Any]:
         return {"status": "unhealthy", "error": str(exc)}
 
 
-def _check_neo4j_sync() -> dict[str, Any]:
+def _check_graph_sync() -> dict[str, Any]:
     try:
-        from neo4j import GraphDatabase
+        from src.storage import graph_db
 
-        settings = get_settings()
-        driver = GraphDatabase.driver(
-            settings.neo4j_uri,
-            auth=(settings.neo4j_user, settings.neo4j_password),
-            connection_timeout=3,
-        )
-        driver.verify_connectivity()
-        driver.close()
+        if not graph_db.health_check():
+            return {"status": "unhealthy", "error": "graph health check failed"}
         return {"status": "healthy"}
     except Exception as exc:
         return {"status": "unhealthy", "error": str(exc)}
@@ -68,16 +62,16 @@ async def _check_qdrant() -> dict[str, Any]:
 @router.get("/health")
 async def health_check() -> dict[str, Any]:
     """Check connectivity to all backing services."""
-    postgres, neo4j, redis_status, qdrant = await asyncio.gather(
+    postgres, graph_status, redis_status, qdrant = await asyncio.gather(
         asyncio.to_thread(_check_postgres_sync),
-        asyncio.to_thread(_check_neo4j_sync),
+        asyncio.to_thread(_check_graph_sync),
         asyncio.to_thread(_check_redis_sync),
         _check_qdrant(),
     )
 
     services = {
         "postgres": postgres,
-        "neo4j": neo4j,
+        "graph": graph_status,
         "qdrant": qdrant,
         "redis": redis_status,
     }

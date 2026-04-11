@@ -1,6 +1,6 @@
 """Diagram data generator — T098.
 
-Queries Neo4j for module relationships, dependency graphs, and call chains,
+Queries graph storage for module relationships, dependency graphs, and call chains,
 outputting structured data for frontend rendering via the diagrams endpoint.
 """
 
@@ -83,23 +83,23 @@ def _build_architecture_diagram(
 def _build_dependency_graph(
     session: Session, wiki: Wiki, modules: list[Module]
 ) -> dict[str, Any]:
-    """Dependency graph — circular bubble nodes from Neo4j inter-module calls."""
+    """Dependency graph — circular bubble nodes from graph inter-module calls."""
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
 
     module_ids = [m.id for m in modules]
     id_to_module = {m.id: m for m in modules}
 
-    # Query Neo4j for inter-module relationships
-    neo_edges: list[dict[str, Any]] = []
+    # Query graph storage for inter-module relationships
+    graph_edges: list[dict[str, Any]] = []
     try:
-        neo_edges = graph_db.get_module_relationships(module_ids)
+        graph_edges = graph_db.get_module_relationships(module_ids)
     except Exception as exc:
-        logger.warning("Neo4j module relationship query failed: %s", exc)
+        logger.warning("Graph module relationship query failed: %s", exc)
 
     # Build node set from modules with call counts
     call_counts: dict[str, int] = {}
-    for edge in neo_edges:
+    for edge in graph_edges:
         from_id = edge.get("from_module", "")
         call_counts[from_id] = call_counts.get(from_id, 0) + int(edge.get("weight", 1))
 
@@ -113,9 +113,9 @@ def _build_dependency_graph(
             "slug": module.slug,
         })
 
-    # Edges from Neo4j
+    # Edges from graph storage
     node_ids = {n["id"] for n in nodes}
-    for edge in neo_edges:
+    for edge in graph_edges:
         from_id = edge.get("from_module", "")
         to_id = edge.get("to_module", "")
         if from_id in node_ids and to_id in node_ids and from_id != to_id:

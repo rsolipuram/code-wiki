@@ -167,16 +167,16 @@ def analyze_repository(repository_id: str, branch: str = "main") -> dict[str, An
                     _progress(4, "Persisting entities", f"Saved {len(entities)} entities (vector index skipped)")
             logger.info("[%s] Step 4 done (%.1fs)", repository_id, time.monotonic() - t0)
 
-            # ── Step 4b: Persist entities to Neo4j ───────────────────────────
+            # ── Step 4b: Persist entities to graph DB ────────────────────────
             _progress(4, "Building relationship graph", "Creating nodes and edges...")
             t0 = time.monotonic()
-            logger.info("[%s] Step 4b: Writing to Neo4j", repository_id)
-            neo4j_stats = _write_neo4j(entities)
-            stats["neo4j_nodes"] = neo4j_stats["nodes"]
-            stats["neo4j_edges"] = neo4j_stats["edges"]
-            stats["neo4j_unresolved"] = neo4j_stats["unresolved"]
+            logger.info("[%s] Step 4b: Writing to graph DB", repository_id)
+            graph_stats = _write_graph(entities)
+            stats["graph_nodes"] = graph_stats["nodes"]
+            stats["graph_edges"] = graph_stats["edges"]
+            stats["graph_unresolved"] = graph_stats["unresolved"]
             logger.info("[%s] Step 4b done (%.1fs)", repository_id, time.monotonic() - t0)
-            _progress(4, "Building relationship graph", f"{neo4j_stats['nodes']} nodes, {neo4j_stats['edges']} edges")
+            _progress(4, "Building relationship graph", f"{graph_stats['nodes']} nodes, {graph_stats['edges']} edges")
 
             # ── Step 5: Compress codebase (shared by agents + wiki pipeline) ──
             _progress(5, "Compressing codebase", "Building code summaries...")
@@ -381,8 +381,8 @@ def _get_or_create_wiki(session: Session, repository_id: str) -> str | None:
     return str(wiki.id)
 
 
-def _write_neo4j(entities: list[ParsedEntity]) -> dict[str, int]:
-    """Write all entities and relationships to Neo4j.
+def _write_graph(entities: list[ParsedEntity]) -> dict[str, int]:
+    """Write all entities and relationships to graph storage.
 
     Builds a name→qualified_name lookup to resolve call targets that use
     short names instead of fully qualified names (fixes dangling edges).
@@ -413,7 +413,7 @@ def _write_neo4j(entities: list[ParsedEntity]) -> dict[str, int]:
             )
             nodes_created += 1
         except Exception as exc:
-            logger.warning("Neo4j node creation failed for %s: %s", entity.qualified_name, exc)
+            logger.warning("Graph node creation failed for %s: %s", entity.qualified_name, exc)
 
     # Create relationships with fuzzy name resolution
     qnames = {e.qualified_name for e in entities}
@@ -437,9 +437,9 @@ def _write_neo4j(entities: list[ParsedEntity]) -> dict[str, int]:
                 )
                 edges_created += 1
             except Exception as exc:
-                logger.warning("Neo4j edge creation failed for %s → %s: %s", entity.qualified_name, callee, exc)
+                logger.warning("Graph edge creation failed for %s → %s: %s", entity.qualified_name, callee, exc)
 
     if edges_unresolved:
-        logger.warning("Neo4j: %d call targets unresolved (no matching entity)", edges_unresolved)
-    logger.info("Neo4j stats: nodes=%d, edges=%d, unresolved=%d", nodes_created, edges_created, edges_unresolved)
+        logger.warning("Graph DB: %d call targets unresolved (no matching entity)", edges_unresolved)
+    logger.info("Graph stats: nodes=%d, edges=%d, unresolved=%d", nodes_created, edges_created, edges_unresolved)
     return {"nodes": nodes_created, "edges": edges_created, "unresolved": edges_unresolved}

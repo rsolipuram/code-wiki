@@ -16,22 +16,6 @@ services:
       timeout: 5s
       retries: 5
 
-  neo4j:
-    image: neo4j:5.16
-    container_name: code-wiki-neo4j
-    environment:
-      NEO4J_AUTH: neo4j/codewiki
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    volumes:
-      - neo4j_data:/data
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7474"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-
   qdrant:
     image: qdrant/qdrant:latest
     container_name: code-wiki-qdrant
@@ -61,6 +45,5 @@ services:
 
 volumes:
   postgres_data:
-  neo4j_data:
   qdrant_data:
   redis_data:

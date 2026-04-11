@@ -1,7 +1,7 @@
 """Code graph query tools for V3 deep content agents.
 
-Exposes Neo4j call/import/inheritance graph as bounded, granular tools.
-Falls back gracefully if Neo4j is unavailable.
+Exposes graph call/import/inheritance queries as bounded, granular tools.
+Falls back gracefully if graph storage is unavailable.
 """
 
 import json
@@ -16,19 +16,18 @@ MAX_RESULTS = 30
 
 
 def make_graph_tools() -> list:
-    """Create Neo4j graph query tools.
+    """Create graph query tools.
 
     Returns:
-        List of LangChain tool functions. Safe to call even if Neo4j is down.
+        List of LangChain tool functions. Safe to call even if graph storage is down.
     """
 
     def _query(cypher: str, params: dict) -> list[dict]:
         """Run a Cypher query, returning [] on failure."""
         try:
-            from src.storage.graph_db import get_driver
-            with get_driver().session() as session:
-                result = session.run(cypher, **params)
-                return [dict(record) for record in result]
+            from src.storage import graph_db
+
+            return graph_db.query_records(cypher, params)
         except Exception as exc:
             logger.debug("Graph query failed: %s", exc)
             return []
@@ -54,7 +53,7 @@ def make_graph_tools() -> list:
             {"name": entity_name.strip(), "limit": MAX_RESULTS},
         )
         if not rows:
-            return json.dumps({"entity": entity_name, "callers": [], "note": "No callers found (or Neo4j unavailable)"})
+            return json.dumps({"entity": entity_name, "callers": [], "note": "No callers found (or graph unavailable)"})
         return json.dumps({"entity": entity_name, "callers": rows}, indent=2)
 
     @tool
@@ -77,7 +76,7 @@ def make_graph_tools() -> list:
             {"name": entity_name.strip(), "limit": MAX_RESULTS},
         )
         if not rows:
-            return json.dumps({"entity": entity_name, "callees": [], "note": "No callees found (or Neo4j unavailable)"})
+            return json.dumps({"entity": entity_name, "callees": [], "note": "No callees found (or graph unavailable)"})
         return json.dumps({"entity": entity_name, "callees": rows}, indent=2)
 
     @tool
@@ -98,7 +97,7 @@ def make_graph_tools() -> list:
             {"name": entity_name.strip(), "limit": MAX_RESULTS},
         )
         if not rows:
-            return json.dumps({"entity": entity_name, "imports": [], "note": "No imports found (or Neo4j unavailable)"})
+            return json.dumps({"entity": entity_name, "imports": [], "note": "No imports found (or graph unavailable)"})
         return json.dumps({"entity": entity_name, "imports": rows}, indent=2)
 
     @tool
@@ -143,20 +142,29 @@ def make_graph_tools() -> list:
         Args:
             entity_name: Qualified name or short name.
         """
-        rows = _query(
+        outgoing = _query(
             """
-            MATCH (a:CodeEntity)-[r]-(b:CodeEntity)
+            MATCH (a:CodeEntity)-[r]->(b:CodeEntity)
             WHERE a.qualified_name CONTAINS $name OR a.name = $name
-            RETURN a.name AS source, type(r) AS relationship,
-                   CASE WHEN startNode(r) = a THEN '→' ELSE '←' END AS direction,
-                   b.name AS target, b.qualified_name AS target_qualified,
-                   b.entity_type AS target_type
+            RETURN a.name AS source, type(r) AS relationship, '→' AS direction,
+                   b.name AS target, b.qualified_name AS target_qualified, b.entity_type AS target_type
             LIMIT $limit
             """,
             {"name": entity_name.strip(), "limit": MAX_RESULTS},
         )
+        incoming = _query(
+            """
+            MATCH (a:CodeEntity)<-[r]-(b:CodeEntity)
+            WHERE a.qualified_name CONTAINS $name OR a.name = $name
+            RETURN a.name AS source, type(r) AS relationship, '←' AS direction,
+                   b.name AS target, b.qualified_name AS target_qualified, b.entity_type AS target_type
+            LIMIT $limit
+            """,
+            {"name": entity_name.strip(), "limit": MAX_RESULTS},
+        )
+        rows = outgoing + incoming
         if not rows:
-            return json.dumps({"entity": entity_name, "relationships": [], "note": "No relationships found (or Neo4j unavailable)"})
+            return json.dumps({"entity": entity_name, "relationships": [], "note": "No relationships found (or graph unavailable)"})
         return json.dumps({"entity": entity_name, "relationships": rows}, indent=2)
 
     @tool
@@ -177,7 +185,7 @@ def make_graph_tools() -> list:
         )
         node_count = nodes[0]["count"] if nodes else 0
         if node_count == 0:
-            return json.dumps({"status": "empty", "note": "No graph data available (Neo4j may be empty or unavailable)"})
+            return json.dumps({"status": "empty", "note": "No graph data available (graph storage may be empty or unavailable)"})
         return json.dumps({
             "nodes": node_count,
             "edges_by_type": {row["rel_type"]: row["count"] for row in edges},

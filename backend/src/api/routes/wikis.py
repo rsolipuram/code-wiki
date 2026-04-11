@@ -192,7 +192,7 @@ async def get_code_entity(
     entity_qualified_name: str,
     db: Session = Depends(get_db),
 ) -> CodeEntityResponse:
-    """Get code entity details by qualified name, including Neo4j relationships."""
+    """Get code entity details by qualified name, including graph relationships."""
     wiki = _get_wiki_for_repo(db, repository_id)
 
     # Find entity across all modules in this wiki
@@ -205,33 +205,17 @@ async def get_code_entity(
     if not entity:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found")
 
-    # Fetch relationships from Neo4j
+    # Fetch relationships from graph storage
     relationships = CodeEntityRelationships()
     try:
-        driver = graph_db.get_driver()
-        with driver.session() as neo_session:
-            result = neo_session.run(
-                """
-                MATCH (n {qualified_name: $qname})
-                OPTIONAL MATCH (n)-[:CALLS]->(callee)
-                OPTIONAL MATCH (n)-[:IMPORTS]->(imported)
-                OPTIONAL MATCH (n)-[:INHERITS_FROM]->(parent)
-                RETURN
-                  collect(DISTINCT callee.qualified_name) AS calls,
-                  collect(DISTINCT imported.qualified_name) AS imports,
-                  collect(DISTINCT parent.qualified_name) AS inherits_from
-                """,
-                qname=entity_qualified_name,
-            )
-            row = result.single()
-            if row:
-                relationships = CodeEntityRelationships(
-                    calls=[c for c in row["calls"] if c],
-                    imports=[i for i in row["imports"] if i],
-                    inherits_from=[p for p in row["inherits_from"] if p],
-                )
+        rels = graph_db.get_entity_relationships(entity_qualified_name)
+        relationships = CodeEntityRelationships(
+            calls=rels["calls"],
+            imports=rels["imports"],
+            inherits_from=rels["inherits_from"],
+        )
     except Exception:
-        pass  # Neo4j unavailable — return empty relationships
+        pass  # Graph unavailable — return empty relationships
 
     visibility = "private" if entity.name.startswith("_") else "public"
 

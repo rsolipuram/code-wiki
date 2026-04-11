@@ -7,8 +7,8 @@ sqlalchemy==2.0.35
 alembic==1.13.3
 psycopg2-binary==2.9.9
 
-# Neo4j
-neo4j==5.24.0
+# Graph database
+real_ladybug>=0.15.0,<0.16.0
 
 # Vector database
 qdrant-client==1.11.3
@@ -29,8 +29,13 @@ rq==1.16.2
 # Repository access
 gitpython==3.1.43
 
-# Code parsing - Python
-jedi==0.19.1
+# Code parsing
+tree-sitter>=0.25.0
+tree-sitter-python>=0.23.0
+tree-sitter-typescript>=0.23.0
+tree-sitter-rust>=0.23.0
+tree-sitter-c-sharp>=0.23.0
+tree-sitter-java>=0.23.0
 
 # Validation
 pydantic==2.9.2

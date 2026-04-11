@@ -1,4 +1,4 @@
-"""Parser registry mapping file extensions to language-specific parsers.
+"""Parser registry mapping file extensions to Tree-sitter parsers.
 
 Usage:
     from src.parsers import get_parser
@@ -7,19 +7,21 @@ Usage:
 """
 
 from src.parsers.base import CodeParser, UnsupportedLanguageError
-from src.parsers.python_parser import PythonParser
-from src.parsers.rust_parser import RustParser
-from src.parsers.typescript_parser import SUPPORTED_EXTENSIONS as _TS_EXTS
-from src.parsers.typescript_parser import TypeScriptParser
+from src.parsers.tree_sitter_parser import TreeSitterParser
 
-_PYTHON_PARSER: PythonParser | None = None
-_TS_PARSER: TypeScriptParser | None = None
-_RUST_PARSER: RustParser | None = None
+_PARSERS: dict[str, TreeSitterParser] = {}
 
 _EXTENSION_MAP: dict[str, str] = {
     ".py": "python",
+    ".cs": "csharp",
+    ".java": "java",
     ".rs": "rust",
-    **{ext: "typescript" for ext in _TS_EXTS},
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".js": "typescript",
+    ".jsx": "tsx",
+    ".mjs": "typescript",
+    ".cjs": "typescript",
 }
 
 
@@ -35,21 +37,13 @@ def get_parser(extension: str) -> CodeParser:
     Raises:
         UnsupportedLanguageError: If no parser is registered for the extension.
     """
-    global _PYTHON_PARSER, _TS_PARSER, _RUST_PARSER
-
     lang = _EXTENSION_MAP.get(extension.lower())
-    if lang == "python":
-        if _PYTHON_PARSER is None:
-            _PYTHON_PARSER = PythonParser()
-        return _PYTHON_PARSER
-    if lang == "typescript":
-        if _TS_PARSER is None:
-            _TS_PARSER = TypeScriptParser()
-        return _TS_PARSER
-    if lang == "rust":
-        if _RUST_PARSER is None:
-            _RUST_PARSER = RustParser()
-        return _RUST_PARSER
+    if lang:
+        parser = _PARSERS.get(lang)
+        if parser is None:
+            parser = TreeSitterParser(lang)
+            _PARSERS[lang] = parser
+        return parser
 
     raise UnsupportedLanguageError(
         f"No parser registered for extension {extension!r}. "

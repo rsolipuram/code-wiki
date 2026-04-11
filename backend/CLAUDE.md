@@ -34,7 +34,7 @@ curl http://localhost:8000/health
 |---------|------|-------|
 | Backend API | 8000 | Swagger at /docs |
 | PostgreSQL | 5434 | Remapped from 5432 |
-| Neo4j | 7474 (browser), 7687 (bolt) | Optional — backend degrades gracefully |
+| Graph DB | embedded | LadybugDB file under cache/graph |
 | Qdrant | 6333 (REST), 6334 (gRPC) | Docker volume `qdrant_data` |
 | Redis | 6380 | Remapped from 6379 |
 | LM Studio | 1234 | OpenAI-compatible API, must be running |
@@ -46,7 +46,7 @@ curl http://localhost:8000/health
 - **RQ worker caches code**: Restart worker after any backend code change
 - **RQ queue name**: Jobs use `analysis` queue — always start worker with `rq worker analysis`
 - **FastAPI error envelope**: Errors wrapped in `{"detail": {...}}` — frontend must unwrap nested `detail`
-- **Neo4j dangling edges**: Entity IDs use qualified names but relationship targets store raw names. `_write_neo4j` builds a lookup map to resolve. Without this, MATCH queries fail silently
+- **Graph dangling edges**: Entity IDs use qualified names but relationship targets may store raw names. `_write_graph` builds a lookup map to resolve.
 - **Alembic migrations**: Run `alembic upgrade head` after pulling changes with new DB columns. Uses `batch_alter_table` for SQLite compatibility
 - **Dossier Qdrant bug (known)**: `index_dossier()` creates correct vectors but payload fields (`repo_id`, `facet`, `agent`) are `None`. Filtered queries return 0 results. Root cause: DossierEntry→payload mapping needs investigation
 - **Qdrant batch size**: `index_entities()` batches at 50. Reduce if payload overflow on large repos

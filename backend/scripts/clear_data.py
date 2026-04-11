@@ -1,7 +1,7 @@
 """Script to clear all data from the Code Wiki application.
 This includes:
 1. PostgreSQL (Truncating all tables)
-2. Neo4j (Deleting all nodes and relationships)
+2. Graph DB (Deleting LadybugDB file)
 3. Qdrant (Deleting all collections)
 4. Redis (Flushing all data)
 5. Local Cache (Deleting cloned repositories)
@@ -17,7 +17,6 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import sessionmaker
-from neo4j import GraphDatabase
 from qdrant_client import QdrantClient
 import redis
 from src.config import get_settings
@@ -46,22 +45,19 @@ def clear_postgres():
             transaction.rollback()
             print(f"Error clearing PostgreSQL: {e}")
 
-def clear_neo4j():
-    print("Clearing Neo4j...")
+def clear_graph_db():
+    print("Clearing graph DB...")
     settings = get_settings()
     try:
-        driver = GraphDatabase.driver(
-            settings.neo4j_uri, 
-            auth=(settings.neo4j_user, settings.neo4j_password)
-        )
-        with driver.session() as session:
-            result = session.run("MATCH (n) DETACH DELETE n")
-            summary = result.consume()
-            print(f"  Deleted Neo4j nodes. Counters: {summary.counters}")
-        driver.close()
-        print("Neo4j cleared.")
+        graph_path = Path(settings.resolved_graph_db_path)
+        if graph_path.exists():
+            graph_path.unlink()
+            print(f"  Deleted graph DB file: {graph_path}")
+        else:
+            print(f"  Graph DB file not found: {graph_path}")
+        print("Graph DB cleared.")
     except Exception as e:
-        print(f"Error clearing Neo4j: {e}")
+        print(f"Error clearing graph DB: {e}")
 
 def clear_qdrant():
     print("Clearing Qdrant...")
@@ -106,7 +102,7 @@ def clear_local_cache():
 if __name__ == "__main__":
     print("Starting data cleanup...")
     clear_postgres()
-    clear_neo4j()
+    clear_graph_db()
     clear_qdrant()
     clear_redis()
     clear_local_cache()

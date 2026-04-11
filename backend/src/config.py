@@ -21,10 +21,8 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
     )
 
-    # Neo4j
-    neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")
-    neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
-    neo4j_password: str = Field(default="codewiki", alias="NEO4J_PASSWORD")
+    # Graph storage (LadybugDB)
+    graph_db_path: str = Field(default="", alias="GRAPH_DB_PATH")
 
     # Qdrant
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
@@ -107,6 +105,16 @@ class Settings(BaseSettings):
                 p = _BACKEND_DIR / p
             return str(p.resolve())
         return str(_PROJECT_ROOT / "cache")
+
+    @property
+    def resolved_graph_db_path(self) -> str:
+        """Absolute path to LadybugDB graph file."""
+        if self.graph_db_path:
+            p = _Path(self.graph_db_path)
+            if not p.is_absolute():
+                p = _BACKEND_DIR / p
+            return str(p.resolve())
+        return str((_Path(self.resolved_data_dir) / "graph" / "code_graph.lbug").resolve())
 
 
 @lru_cache
