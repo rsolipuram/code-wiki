@@ -78,6 +78,7 @@ def _file_summary_to_dict(fs: FileSummary) -> dict:
         "dependencies": fs.dependencies,
         "nav_topic": fs.nav_topic,
         "nav_role": fs.nav_role,
+        "function_calls": fs.function_calls,
     }
 
 
@@ -94,6 +95,7 @@ def _dict_to_file_summary(d: dict) -> FileSummary:
         dependencies=d.get("dependencies", []),
         nav_topic=d.get("nav_topic", ""),
         nav_role=d.get("nav_role", ""),
+        function_calls=d.get("function_calls", {}),
     )
 
 
@@ -681,6 +683,16 @@ class CodebaseCompressor:
             scored_ents = score_entities(ents)
             key_ents = [se.entity.qualified_name for se in scored_ents[:5]]
 
+            # Per-entity outbound calls (exclude self-calls and module-level noise)
+            function_calls: dict[str, list[str]] = {}
+            for e in ents:
+                if e.entity_type == "module" or not e.calls:
+                    continue
+                # Keep up to 20 callees per entity; strip fully-qualified prefix noise
+                short_callees = [c.split(".")[-1] if "." in c else c for c in e.calls[:20]]
+                if short_callees:
+                    function_calls[e.name] = short_callees
+
             summaries[rel_path] = FileSummary(
                 file_path=rel_path,
                 language=language,
@@ -690,6 +702,7 @@ class CodebaseCompressor:
                 key_entities=key_ents,
                 exported_symbols=exported_symbols[:30],
                 dependencies=dependencies[:20],
+                function_calls=function_calls,
             )
         return summaries
 

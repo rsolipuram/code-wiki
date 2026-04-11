@@ -23,6 +23,8 @@ class FileSummary:
     dependencies: list[str] = field(default_factory=list)    # e.g. ["openai", "db_utils"]
     nav_topic: str = ""   # wiki section this file belongs to (e.g. "Agent Architecture")
     nav_role: str = ""    # "primary" | "supporting" | "config" | "test"
+    # Per-entity outbound calls: {entity_name: [callee1, callee2, ...]}
+    function_calls: dict = field(default_factory=dict)
 
 
 @dataclass
