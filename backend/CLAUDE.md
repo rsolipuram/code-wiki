@@ -42,7 +42,7 @@ curl http://localhost:8000/health
 ## Gotchas
 
 - **LM Studio required**: Always verify before pipeline runs. V2 pipeline errors silently if down
-- **macOS fork safety**: RQ's forking worker causes SIGABRT with Neo4j/Qdrant/embeddings. `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` alone is insufficient — must use `--worker-class rq.SimpleWorker`
+- **macOS fork safety**: RQ's forking worker can SIGABRT with graph/Qdrant/embedding workloads. `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` alone is insufficient — must use `--worker-class rq.SimpleWorker`
 - **RQ worker caches code**: Restart worker after any backend code change
 - **RQ queue name**: Jobs use `analysis` queue — always start worker with `rq worker analysis`
 - **FastAPI error envelope**: Errors wrapped in `{"detail": {...}}` — frontend must unwrap nested `detail`

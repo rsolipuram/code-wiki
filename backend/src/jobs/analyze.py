@@ -5,7 +5,7 @@ Orchestrates the full pipeline:
   2. Parse code entities
   3. Run recon + facet agents (via orchestrator)
   4. Generate wiki pages
-  5. Persist to PostgreSQL + Neo4j + Qdrant
+  5. Persist to PostgreSQL + Ladybug graph + Qdrant
   6. Update repository status
 """
 

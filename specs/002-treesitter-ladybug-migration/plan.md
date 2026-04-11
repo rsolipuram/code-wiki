@@ -350,6 +350,8 @@ One `.scm` file per language under `backend/src/parsers/queries/`.
 
 **Verification**: Comparison script or test.
 
+**Artifact**: `backend/src/parsers/test_migration_validation.py::test_t25_parser_parity_baseline_names`
+
 **Scope**: S (0.5 day)
 
 **Dependencies**: T2.4
@@ -587,6 +589,8 @@ Goal: Remove all Neo4j infrastructure and update configuration.
 - Diagrams contain edges
 
 **Verification**: Full job run + API smoke test.
+
+**Artifact**: `backend/src/parsers/test_migration_validation.py::test_t51_pipeline_smoke_extract_entities_filtered_repo`
 
 **Scope**: M (1 day)
 

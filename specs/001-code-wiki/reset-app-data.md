@@ -71,10 +71,9 @@ SQL
 # 2. Flush Redis (queues + pubsub data)
 docker exec code-wiki-redis redis-cli -p 6379 FLUSHALL
 
-# 3. Clear Neo4j graph data (optional but recommended)
-docker start code-wiki-neo4j || true
-docker exec code-wiki-neo4j cypher-shell -u neo4j -p codewiki \
-  "MATCH (n) DETACH DELETE n;"
+# 3. Clear Ladybug graph data (optional but recommended)
+cd backend && python3 -c "from pathlib import Path; from src.config import get_settings; p = Path(get_settings().resolved_graph_db_path); p.unlink(missing_ok=True); print(f'Cleared {p}')"
+cd ..
 
 # 4. Remove cached repository clones
 rm -rf backend/cache/repos/*

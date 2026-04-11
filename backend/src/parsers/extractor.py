@@ -1,7 +1,7 @@
 """Entity extraction pipeline.
 
 Walks a repository directory, parses each supported file, and produces
-CodeEntity records for PostgreSQL + Neo4j.
+CodeEntity records for PostgreSQL + Ladybug-backed graph persistence.
 """
 
 import logging

@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from tree_sitter import Language, Parser
+from tree_sitter import Language, Parser, Query, QueryCursor
 
 from src.parsers.base import CallEdge, CodeParser, Dependency, ParsedEntity
 
@@ -94,6 +94,7 @@ class TreeSitterParser(CodeParser):
         self.language_name = language_name
         self._language = self._load_language(language_name)
         self._parser = Parser(self._language)
+        self._entity_query = self._load_entity_query()
 
     def _load_language(self, language_name: str) -> Language:
         module_name, function_name = _LANG_LOADERS[language_name]
@@ -111,10 +112,48 @@ class TreeSitterParser(CodeParser):
         tree = self._parser.parse(source_bytes)
         return tree, source_bytes
 
-    def _extract_imports(self, root_node, source_bytes: bytes) -> list[str]:
+    def _query_language_name(self) -> str:
+        if self.language_name == "tsx":
+            return "typescript"
+        return self.language_name
+
+    def _load_entity_query(self) -> Optional[Query]:
+        query_path = Path(__file__).with_name("queries") / f"{self._query_language_name()}.scm"
+        if not query_path.exists():
+            logger.info("No .scm query file found for %s at %s", self.language_name, query_path)
+            return None
+        try:
+            query_source = query_path.read_text(encoding="utf-8")
+            return Query(self._language, query_source)
+        except Exception as exc:
+            logger.warning("Failed to load Tree-sitter query for %s: %s", self.language_name, exc)
+            return None
+
+    def _query_captures(self, root_node) -> dict[str, list]:
+        if self._entity_query is None:
+            return {}
+        try:
+            cursor = QueryCursor(self._entity_query)
+            captures = cursor.captures(root_node)
+            return {name: list(nodes) for name, nodes in captures.items()}
+        except Exception as exc:
+            logger.warning("Tree-sitter query capture failed for %s: %s", self.language_name, exc)
+            return {}
+
+    def _extract_imports(self, root_node, source_bytes: bytes, query_captures: dict[str, list] | None = None) -> list[str]:
         import_nodes = _IMPORT_NODE_TYPES.get(self.language_name, set())
         imports: list[str] = []
         seen: set[str] = set()
+        query_import_nodes = (query_captures or {}).get("entity.import", [])
+
+        for node in query_import_nodes:
+            raw = _node_text(node, source_bytes).strip().rstrip(";")
+            parsed = self._parse_import_statement(raw)
+            for item in parsed:
+                if item and item not in seen:
+                    seen.add(item)
+                    imports.append(item)
+
         stack = [root_node]
         while stack:
             node = stack.pop()
@@ -188,6 +227,25 @@ class TreeSitterParser(CodeParser):
                 name_node = self._entity_name_node(parent)
                 if name_node is not None:
                     return _normalize_symbol(_node_text(name_node, source_bytes))
+            if parent.type == "impl_item":
+                impl_text = _node_text(parent, source_bytes)
+                impl_header = impl_text.split("{", 1)[0]
+                trait_impl = re.match(
+                    r"^\s*impl(?:\s*<[^>]+>)?\s+.+\s+for\s+([A-Za-z0-9_:]+)\s*$",
+                    impl_header,
+                )
+                if trait_impl:
+                    owner_name = _normalize_symbol(trait_impl.group(1))
+                    if owner_name:
+                        return owner_name.split(".")[-1]
+                inherent_impl = re.match(
+                    r"^\s*impl(?:\s*<[^>]+>)?\s+([A-Za-z0-9_:]+)\s*$",
+                    impl_header,
+                )
+                if inherent_impl:
+                    owner_name = _normalize_symbol(inherent_impl.group(1))
+                    if owner_name:
+                        return owner_name.split(".")[-1]
             parent = parent.parent
         return None
 
@@ -211,30 +269,88 @@ class TreeSitterParser(CodeParser):
             stack.extend(reversed(current.children))
         return calls
 
-    def parse_file(self, file_path: str, repo_path: str = "") -> list[ParsedEntity]:
-        try:
-            tree, source_bytes = self._parse(file_path)
-        except Exception as exc:
-            logger.warning("Tree-sitter parse failed for %s: %s", file_path, exc)
-            return []
+    def _entity_kind_from_capture(self, capture_name: str, entity_node) -> Optional[str]:
+        if capture_name == "entity.class":
+            return "class"
+        if capture_name == "entity.interface":
+            return "interface"
+        if capture_name == "entity.method":
+            return "method"
+        if capture_name == "entity.function":
+            return "method" if self._is_method(entity_node) else "function"
+        return None
 
-        root = tree.root_node
-        module_name = _module_name(file_path, repo_path)
-        total_lines = source_bytes.count(b"\n") + 1
-        imports = self._extract_imports(root, source_bytes)
+    def _qualified_name_for_entity(
+        self,
+        module_name: str,
+        entity_type: str,
+        entity_name: str,
+        owner: Optional[str],
+    ) -> str:
+        if entity_type in {"class", "interface"}:
+            return f"{module_name}.{entity_name}"
+        if entity_type == "method" and owner:
+            return f"{module_name}.{owner}.{entity_name}"
+        return f"{module_name}.{entity_name}"
 
-        entities: list[ParsedEntity] = [
-            ParsedEntity(
-                name=module_name.split(".")[-1],
-                qualified_name=module_name,
-                entity_type="module",
-                file_path=file_path,
-                line_start=1,
-                line_end=total_lines,
-                imports=imports,
+    def _extract_entities_from_query(self, query_captures: dict[str, list], source_bytes: bytes, module_name: str) -> list[ParsedEntity]:
+        entities: list[ParsedEntity] = []
+        capture_priority = {
+            "entity.interface": 4,
+            "entity.class": 3,
+            "entity.method": 2,
+            "entity.function": 1,
+        }
+        selected: dict[tuple[int, int], tuple[int, str, object, object]] = {}
+
+        for capture_name, nodes in query_captures.items():
+            if not capture_name.startswith("entity.") or capture_name == "entity.import":
+                continue
+            for name_node in nodes:
+                entity_node = name_node.parent
+                if entity_node is None:
+                    continue
+                key = (entity_node.start_byte, entity_node.end_byte)
+                priority = capture_priority.get(capture_name, 0)
+                existing = selected.get(key)
+                if existing is None or priority > existing[0]:
+                    selected[key] = (priority, capture_name, entity_node, name_node)
+
+        ordered_captures = sorted(selected.items(), key=lambda item: (item[0][0], item[0][1]))
+
+        for _, (_, capture_name, entity_node, name_node) in ordered_captures:
+
+            entity_type = self._entity_kind_from_capture(capture_name, entity_node)
+            if entity_type is None:
+                continue
+
+            name = _normalize_symbol(_node_text(name_node, source_bytes))
+            if not name:
+                continue
+
+            owner = self._enclosing_owner(entity_node, source_bytes)
+            qualified_name = self._qualified_name_for_entity(module_name, entity_type, name, owner)
+            line_start, line_end = _line_span(entity_node)
+            signature = _node_text(entity_node, source_bytes).splitlines()[0].strip()
+            calls = self._extract_calls(entity_node, source_bytes, exclude={name, qualified_name})
+            entities.append(
+                ParsedEntity(
+                    name=name,
+                    qualified_name=qualified_name,
+                    entity_type=entity_type,
+                    file_path="",
+                    line_start=line_start,
+                    line_end=line_end,
+                    signature=signature[:500] if signature else None,
+                    calls=calls,
+                    imports=[],
+                )
             )
-        ]
 
+        return entities
+
+    def _extract_entities_fallback(self, root, source_bytes: bytes, module_name: str, file_path: str) -> list[ParsedEntity]:
+        entities: list[ParsedEntity] = []
         stack = [root]
         while stack:
             node = stack.pop()
@@ -251,13 +367,9 @@ class TreeSitterParser(CodeParser):
                 is_method = self._is_method(node)
                 if node.type in _CLASS_NODE_TYPES:
                     entity_type = "class" if "interface" not in node.type and "trait" not in node.type else "interface"
-                    qualified_name = f"{module_name}.{name}"
                 else:
                     entity_type = "method" if is_method else "function"
-                    if owner and is_method:
-                        qualified_name = f"{module_name}.{owner}.{name}"
-                    else:
-                        qualified_name = f"{module_name}.{name}"
+                qualified_name = self._qualified_name_for_entity(module_name, entity_type, name, owner)
                 line_start, line_end = _line_span(node)
                 signature = _node_text(node, source_bytes).splitlines()[0].strip()
                 calls = self._extract_calls(node, source_bytes, exclude={name, qualified_name})
@@ -275,6 +387,40 @@ class TreeSitterParser(CodeParser):
                     )
                 )
             stack.extend(reversed(node.children))
+        return entities
+
+    def parse_file(self, file_path: str, repo_path: str = "") -> list[ParsedEntity]:
+        try:
+            tree, source_bytes = self._parse(file_path)
+        except Exception as exc:
+            logger.warning("Tree-sitter parse failed for %s: %s", file_path, exc)
+            return []
+
+        root = tree.root_node
+        module_name = _module_name(file_path, repo_path)
+        total_lines = source_bytes.count(b"\n") + 1
+        query_captures = self._query_captures(root)
+        imports = self._extract_imports(root, source_bytes, query_captures)
+
+        entities: list[ParsedEntity] = [
+            ParsedEntity(
+                name=module_name.split(".")[-1],
+                qualified_name=module_name,
+                entity_type="module",
+                file_path=file_path,
+                line_start=1,
+                line_end=total_lines,
+                imports=imports,
+            )
+        ]
+
+        extracted = self._extract_entities_from_query(query_captures, source_bytes, module_name)
+        if extracted:
+            for entity in extracted:
+                entity.file_path = file_path
+            entities.extend(extracted)
+        else:
+            entities.extend(self._extract_entities_fallback(root, source_bytes, module_name, file_path))
 
         return entities
 
